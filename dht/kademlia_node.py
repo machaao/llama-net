@@ -36,6 +36,7 @@ class KademliaNode:
         self.routing_table = RoutingTable(self.node_id)
         self.storage: Dict[str, Any] = {}
         self.server = None
+        self.protocol = None
         self.running = False
         
         # Kademlia parameters
@@ -54,8 +55,14 @@ class KademliaNode:
         # Start UDP server
         from dht.protocol import KademliaProtocol
         loop = asyncio.get_event_loop()
+        
+        # Store protocol reference
+        def protocol_factory():
+            self.protocol = KademliaProtocol(self)
+            return self.protocol
+            
         self.server = await loop.create_datagram_endpoint(
-            lambda: KademliaProtocol(self),
+            protocol_factory,
             local_addr=('0.0.0.0', self.port)
         )
         
@@ -190,7 +197,7 @@ class KademliaNode:
             'sender_id': self.node_id
         }
         
-        response = await self.server[1].send_request(message, (ip, port))
+        response = await self.protocol.send_request(message, (ip, port))
         if response and response.get('pong'):
             return Contact(response.get('sender_id'), ip, port)
         return None
@@ -205,7 +212,7 @@ class KademliaNode:
             'value': value
         }
         
-        response = await self.server[1].send_request(message, (contact.ip, contact.port))
+        response = await self.protocol.send_request(message, (contact.ip, contact.port))
         return response and response.get('stored', False)
     
     async def _find_value_on_node(self, contact: Contact, key: str) -> Optional[Any]:
@@ -217,7 +224,7 @@ class KademliaNode:
             'key': key
         }
         
-        response = await self.server[1].send_request(message, (contact.ip, contact.port))
+        response = await self.protocol.send_request(message, (contact.ip, contact.port))
         if response and 'value' in response:
             return response['value']
         return None
@@ -231,7 +238,7 @@ class KademliaNode:
             'target_id': target_id
         }
         
-        response = await self.server[1].send_request(message, (contact.ip, contact.port))
+        response = await self.protocol.send_request(message, (contact.ip, contact.port))
         if response and 'contacts' in response:
             contacts = []
             for contact_data in response['contacts']:
