@@ -22,44 +22,17 @@ class Client:
         self.model = model
         self.min_tps = min_tps
         self.max_load = max_load
-        self._loop = None
         
-    async def _ensure_started(self):
-        """Ensure DHT discovery is started"""
-        if not self.dht_discovery.kademlia_node:
-            await self.dht_discovery.start()
-        
-    def generate(self, 
-                prompt: str,
-                max_tokens: int = 100,
-                temperature: float = 0.7,
-                top_p: float = 0.9,
-                top_k: int = 40,
-                stop: Optional[List[str]] = None,
-                repeat_penalty: float = 1.1,
-                max_retries: int = 3) -> Optional[GenerationResponse]:
+    async def generate(self, 
+                      prompt: str,
+                      max_tokens: int = 100,
+                      temperature: float = 0.7,
+                      top_p: float = 0.9,
+                      top_k: int = 40,
+                      stop: Optional[List[str]] = None,
+                      repeat_penalty: float = 1.1,
+                      max_retries: int = 3) -> Optional[GenerationResponse]:
         """Generate text using the best available node"""
-        # Run async method in event loop
-        if self._loop is None:
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-        
-        return self._loop.run_until_complete(
-            self._generate_async(prompt, max_tokens, temperature, top_p, top_k, stop, repeat_penalty, max_retries)
-        )
-    
-    async def _generate_async(self, 
-                             prompt: str,
-                             max_tokens: int,
-                             temperature: float,
-                             top_p: float,
-                             top_k: int,
-                             stop: Optional[List[str]],
-                             repeat_penalty: float,
-                             max_retries: int) -> Optional[GenerationResponse]:
-        """Async implementation of generate"""
-        await self._ensure_started()
-        
         retries = 0
         
         while retries < max_retries:

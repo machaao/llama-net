@@ -10,7 +10,7 @@ async def main():
     
     try:
         # Generate text
-        response = client.generate(
+        response = await client.generate(
             prompt="What is LlamaNet?",
             max_tokens=150,
             temperature=0.7
