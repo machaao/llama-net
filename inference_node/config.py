@@ -13,10 +13,12 @@ class InferenceConfig:
     
     def _find_available_port(self, start_port: int = 8000) -> int:
         """Find an available port starting from start_port"""
+        import socket
         port = start_port
         while port < start_port + 100:  # Try up to 100 ports
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     s.bind(('', port))
                     return port
             except OSError:
@@ -47,19 +49,54 @@ class InferenceConfig:
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
             
             # Handle HTTP port
-            if args.port:
-                self.port = args.port
+            if args.port and args.port != 8000:  # User specified a non-default port
+                # Check if the specified port is available
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        s.bind(('', args.port))
+                    self.port = args.port
+                except OSError:
+                    logger.warning(f"Specified port {args.port} is not available, finding alternative")
+                    self.port = self._find_available_port(args.port)
+                    logger.info(f"Using available port: {self.port}")
             elif load_env_var("PORT", None):
-                self.port = int(load_env_var("PORT"))
+                specified_port = int(load_env_var("PORT"))
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        s.bind(('', specified_port))
+                    self.port = specified_port
+                except OSError:
+                    logger.warning(f"Environment PORT {specified_port} is not available, finding alternative")
+                    self.port = self._find_available_port(specified_port)
+                    logger.info(f"Using available port: {self.port}")
             else:
                 self.port = self._find_available_port(8000)
                 logger.info(f"Using available port: {self.port}")
 
             # Handle DHT port  
-            if args.dht_port:
-                self.dht_port = args.dht_port
+            if args.dht_port and args.dht_port != 8001:  # User specified a non-default port
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        s.bind(('', args.dht_port))
+                    self.dht_port = args.dht_port
+                except OSError:
+                    logger.warning(f"Specified DHT port {args.dht_port} is not available, finding alternative")
+                    self.dht_port = self._find_available_port(args.dht_port)
+                    logger.info(f"Using available DHT port: {self.dht_port}")
             elif load_env_var("DHT_PORT", None):
-                self.dht_port = int(load_env_var("DHT_PORT"))
+                specified_dht_port = int(load_env_var("DHT_PORT"))
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        s.bind(('', specified_dht_port))
+                    self.dht_port = specified_dht_port
+                except OSError:
+                    logger.warning(f"Environment DHT_PORT {specified_dht_port} is not available, finding alternative")
+                    self.dht_port = self._find_available_port(specified_dht_port)
+                    logger.info(f"Using available DHT port: {self.dht_port}")
             else:
                 self.dht_port = self._find_available_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
@@ -73,14 +110,32 @@ class InferenceConfig:
             
             # Handle HTTP port
             if load_env_var("PORT", None):
-                self.port = int(load_env_var("PORT"))
+                specified_port = int(load_env_var("PORT"))
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        s.bind(('', specified_port))
+                    self.port = specified_port
+                except OSError:
+                    logger.warning(f"Environment PORT {specified_port} is not available, finding alternative")
+                    self.port = self._find_available_port(specified_port)
+                    logger.info(f"Using available port: {self.port}")
             else:
                 self.port = self._find_available_port(8000)
                 logger.info(f"Using available port: {self.port}")
 
             # Handle DHT port
             if load_env_var("DHT_PORT", None):
-                self.dht_port = int(load_env_var("DHT_PORT"))
+                specified_dht_port = int(load_env_var("DHT_PORT"))
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        s.bind(('', specified_dht_port))
+                    self.dht_port = specified_dht_port
+                except OSError:
+                    logger.warning(f"Environment DHT_PORT {specified_dht_port} is not available, finding alternative")
+                    self.dht_port = self._find_available_port(specified_dht_port)
+                    logger.info(f"Using available DHT port: {self.dht_port}")
             else:
                 self.dht_port = self._find_available_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
