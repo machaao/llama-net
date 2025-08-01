@@ -5,3 +5,4 @@ requests>=2.26.0
 llama-cpp-python>=0.1.0
 psutil>=5.8.0
 gputil>=1.4.0
+asyncio>=3.4.3

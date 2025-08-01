@@ -1,7 +1,8 @@
+import asyncio
 import requests
 from typing import Optional, Dict, Any, List
 from common.models import GenerationRequest, GenerationResponse
-from client.discovery import RegistryClient
+from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
 from common.utils import get_logger
 
@@ -11,15 +12,22 @@ class Client:
     """LlamaNet client for inference"""
     
     def __init__(self, 
-                registry_url: str = "http://localhost:8080",
+                bootstrap_nodes: str = "",
                 model: Optional[str] = None,
                 min_tps: float = 0.0,
-                max_load: float = 1.0):
-        self.registry_client = RegistryClient(registry_url)
-        self.node_selector = NodeSelector(self.registry_client)
+                max_load: float = 1.0,
+                dht_port: int = 8001):
+        self.dht_discovery = DHTDiscovery(bootstrap_nodes, dht_port)
+        self.node_selector = NodeSelector(self.dht_discovery)
         self.model = model
         self.min_tps = min_tps
         self.max_load = max_load
+        self._loop = None
+        
+    async def _ensure_started(self):
+        """Ensure DHT discovery is started"""
+        if not self.dht_discovery.kademlia_node:
+            await self.dht_discovery.start()
         
     def generate(self, 
                 prompt: str,
@@ -31,11 +39,32 @@ class Client:
                 repeat_penalty: float = 1.1,
                 max_retries: int = 3) -> Optional[GenerationResponse]:
         """Generate text using the best available node"""
+        # Run async method in event loop
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+        
+        return self._loop.run_until_complete(
+            self._generate_async(prompt, max_tokens, temperature, top_p, top_k, stop, repeat_penalty, max_retries)
+        )
+    
+    async def _generate_async(self, 
+                             prompt: str,
+                             max_tokens: int,
+                             temperature: float,
+                             top_p: float,
+                             top_k: int,
+                             stop: Optional[List[str]],
+                             repeat_penalty: float,
+                             max_retries: int) -> Optional[GenerationResponse]:
+        """Async implementation of generate"""
+        await self._ensure_started()
+        
         retries = 0
         
         while retries < max_retries:
             # Select a node
-            node = self.node_selector.select_node(
+            node = await self.node_selector.select_node(
                 model=self.model,
                 min_tps=self.min_tps,
                 max_load=self.max_load
@@ -74,8 +103,12 @@ class Client:
                 logger.warning(f"Error with node {node.node_id}: {e}")
                 
             # Force refresh of nodes cache
-            self.registry_client.get_nodes(force_refresh=True)
+            await self.dht_discovery.get_nodes(force_refresh=True)
             retries += 1
             
         logger.error(f"Failed to generate text after {max_retries} retries")
         return None
+    
+    async def close(self):
+        """Close the client and cleanup resources"""
+        await self.dht_discovery.stop()

@@ -1,3 +1,4 @@
+import asyncio
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from typing import Dict, Any
@@ -6,7 +7,7 @@ from common.models import GenerationRequest, GenerationResponse
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo
-from inference_node.heartbeat import HeartbeatSender
+from inference_node.dht_publisher import DHTPublisher
 from common.utils import get_logger
 
 logger = get_logger(__name__)
@@ -16,12 +17,12 @@ app = FastAPI(title="LlamaNet Inference Node")
 # Global variables
 config = None
 llm = None
-heartbeat = None
+dht_publisher = None
 system_info = None
 
 @app.on_event("startup")
 async def startup_event():
-    global config, llm, heartbeat, system_info
+    global config, llm, dht_publisher, system_info
     
     # Load configuration
     config = InferenceConfig()
@@ -33,14 +34,14 @@ async def startup_event():
     # Get system info
     system_info = SystemInfo.get_all_info()
     
-    # Start heartbeat
-    heartbeat = HeartbeatSender(config, llm.get_metrics)
-    heartbeat.start()
+    # Start DHT publisher
+    dht_publisher = DHTPublisher(config, llm.get_metrics)
+    await dht_publisher.start()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    if heartbeat:
-        heartbeat.stop()
+    if dht_publisher:
+        await dht_publisher.stop()
 
 @app.post("/generate", response_model=GenerationResponse)
 async def generate(request: GenerationRequest):
@@ -87,7 +88,8 @@ async def info():
         "node_id": config.node_id,
         "model": config.model_name,
         "model_path": config.model_path,
-        "system": system_info
+        "system": system_info,
+        "dht_port": config.dht_port
     }
 
 def start_server():

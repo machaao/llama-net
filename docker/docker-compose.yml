@@ -1,28 +1,57 @@
 version: '3'
 
 services:
-  registry:
-    build:
-      context: ..
-      dockerfile: docker/registry.Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      - REGISTRY_PORT=8080
-    restart: unless-stopped
-
-  inference:
+  # Bootstrap node - first inference node that others can connect to
+  bootstrap:
     build:
       context: ..
       dockerfile: docker/inference.Dockerfile
     ports:
       - "8000:8000"
+      - "8001:8001"  # DHT port
     environment:
       - MODEL_PATH=/models/model.gguf
       - PORT=8000
-      - REGISTRY_URL=http://registry:8080
+      - DHT_PORT=8001
+      - NODE_ID=bootstrap-node
+      - BOOTSTRAP_NODES=  # Empty for bootstrap node
+    volumes:
+      - ../models:/models
+    restart: unless-stopped
+
+  # Additional inference nodes
+  inference1:
+    build:
+      context: ..
+      dockerfile: docker/inference.Dockerfile
+    ports:
+      - "8002:8000"
+      - "8003:8001"  # DHT port
+    environment:
+      - MODEL_PATH=/models/model.gguf
+      - PORT=8000
+      - DHT_PORT=8001
+      - BOOTSTRAP_NODES=bootstrap:8001
     volumes:
       - ../models:/models
     depends_on:
-      - registry
+      - bootstrap
+    restart: unless-stopped
+
+  inference2:
+    build:
+      context: ..
+      dockerfile: docker/inference.Dockerfile
+    ports:
+      - "8004:8000"
+      - "8005:8001"  # DHT port
+    environment:
+      - MODEL_PATH=/models/model.gguf
+      - PORT=8000
+      - DHT_PORT=8001
+      - BOOTSTRAP_NODES=bootstrap:8001
+    volumes:
+      - ../models:/models
+    depends_on:
+      - bootstrap
     restart: unless-stopped

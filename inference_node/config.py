@@ -1,4 +1,5 @@
 import os
+import uuid
 from typing import Optional
 from common.utils import load_env_var, get_logger
 
@@ -17,10 +18,11 @@ class InferenceConfig:
         # Server configuration
         self.host = load_env_var("HOST", "0.0.0.0")
         self.port = int(load_env_var("PORT", 8000))
-        self.node_id = load_env_var("NODE_ID", None)
+        self.node_id = load_env_var("NODE_ID", f"node-{uuid.uuid4().hex[:8]}")
         
-        # Registry configuration
-        self.registry_url = load_env_var("REGISTRY_URL", "http://localhost:8080")
+        # DHT configuration (replaces registry)
+        self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
+        self.dht_port = int(load_env_var("DHT_PORT", 8001))
         self.heartbeat_interval = int(load_env_var("HEARTBEAT_INTERVAL", 10))
         
         # LLM configuration
@@ -34,5 +36,6 @@ class InferenceConfig:
     def __str__(self) -> str:
         return (
             f"InferenceConfig(model_path={self.model_path}, "
-            f"host={self.host}, port={self.port}, node_id={self.node_id})"
+            f"host={self.host}, port={self.port}, node_id={self.node_id}, "
+            f"dht_port={self.dht_port})"
         )

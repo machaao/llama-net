@@ -1,7 +1,7 @@
 import random
 from typing import List, Optional, Dict, Any, Callable
 from common.models import NodeInfo
-from client.discovery import RegistryClient
+from client.dht_discovery import DHTDiscovery
 from common.utils import get_logger
 
 logger = get_logger(__name__)
@@ -9,17 +9,17 @@ logger = get_logger(__name__)
 class NodeSelector:
     """Select the best node for inference"""
     
-    def __init__(self, registry_client: RegistryClient):
-        self.registry_client = registry_client
+    def __init__(self, dht_discovery: DHTDiscovery):
+        self.dht_discovery = dht_discovery
         
-    def select_node(self, 
-                   model: Optional[str] = None,
-                   min_tps: float = 0.0,
-                   max_load: float = 1.0,
-                   randomize: bool = True) -> Optional[NodeInfo]:
+    async def select_node(self, 
+                         model: Optional[str] = None,
+                         min_tps: float = 0.0,
+                         max_load: float = 1.0,
+                         randomize: bool = True) -> Optional[NodeInfo]:
         """Select the best node based on criteria"""
-        # Get nodes from registry
-        nodes = self.registry_client.get_nodes(model)
+        # Get nodes from DHT
+        nodes = await self.dht_discovery.get_nodes(model)
         
         if not nodes:
             logger.warning(f"No nodes available for model {model}")
