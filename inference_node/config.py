@@ -34,7 +34,7 @@ class InferenceConfig:
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
             self.port = args.port or int(load_env_var("PORT", 8000))
             self.dht_port = args.dht_port or int(load_env_var("DHT_PORT", 8001))
-            self.node_id = args.node_id or load_env_var("NODE_ID", f"node-{uuid.uuid4().hex[:8]}")
+            self.node_id = args.node_id or load_env_var("NODE_ID", uuid.uuid4().hex[:16])
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
         else:
             # Direct initialization (for programmatic use)
@@ -42,7 +42,7 @@ class InferenceConfig:
             self.host = load_env_var("HOST", "0.0.0.0")
             self.port = int(load_env_var("PORT", 8000))
             self.dht_port = int(load_env_var("DHT_PORT", 8001))
-            self.node_id = load_env_var("NODE_ID", f"node-{uuid.uuid4().hex[:8]}")
+            self.node_id = load_env_var("NODE_ID", uuid.uuid4().hex[:16])
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
         
         # Validate model path

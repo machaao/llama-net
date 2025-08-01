@@ -25,12 +25,20 @@ class Contact:
     
     def distance(self, other_id: str) -> int:
         """Calculate XOR distance between this contact and another node ID"""
-        return int(self.node_id, 16) ^ int(other_id, 16)
+        try:
+            return int(self.node_id, 16) ^ int(other_id, 16)
+        except ValueError:
+            logger.error(f"Invalid node ID format for distance calculation: {self.node_id} or {other_id}")
+            return float('inf')  # Return max distance for invalid IDs
 
 class KademliaNode:
     """Kademlia DHT Node implementation"""
     
     def __init__(self, node_id: str = None, port: int = 8001):
+        if node_id and not self._validate_node_id(node_id):
+            logger.warning(f"Invalid node_id format: {node_id}, generating new one")
+            node_id = None
+        
         self.node_id = node_id or self._generate_node_id()
         self.port = port
         self.routing_table = RoutingTable(self.node_id)
@@ -47,6 +55,14 @@ class KademliaNode:
     def _generate_node_id(self) -> str:
         """Generate a random 160-bit node ID"""
         return hashlib.sha1(str(random.random()).encode()).hexdigest()
+    
+    def _validate_node_id(self, node_id: str) -> bool:
+        """Validate that node_id is a valid hex string"""
+        try:
+            int(node_id, 16)
+            return True
+        except ValueError:
+            return False
     
     async def start(self, bootstrap_nodes: List[Tuple[str, int]] = None):
         """Start the Kademlia node"""
