@@ -92,16 +92,22 @@ class DHTDiscovery:
                         nodes.append(node_data)
                 self._cache_is_model_specific = False
             
-            # Convert to NodeInfo objects
+            # Convert to NodeInfo objects and deduplicate
+            seen_nodes = set()
             self.nodes_cache = []
+            
             for node_data in nodes:
-                try:
-                    node_info = NodeInfo(**node_data)
-                    # Filter out stale nodes (older than 60 seconds)
-                    if time.time() - node_info.last_seen < 60:
-                        self.nodes_cache.append(node_info)
-                except Exception as e:
-                    logger.warning(f"Failed to parse node data: {e}")
+                if isinstance(node_data, dict):
+                    node_id = node_data.get('node_id')
+                    if node_id and node_id not in seen_nodes:
+                        try:
+                            node_info = NodeInfo(**node_data)
+                            # Filter out stale nodes (older than 60 seconds)
+                            if time.time() - node_info.last_seen < 60:
+                                self.nodes_cache.append(node_info)
+                                seen_nodes.add(node_id)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse node data: {e}")
             
             self.cache_time = time.time()
             logger.debug(f"Refreshed nodes cache, found {len(self.nodes_cache)} nodes")

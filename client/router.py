@@ -33,7 +33,8 @@ class NodeSelector:
         
         if not eligible_nodes:
             logger.warning(f"No nodes meet criteria (min_tps={min_tps}, max_load={max_load})")
-            return None
+            # Fall back to any available node
+            eligible_nodes = nodes
             
         # Sort by load (ascending)
         eligible_nodes.sort(key=lambda n: n.load)
