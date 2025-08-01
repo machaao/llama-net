@@ -92,8 +92,14 @@ class KademliaNode:
         """Stop the Kademlia node"""
         self.running = False
         if self.server:
-            self.server.close()
-            await self.server.wait_closed()
+            try:
+                # self.server is a tuple (transport, protocol) from create_datagram_endpoint
+                transport, protocol = self.server
+                transport.close()
+            except Exception as e:
+                logger.warning(f"Error closing UDP transport: {e}")
+            finally:
+                self.server = None
     
     async def _bootstrap(self, bootstrap_nodes: List[Tuple[str, int]]):
         """Bootstrap by connecting to existing nodes"""
