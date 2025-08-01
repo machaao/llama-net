@@ -52,7 +52,7 @@ class LlamaWrapper:
         )
         
         generation_time = time.time() - start_time
-        tokens_generated = len(output['choices'][0]['text'])
+        tokens_generated = output['usage']['completion_tokens'] if 'usage' in output else len(output['choices'][0]['text'].split())
         
         # Update metrics
         self.total_tokens_generated += tokens_generated

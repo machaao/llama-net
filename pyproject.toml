@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llamanet"
+version = "0.1.0"
+description = "Decentralized Inference Swarm for llama.cpp"
+authors = [{name = "LlamaNet Team", email = "example@example.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["llm", "inference", "decentralized"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0",
+    "pydantic>=1.8.2",
+    "requests>=2.26.0",
+    "llama-cpp-python>=0.1.0",
+    "psutil>=5.8.0",
+    "gputil>=1.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/llamanet"
+Repository = "https://github.com/yourusername/llamanet"
+
+[project.scripts]
+llamanet-inference = "inference_node.server:start_server"
+llamanet-registry = "registry.server:start_server"
+
+[tool.setuptools.packages.find]
+include = ["client*", "common*", "dht*", "inference_node*", "registry*"]
