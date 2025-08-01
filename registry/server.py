@@ -1,6 +1,7 @@
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from typing import Dict, List, Optional
+from contextlib import asynccontextmanager
 
 from common.models import NodeInfo
 from registry.config import RegistryConfig
@@ -9,14 +10,13 @@ from common.utils import get_logger
 
 logger = get_logger(__name__)
 
-app = FastAPI(title="LlamaNet Registry Service")
-
 # Global variables
 config = None
 node_manager = None
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     global config, node_manager
     
     # Load configuration
@@ -25,11 +25,14 @@ async def startup_event():
     
     # Initialize node manager
     node_manager = NodeManager(config)
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    
+    yield
+    
+    # Shutdown
     if node_manager:
         node_manager.stop()
+
+app = FastAPI(title="LlamaNet Registry Service", lifespan=lifespan)
 
 @app.post("/register")
 async def register(node: NodeInfo):
@@ -66,6 +69,10 @@ async def get_node(node_id: str):
 
 def start_server():
     """Start the registry server"""
+    global config
+    if config is None:
+        config = RegistryConfig()
+    
     uvicorn.run(
         "registry.server:app",
         host=config.host,

@@ -2,6 +2,7 @@ import asyncio
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from typing import Dict, Any
+from contextlib import asynccontextmanager
 
 from common.models import GenerationRequest, GenerationResponse
 from inference_node.config import InferenceConfig
@@ -12,16 +13,15 @@ from common.utils import get_logger
 
 logger = get_logger(__name__)
 
-app = FastAPI(title="LlamaNet Inference Node")
-
 # Global variables
 config = None
 llm = None
 dht_publisher = None
 system_info = None
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     global config, llm, dht_publisher, system_info
     
     # Load configuration
@@ -37,11 +37,14 @@ async def startup_event():
     # Start DHT publisher
     dht_publisher = DHTPublisher(config, llm.get_metrics)
     await dht_publisher.start()
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    
+    yield
+    
+    # Shutdown
     if dht_publisher:
         await dht_publisher.stop()
+
+app = FastAPI(title="LlamaNet Inference Node", lifespan=lifespan)
 
 @app.post("/generate", response_model=GenerationResponse)
 async def generate(request: GenerationRequest):
@@ -94,6 +97,10 @@ async def info():
 
 def start_server():
     """Start the inference server"""
+    global config
+    if config is None:
+        config = InferenceConfig()
+    
     uvicorn.run(
         "inference_node.server:app",
         host=config.host,
