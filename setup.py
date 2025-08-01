@@ -12,7 +12,6 @@ setup(
         "llama-cpp-python>=0.1.0",
         "psutil>=5.8.0",
         "gputil>=1.4.0",
-        "asyncio>=3.4.3",
         "kademlia>=2.2.2"
     ],
     author="LlamaNet Team",
