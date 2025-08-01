@@ -49,7 +49,18 @@ class DHTPublisher:
             port=self.config.dht_port
         )
         
-        await self.kademlia_node.start(self.bootstrap_nodes)
+        try:
+            await self.kademlia_node.start(self.bootstrap_nodes)
+            
+            # Update config with actual port used (in case it changed)
+            if self.kademlia_node.port != self.config.dht_port:
+                logger.info(f"DHT port changed from {self.config.dht_port} to {self.kademlia_node.port}")
+                self.config.dht_port = self.kademlia_node.port
+                
+        except Exception as e:
+            logger.error(f"Failed to start DHT node: {e}")
+            self.running = False
+            raise
         
         # Start publishing loop
         self.publish_task = asyncio.create_task(self._publish_loop())

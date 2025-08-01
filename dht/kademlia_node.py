@@ -64,9 +64,40 @@ class KademliaNode:
         except ValueError:
             return False
     
+    def _is_port_available(self, port: int) -> bool:
+        """Check if a UDP port is available"""
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('', port))
+                return True
+        except OSError:
+            return False
+
+    def _find_available_port(self, start_port: int = 8001) -> int:
+        """Find an available UDP port starting from start_port"""
+        import socket
+        port = start_port
+        while port < start_port + 100:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind(('', port))
+                    return port
+            except OSError:
+                port += 1
+        raise RuntimeError(f"No available UDP ports found starting from {start_port}")
+    
     async def start(self, bootstrap_nodes: List[Tuple[str, int]] = None):
         """Start the Kademlia node"""
         self.running = True
+        
+        # Check if port is available before starting
+        if not self._is_port_available(self.port):
+            original_port = self.port
+            self.port = self._find_available_port(self.port)
+            logger.warning(f"DHT port {original_port} was in use, using {self.port} instead")
         
         # Start UDP server
         from dht.protocol import KademliaProtocol
@@ -77,10 +108,23 @@ class KademliaNode:
             self.protocol = KademliaProtocol(self)
             return self.protocol
             
-        self.server = await loop.create_datagram_endpoint(
-            protocol_factory,
-            local_addr=('0.0.0.0', self.port)
-        )
+        try:
+            self.server = await loop.create_datagram_endpoint(
+                protocol_factory,
+                local_addr=('0.0.0.0', self.port)
+            )
+        except OSError as e:
+            if e.errno == 48:  # Address already in use
+                # Try to find an alternative port
+                original_port = self.port
+                self.port = self._find_available_port(self.port + 1)
+                logger.warning(f"Port {original_port} still in use, retrying with port {self.port}")
+                self.server = await loop.create_datagram_endpoint(
+                    protocol_factory,
+                    local_addr=('0.0.0.0', self.port)
+                )
+            else:
+                raise
         
         logger.info(f"Kademlia node {self.node_id[:8]} started on port {self.port}")
         
