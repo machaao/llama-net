@@ -1,6 +1,9 @@
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 from common.utils import get_logger
+
+if TYPE_CHECKING:
+    from dht.kademlia_node import Contact
 
 logger = get_logger(__name__)
 
