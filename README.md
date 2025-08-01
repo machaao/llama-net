@@ -6,7 +6,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 
 - **Decentralized DHT-based node discovery** using Kademlia protocol
 - Inference nodes that serve LLM models using llama.cpp
-- Client library for easy integration
+- **Async Client Library** for easy integration with async/await support
 - Automatic node selection based on load and performance
 - No single point of failure - fully distributed architecture
 - Docker support for easy deployment
@@ -47,8 +47,9 @@ First, download a GGUF model file. For example:
 # Create models directory
 mkdir -p models
 
-# Download a small model (replace with your preferred model)
-wget https://huggingface.co/microsoft/DialoGPT-medium/resolve/main/pytorch_model.bin -O models/model.gguf
+# Download a GGUF model (example - replace with actual GGUF model URL)
+# wget https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.q4_0.gguf -O models/model.gguf
+# For now, place your .gguf model file in the models directory
 ```
 
 ### 2. Start Bootstrap Node
@@ -109,7 +110,7 @@ async def main():
     )
     
     try:
-        response = client.generate(
+        response = await client.generate(
             prompt="What is LlamaNet?",
             max_tokens=150,
             temperature=0.7
@@ -146,6 +147,9 @@ python -m inference_node.server \
   --port 8002 \
   --dht-port 8003 \
   --bootstrap-nodes localhost:8001
+
+# 5. Use the client (see examples/simple_client.py for full example)
+# Note: client.generate() must be awaited in an async function
 ```
 
 ## Docker Deployment
@@ -221,6 +225,10 @@ client = Client(
     max_load=0.8,                            # Maximum load threshold
     dht_port=8001                            # DHT port for client
 )
+
+# Note: All client operations are async and must be awaited
+response = await client.generate("Your prompt here")
+await client.close()  # Always close the client when done
 ```
 
 ## Architecture
