@@ -99,7 +99,7 @@ def start_server():
     """Start the inference server"""
     global config
     if config is None:
-        config = InferenceConfig()
+        config = InferenceConfig()  # Will parse command line args
     
     uvicorn.run(
         "inference_node.server:app",
@@ -107,6 +107,38 @@ def start_server():
         port=config.port,
         log_level="info"
     )
+
+def show_help():
+    """Show help information"""
+    print("""
+LlamaNet Inference Node
+
+Usage:
+  python -m inference_node.server [OPTIONS]
+
+Options:
+  --model-path PATH     Path to the GGUF model file (required)
+  --host HOST          Host to bind the service (default: 0.0.0.0)
+  --port PORT          HTTP API port (default: 8000)
+  --dht-port PORT      DHT protocol port (default: 8001)
+  --node-id ID         Unique node identifier (default: auto-generated)
+  --bootstrap-nodes    Comma-separated bootstrap nodes (ip:port)
+
+Examples:
+  # Start bootstrap node
+  python -m inference_node.server --model-path ./models/model.gguf
+
+  # Start additional node
+  python -m inference_node.server \\
+    --model-path ./models/model.gguf \\
+    --port 8002 \\
+    --dht-port 8003 \\
+    --bootstrap-nodes localhost:8001
+
+Environment Variables:
+  MODEL_PATH, HOST, PORT, DHT_PORT, NODE_ID, BOOTSTRAP_NODES
+  (Command line arguments take precedence)
+""")
 
 if __name__ == "__main__":
     start_server()

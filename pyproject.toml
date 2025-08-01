@@ -36,6 +36,7 @@ Repository = "https://github.com/yourusername/llamanet"
 [project.scripts]
 llamanet-inference = "inference_node.server:start_server"
 llamanet-registry = "registry.server:start_server"
+llamanet-help = "inference_node.server:show_help"
 
 [tool.setuptools.packages.find]
 include = ["client*", "common*", "dht*", "inference_node*", "registry*"]
