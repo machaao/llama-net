@@ -11,18 +11,20 @@ setup(
         "requests>=2.26.0",
         "llama-cpp-python>=0.1.0",
         "psutil>=5.8.0",
-        "gputil>=1.4.0"
+        "gputil>=1.4.0",
+        "asyncio>=3.4.3",
+        "kademlia>=2.2.2"
     ],
     author="LlamaNet Team",
     author_email="example@example.com",
     description="Decentralized Inference Swarm for llama.cpp",
     keywords="llm, inference, decentralized",
     url="https://github.com/yourusername/llamanet",
+    license="MIT",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
     ],
     python_requires=">=3.8",
 )
