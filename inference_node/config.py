@@ -2,6 +2,7 @@ import os
 import uuid
 import argparse
 import sys
+import socket
 from typing import Optional
 from common.utils import load_env_var, get_logger
 
@@ -9,6 +10,18 @@ logger = get_logger(__name__)
 
 class InferenceConfig:
     """Configuration for the inference node"""
+    
+    def _find_available_port(self, start_port: int = 8000) -> int:
+        """Find an available port starting from start_port"""
+        port = start_port
+        while port < start_port + 100:  # Try up to 100 ports
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('', port))
+                    return port
+            except OSError:
+                port += 1
+        raise RuntimeError(f"No available ports found starting from {start_port}")
     
     def __init__(self, model_path: str = None):
         # Parse command line arguments if model_path not provided
@@ -32,16 +45,46 @@ class InferenceConfig:
             # Use command line args or fall back to environment variables
             self.model_path = args.model_path or load_env_var("MODEL_PATH", "")
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
-            self.port = args.port or int(load_env_var("PORT", 8000))
-            self.dht_port = args.dht_port or int(load_env_var("DHT_PORT", 8001))
+            
+            # Handle HTTP port
+            if args.port:
+                self.port = args.port
+            elif load_env_var("PORT", None):
+                self.port = int(load_env_var("PORT"))
+            else:
+                self.port = self._find_available_port(8000)
+                logger.info(f"Using available port: {self.port}")
+
+            # Handle DHT port  
+            if args.dht_port:
+                self.dht_port = args.dht_port
+            elif load_env_var("DHT_PORT", None):
+                self.dht_port = int(load_env_var("DHT_PORT"))
+            else:
+                self.dht_port = self._find_available_port(8001)
+                logger.info(f"Using available DHT port: {self.dht_port}")
+                
             self.node_id = args.node_id or load_env_var("NODE_ID", uuid.uuid4().hex[:16])
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
         else:
             # Direct initialization (for programmatic use)
             self.model_path = model_path
             self.host = load_env_var("HOST", "0.0.0.0")
-            self.port = int(load_env_var("PORT", 8000))
-            self.dht_port = int(load_env_var("DHT_PORT", 8001))
+            
+            # Handle HTTP port
+            if load_env_var("PORT", None):
+                self.port = int(load_env_var("PORT"))
+            else:
+                self.port = self._find_available_port(8000)
+                logger.info(f"Using available port: {self.port}")
+
+            # Handle DHT port
+            if load_env_var("DHT_PORT", None):
+                self.dht_port = int(load_env_var("DHT_PORT"))
+            else:
+                self.dht_port = self._find_available_port(8001)
+                logger.info(f"Using available DHT port: {self.dht_port}")
+                
             self.node_id = load_env_var("NODE_ID", uuid.uuid4().hex[:16])
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
         

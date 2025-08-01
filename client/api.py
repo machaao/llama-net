@@ -11,12 +11,29 @@ logger = get_logger(__name__)
 class Client:
     """LlamaNet client for inference"""
     
+    def _find_available_port(self, start_port: int = 8001) -> int:
+        """Find an available port starting from start_port"""
+        import socket
+        port = start_port
+        while port < start_port + 100:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('', port))
+                    return port
+            except OSError:
+                port += 1
+        raise RuntimeError(f"No available ports found starting from {start_port}")
+    
     def __init__(self, 
                 bootstrap_nodes: str = "",
                 model: Optional[str] = None,
                 min_tps: float = 0.0,
                 max_load: float = 1.0,
-                dht_port: int = 8001):
+                dht_port: int = None):
+        if dht_port is None:
+            dht_port = self._find_available_port(8001)
+            logger.info(f"Client using available DHT port: {dht_port}")
+            
         self.dht_discovery = DHTDiscovery(bootstrap_nodes, dht_port)
         self.node_selector = NodeSelector(self.dht_discovery)
         self.model = model
