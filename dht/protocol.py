@@ -3,6 +3,7 @@ import json
 import struct
 import time
 import hashlib
+import uuid
 from typing import Dict, Any, Tuple, Optional
 from common.utils import get_logger
 

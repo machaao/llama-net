@@ -20,7 +20,7 @@ class InferenceConfig:
         self.port = int(load_env_var("PORT", 8000))
         self.node_id = load_env_var("NODE_ID", f"node-{uuid.uuid4().hex[:8]}")
         
-        # DHT configuration (replaces registry)
+        # DHT configuration
         self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
         self.dht_port = int(load_env_var("DHT_PORT", 8001))
         self.heartbeat_interval = int(load_env_var("HEARTBEAT_INTERVAL", 10))

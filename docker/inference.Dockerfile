@@ -21,7 +21,7 @@ RUN mkdir -p /models
 # Environment variables
 ENV MODEL_PATH=/models/model.gguf
 ENV PORT=8000
-ENV REGISTRY_URL=http://registry:8080
+ENV DHT_PORT=8001
 
 # Expose port
 EXPOSE 8000

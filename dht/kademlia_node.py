@@ -3,9 +3,11 @@ import hashlib
 import json
 import random
 import time
+import uuid
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from common.utils import get_logger
+from dht.routing_table import RoutingTable
 
 logger = get_logger(__name__)
 
@@ -50,6 +52,7 @@ class KademliaNode:
         self.running = True
         
         # Start UDP server
+        from dht.protocol import KademliaProtocol
         loop = asyncio.get_event_loop()
         self.server = await loop.create_datagram_endpoint(
             lambda: KademliaProtocol(self),
@@ -181,25 +184,62 @@ class KademliaNode:
     
     async def _ping_node(self, ip: str, port: int) -> Optional[Contact]:
         """Ping a node and return contact info"""
-        # Implementation would send UDP ping message
-        # For now, return a mock contact
-        pass
+        message = {
+            'type': 'ping',
+            'id': str(uuid.uuid4()),
+            'sender_id': self.node_id
+        }
+        
+        response = await self.server[1].send_request(message, (ip, port))
+        if response and response.get('pong'):
+            return Contact(response.get('sender_id'), ip, port)
+        return None
     
     async def _store_on_node(self, contact: Contact, key: str, value: Any) -> bool:
         """Store key-value on a specific node"""
-        # Implementation would send UDP store message
-        pass
+        message = {
+            'type': 'store',
+            'id': str(uuid.uuid4()),
+            'sender_id': self.node_id,
+            'key': key,
+            'value': value
+        }
+        
+        response = await self.server[1].send_request(message, (contact.ip, contact.port))
+        return response and response.get('stored', False)
     
     async def _find_value_on_node(self, contact: Contact, key: str) -> Optional[Any]:
         """Find value on a specific node"""
-        # Implementation would send UDP find_value message
-        pass
+        message = {
+            'type': 'find_value',
+            'id': str(uuid.uuid4()),
+            'sender_id': self.node_id,
+            'key': key
+        }
+        
+        response = await self.server[1].send_request(message, (contact.ip, contact.port))
+        if response and 'value' in response:
+            return response['value']
+        return None
     
     async def _find_node_on_contact(self, contact: Contact, target_id: str) -> List[Contact]:
         """Find nodes on a specific contact"""
-        # Implementation would send UDP find_node message
-        pass
+        message = {
+            'type': 'find_node',
+            'id': str(uuid.uuid4()),
+            'sender_id': self.node_id,
+            'target_id': target_id
+        }
+        
+        response = await self.server[1].send_request(message, (contact.ip, contact.port))
+        if response and 'contacts' in response:
+            contacts = []
+            for contact_data in response['contacts']:
+                contacts.append(Contact(
+                    contact_data['node_id'],
+                    contact_data['ip'],
+                    contact_data['port']
+                ))
+            return contacts
+        return []
 
-# Import here to avoid circular imports
-from dht.routing_table import RoutingTable
-from dht.protocol import KademliaProtocol

@@ -14,7 +14,7 @@ services:
       - PORT=8000
       - DHT_PORT=8001
       - NODE_ID=bootstrap-node
-      - BOOTSTRAP_NODES=  # Empty for bootstrap node
+      - BOOTSTRAP_NODES=""
     volumes:
       - ../models:/models
     restart: unless-stopped
