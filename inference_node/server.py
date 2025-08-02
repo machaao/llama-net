@@ -95,6 +95,38 @@ async def info():
         "dht_port": config.dht_port
     }
 
+@app.get("/dht/status")
+async def dht_status():
+    """Get DHT network status"""
+    if not dht_publisher or not dht_publisher.kademlia_node:
+        raise HTTPException(status_code=503, detail="DHT not initialized")
+        
+    kademlia_node = dht_publisher.kademlia_node
+    routing_table = kademlia_node.routing_table
+    
+    # Get all contacts from routing table
+    all_contacts = routing_table.get_all_contacts()
+    
+    # Format contact information
+    contacts = []
+    for contact in all_contacts:
+        contacts.append({
+            "node_id": contact.node_id,
+            "ip": contact.ip,
+            "port": contact.port,
+            "last_seen": contact.last_seen
+        })
+    
+    return {
+        "node_id": kademlia_node.node_id,
+        "dht_port": kademlia_node.port,
+        "running": kademlia_node.running,
+        "contacts_count": len(all_contacts),
+        "contacts": contacts,
+        "storage_keys": list(kademlia_node.storage.keys()),
+        "bootstrap_nodes": dht_publisher.bootstrap_nodes
+    }
+
 def start_server():
     """Start the inference server"""
     global config
