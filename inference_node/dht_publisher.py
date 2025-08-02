@@ -66,6 +66,11 @@ class DHTPublisher:
         self.publish_task = asyncio.create_task(self._publish_loop())
         
         logger.info(f"DHT publisher started on port {self.config.dht_port}")
+        
+        if self.bootstrap_nodes:
+            logger.info(f"🌐 Joining DHT network via bootstrap nodes: {self.bootstrap_nodes}")
+        else:
+            logger.info(f"🌟 Starting as DHT bootstrap node")
     
     async def stop(self):
         """Stop the DHT publisher"""

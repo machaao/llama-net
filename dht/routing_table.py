@@ -56,8 +56,16 @@ class RoutingTable:
         if bucket_index not in self.buckets:
             self.buckets[bucket_index] = KBucket(self.k)
         
+        # Check if this is a new contact before adding
+        existing_contact_ids = [c.node_id for c in self.buckets[bucket_index].contacts]
+        is_new_contact = contact.node_id not in existing_contact_ids
+        
         self.buckets[bucket_index].add_contact(contact)
-        logger.debug(f"Added contact {contact.node_id[:8]} to bucket {bucket_index}")
+        
+        if is_new_contact:
+            logger.info(f"🔗 New DHT contact added: {contact.node_id[:12]}... ({contact.ip}:{contact.port})")
+        else:
+            logger.debug(f"Updated contact {contact.node_id[:8]} in bucket {bucket_index}")
     
     def remove_contact(self, node_id: str):
         """Remove a contact from the routing table"""

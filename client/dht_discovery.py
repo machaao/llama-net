@@ -18,6 +18,7 @@ class DHTDiscovery:
         self.cache_ttl = 5  # Cache results for 5 seconds
         self.nodes_cache: List[NodeInfo] = []
         self._cache_is_model_specific = False
+        self.known_node_ids = set()  # Track known nodes
         
     def _parse_bootstrap_nodes(self, bootstrap_str: str) -> List[Tuple[str, int]]:
         """Parse bootstrap nodes from comma-separated string"""
@@ -106,6 +107,11 @@ class DHTDiscovery:
                             if time.time() - node_info.last_seen < 60:
                                 self.nodes_cache.append(node_info)
                                 seen_nodes.add(node_id)
+                                
+                                # Check if this is a new node
+                                if node_id not in self.known_node_ids:
+                                    logger.info(f"🆕 New node discovered: {node_id[:12]}... ({node_data.get('ip')}:{node_data.get('port')}) - Model: {node_data.get('model')}")
+                                    self.known_node_ids.add(node_id)
                         except Exception as e:
                             logger.warning(f"Failed to parse node data: {e}")
             
