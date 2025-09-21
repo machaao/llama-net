@@ -267,6 +267,81 @@ Bootstrap Node (8001) ← Node 1 (8003) ← Node 2 (8005)
 - Verify client can reach bootstrap nodes on DHT port
 - Ensure model names match between nodes and client requests
 
+## OpenAI-Compatible API
+
+LlamaNet now supports OpenAI-compatible endpoints, making it a drop-in replacement for OpenAI's API in many applications.
+
+### Supported Endpoints
+
+- `GET /v1/models` - List available models
+- `POST /v1/completions` - Text completion (compatible with OpenAI's completions API)
+- `POST /v1/chat/completions` - Chat completion (compatible with OpenAI's chat API)
+
+### Using with OpenAI Python Library
+
+```python
+import openai
+
+# Configure to use LlamaNet
+openai.api_base = "http://localhost:8000/v1"
+openai.api_key = "dummy-key"  # Not used but required by the library
+
+# Text completion
+response = openai.Completion.create(
+    model="llamanet",
+    prompt="What is artificial intelligence?",
+    max_tokens=100,
+    temperature=0.7
+)
+print(response.choices[0].text)
+
+# Chat completion
+response = openai.ChatCompletion.create(
+    model="llamanet",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Explain quantum computing."}
+    ],
+    max_tokens=150
+)
+print(response.choices[0].message.content)
+```
+
+### Using with curl
+
+```bash
+# List models
+curl http://localhost:8000/v1/models
+
+# Text completion
+curl -X POST http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llamanet",
+    "prompt": "What is machine learning?",
+    "max_tokens": 100,
+    "temperature": 0.7
+  }'
+
+# Chat completion
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llamanet",
+    "messages": [
+      {"role": "user", "content": "Hello, how are you?"}
+    ],
+    "max_tokens": 100
+  }'
+```
+
+### Compatibility Notes
+
+- The API is compatible with most OpenAI client libraries
+- Some advanced features (like function calling) are not yet supported
+- Token counting is approximate and may differ from OpenAI's implementation
+- Streaming responses are not yet implemented but planned for future releases
+
 ## License
 
 MIT

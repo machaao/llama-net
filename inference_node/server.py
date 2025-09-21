@@ -1,11 +1,20 @@
 import asyncio
 import time
+import uuid
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from typing import Dict, Any
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from typing import Dict, Any, Union, List
 from contextlib import asynccontextmanager
+import json
 
-from common.models import GenerationRequest, GenerationResponse
+from common.models import (
+    GenerationRequest, GenerationResponse,
+    OpenAICompletionRequest, OpenAIChatCompletionRequest,
+    OpenAICompletionResponse, OpenAIChatCompletionResponse,
+    OpenAIChoice, OpenAIUsage, OpenAIMessage,
+    OpenAIModel, OpenAIModelList
+)
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo
@@ -55,6 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LlamaNet Inference Node", lifespan=lifespan)
 
+# Original LlamaNet endpoints
 @app.post("/generate", response_model=GenerationResponse)
 async def generate(request: GenerationRequest):
     """Generate text from a prompt"""
@@ -82,6 +92,158 @@ async def generate(request: GenerationRequest):
         logger.error(f"Generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# OpenAI-compatible endpoints
+@app.get("/v1/models")
+async def list_models():
+    """List available models (OpenAI-compatible)"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    return OpenAIModelList(
+        data=[
+            OpenAIModel(
+                id=config.model_name,
+                created=int(time.time()),
+                owned_by="llamanet"
+            )
+        ]
+    )
+
+@app.post("/v1/completions")
+async def create_completion(request: OpenAICompletionRequest):
+    """Create a completion (OpenAI-compatible)"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    # Handle prompt (can be string or list)
+    if isinstance(request.prompt, list):
+        if len(request.prompt) == 0:
+            raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+        prompt = request.prompt[0]  # Use first prompt for now
+    else:
+        prompt = request.prompt
+    
+    # Convert stop to list if it's a string
+    stop = None
+    if request.stop:
+        if isinstance(request.stop, str):
+            stop = [request.stop]
+        else:
+            stop = request.stop
+    
+    try:
+        # Generate text
+        result = llm.generate(
+            prompt=prompt,
+            max_tokens=request.max_tokens or 100,
+            temperature=request.temperature or 0.7,
+            top_p=request.top_p or 0.9,
+            stop=stop,
+            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+        )
+        
+        # Calculate token counts (approximate)
+        prompt_tokens = len(prompt.split())
+        completion_tokens = result["tokens_generated"]
+        
+        # Create response
+        choice = OpenAIChoice(
+            text=result["text"],
+            index=0,
+            finish_reason="stop"
+        )
+        
+        usage = OpenAIUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        return OpenAICompletionResponse(
+            id=f"cmpl-{uuid.uuid4().hex[:8]}",
+            created=int(time.time()),
+            model=request.model,
+            choices=[choice],
+            usage=usage
+        )
+        
+    except Exception as e:
+        logger.error(f"Completion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/chat/completions")
+async def create_chat_completion(request: OpenAIChatCompletionRequest):
+    """Create a chat completion (OpenAI-compatible)"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    # Convert messages to a single prompt
+    prompt_parts = []
+    for message in request.messages:
+        if message.role == "system":
+            prompt_parts.append(f"System: {message.content}")
+        elif message.role == "user":
+            prompt_parts.append(f"User: {message.content}")
+        elif message.role == "assistant":
+            prompt_parts.append(f"Assistant: {message.content}")
+    
+    prompt = "\n".join(prompt_parts) + "\nAssistant:"
+    
+    # Convert stop to list if it's a string
+    stop = None
+    if request.stop:
+        if isinstance(request.stop, str):
+            stop = [request.stop]
+        else:
+            stop = request.stop
+    
+    try:
+        # Generate text
+        result = llm.generate(
+            prompt=prompt,
+            max_tokens=request.max_tokens or 100,
+            temperature=request.temperature or 0.7,
+            top_p=request.top_p or 0.9,
+            stop=stop,
+            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+        )
+        
+        # Calculate token counts (approximate)
+        prompt_tokens = len(prompt.split())
+        completion_tokens = result["tokens_generated"]
+        
+        # Create response message
+        response_message = OpenAIMessage(
+            role="assistant",
+            content=result["text"].strip()
+        )
+        
+        choice = OpenAIChoice(
+            message=response_message,
+            index=0,
+            finish_reason="stop"
+        )
+        
+        usage = OpenAIUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        return OpenAIChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+            created=int(time.time()),
+            model=request.model,
+            choices=[choice],
+            usage=usage
+        )
+        
+    except Exception as e:
+        logger.error(f"Chat completion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Original LlamaNet status endpoints
+
 @app.get("/status")
 async def status():
     """Get node status"""
@@ -101,7 +263,12 @@ async def info():
         "model": config.model_name,
         "model_path": config.model_path,
         "system": system_info,
-        "dht_port": config.dht_port
+        "dht_port": config.dht_port,
+        "openai_compatible": True,
+        "endpoints": {
+            "llamanet": ["/generate", "/status", "/info", "/health"],
+            "openai": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
+        }
     }
 
 @app.get("/health")
@@ -116,7 +283,8 @@ async def health():
     health_status.update({
         "llm_loaded": llm is not None,
         "dht_running": dht_publisher is not None and dht_publisher.running,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "openai_compatible": True
     })
     
     return health_status
@@ -196,6 +364,17 @@ Examples:
 Environment Variables:
   MODEL_PATH, HOST, PORT, DHT_PORT, NODE_ID, BOOTSTRAP_NODES
   (Command line arguments take precedence)
+
+OpenAI-Compatible Endpoints:
+  GET  /v1/models                - List available models
+  POST /v1/completions          - Text completion
+  POST /v1/chat/completions     - Chat completion
+
+LlamaNet Endpoints:
+  POST /generate                - Native LlamaNet generation
+  GET  /status                  - Node status and metrics
+  GET  /info                    - Node information
+  GET  /health                  - Health check
 """)
 
 if __name__ == "__main__":
