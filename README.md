@@ -1070,7 +1070,7 @@ MIT License - see LICENSE file for details.
 
 ## Made with ❤️ using MACH-AI
 
-This project was built with love using [MACH-AI](https://machai.live).
+This project was built with love using [MACH-AI](https://machai.live)
 
 **Key streaming features developed with MACH-AI:**
 - 🌊 **Real-time streaming inference** with Server-Sent Events
