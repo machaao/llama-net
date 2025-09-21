@@ -37,6 +37,27 @@ class GenerationResponse(BaseModel):
     generation_time: float
     node_id: str
 
+# Streaming models
+class StreamingGenerationRequest(BaseModel):
+    """Request for streaming text generation"""
+    prompt: str
+    max_tokens: int = 100
+    temperature: float = 0.7
+    top_p: float = 0.9
+    top_k: int = 40
+    stop: Optional[List[str]] = None
+    repeat_penalty: float = 1.1
+    stream: bool = True
+
+class StreamingChunk(BaseModel):
+    """Individual chunk in a streaming response"""
+    text: str
+    accumulated_text: str
+    tokens_generated: int
+    generation_time: float
+    finished: bool
+    node_id: str
+
 # OpenAI-compatible models
 class OpenAIMessage(BaseModel):
     """OpenAI chat message format"""
@@ -118,3 +139,23 @@ class OpenAIModelList(BaseModel):
     """OpenAI models list response"""
     object: str = "list"
     data: List[OpenAIModel]
+
+# Streaming OpenAI models
+class OpenAIStreamingDelta(BaseModel):
+    """OpenAI streaming delta object"""
+    content: Optional[str] = None
+    role: Optional[str] = None
+
+class OpenAIStreamingChoice(BaseModel):
+    """OpenAI streaming choice object"""
+    delta: OpenAIStreamingDelta
+    index: int
+    finish_reason: Optional[str] = None
+
+class OpenAIStreamingResponse(BaseModel):
+    """OpenAI-compatible streaming response"""
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: List[OpenAIStreamingChoice]

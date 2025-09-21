@@ -1,5 +1,5 @@
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Generator
 from llama_cpp import Llama
 from common.utils import get_logger
 from inference_node.config import InferenceConfig
@@ -63,6 +63,58 @@ class LlamaWrapper:
             "tokens_generated": tokens_generated,
             "generation_time": generation_time
         }
+    
+    def generate_stream(self, 
+                       prompt: str, 
+                       max_tokens: int = 100,
+                       temperature: float = 0.7,
+                       top_p: float = 0.9,
+                       top_k: int = 40,
+                       stop: Optional[List[str]] = None,
+                       repeat_penalty: float = 1.1) -> Generator[Dict[str, Any], None, None]:
+        """Generate text with streaming support"""
+        self.request_count += 1
+        start_time = time.time()
+        
+        # Create streaming generator
+        stream = self.llm(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            stop=stop,
+            repeat_penalty=repeat_penalty,
+            stream=True  # Enable streaming
+        )
+        
+        total_tokens = 0
+        accumulated_text = ""
+        
+        try:
+            for chunk in stream:
+                if 'choices' in chunk and len(chunk['choices']) > 0:
+                    choice = chunk['choices'][0]
+                    if 'text' in choice and choice['text']:
+                        total_tokens += 1
+                        accumulated_text += choice['text']
+                        generation_time = time.time() - start_time
+                        
+                        yield {
+                            "text": choice['text'],
+                            "accumulated_text": accumulated_text,
+                            "tokens_generated": total_tokens,
+                            "generation_time": generation_time,
+                            "finished": choice.get('finish_reason') is not None
+                        }
+                        
+                        if choice.get('finish_reason') is not None:
+                            break
+        finally:
+            # Update metrics
+            final_time = time.time() - start_time
+            self.total_tokens_generated += total_tokens
+            self.total_generation_time += final_time
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get metrics about the model"""
