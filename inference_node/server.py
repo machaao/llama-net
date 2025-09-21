@@ -12,10 +12,13 @@ import json
 
 from common.models import (
     GenerationRequest, GenerationResponse,
+    OpenAIModel, OpenAIModelList
+)
+from common.openai_models import (
     OpenAICompletionRequest, OpenAIChatCompletionRequest,
     OpenAICompletionResponse, OpenAIChatCompletionResponse,
     OpenAIChoice, OpenAIUsage, OpenAIMessage,
-    OpenAIModel, OpenAIModelList
+    create_streaming_chat_response, create_streaming_completion_response
 )
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
@@ -154,7 +157,36 @@ async def create_completion(request: OpenAICompletionRequest):
             stop = request.stop
     
     try:
-        # Generate text
+        # Handle streaming
+        if request.stream:
+            request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+            
+            async def stream_generator():
+                async for chunk in llm.generate_stream_async(
+                    prompt=prompt,
+                    max_tokens=request.max_tokens or 100,
+                    temperature=request.temperature or 0.7,
+                    top_p=request.top_p or 0.9,
+                    stop=stop,
+                    repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                ):
+                    yield chunk
+            
+            return StreamingResponse(
+                create_streaming_completion_response(
+                    request_id=request_id,
+                    model=request.model,
+                    stream_generator=stream_generator()
+                ),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
+            )
+        
+        # Non-streaming response
         result = llm.generate(
             prompt=prompt,
             max_tokens=request.max_tokens or 100,
@@ -220,7 +252,36 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
             stop = request.stop
     
     try:
-        # Generate text
+        # Handle streaming
+        if request.stream:
+            request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            
+            async def stream_generator():
+                async for chunk in llm.generate_stream_async(
+                    prompt=prompt,
+                    max_tokens=request.max_tokens or 100,
+                    temperature=request.temperature or 0.7,
+                    top_p=request.top_p or 0.9,
+                    stop=stop,
+                    repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                ):
+                    yield chunk
+            
+            return StreamingResponse(
+                create_streaming_chat_response(
+                    request_id=request_id,
+                    model=request.model,
+                    stream_generator=stream_generator()
+                ),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
+            )
+        
+        # Non-streaming response
         result = llm.generate(
             prompt=prompt,
             max_tokens=request.max_tokens or 100,
