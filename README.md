@@ -1,15 +1,30 @@
 # LlamaNet
 
-LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It uses Kademlia DHT for truly distributed node discovery without any central registry.
+LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It uses Kademlia DHT for truly distributed node discovery without any central registry and supports both real-time streaming and traditional inference modes.
 
 ## Features
 
 - **Decentralized DHT-based node discovery** using Kademlia protocol
-- Inference nodes that serve LLM models using llama.cpp
+- **Real-time streaming inference** with Server-Sent Events (SSE)
+- **OpenAI-compatible API** with streaming support
+- **Interactive web interface** with live streaming responses
 - **Async Client Library** for easy integration with async/await support
-- Automatic node selection based on load and performance
-- No single point of failure - fully distributed architecture
-- Docker support for easy deployment
+- **Automatic node selection** based on load and performance
+- **No single point of failure** - fully distributed architecture
+- **Docker support** for easy deployment
+
+## New Streaming Features
+
+### Real-time Text Generation
+- **Live streaming responses** - see text appear as it's generated
+- **OpenAI-compatible streaming** - works with existing OpenAI clients
+- **Web UI streaming** - interactive chat interface with real-time updates
+- **Functional programming approach** - event-driven architecture with no blocking loops
+
+### Streaming Endpoints
+- **Native LlamaNet**: `/generate/stream` - Server-Sent Events format
+- **OpenAI Compatible**: `/v1/chat/completions` and `/v1/completions` with `stream: true`
+- **Web Interface**: Toggle streaming on/off in the browser UI
 
 ## Requirements
 
@@ -38,78 +53,141 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 pip install llamanet
 ```
 
-## Running Locally
+## Quick Start
 
-### 1. Download a Model
+### 1. Start a Bootstrap Node
 
-First, download a GGUF model file. For example:
 ```bash
-# Create models directory
-mkdir -p models
-
-# Download a GGUF model (example - replace with actual GGUF model URL)
-# wget https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.q4_0.gguf -O models/model.gguf
-# For now, place your .gguf model file in the models directory
+python -m inference_node.server --model-path ./models/your-model.gguf
 ```
 
-### 2. Start Bootstrap Node
+This starts:
+- **HTTP API** on port 8000 (inference endpoints)
+- **DHT node** on port 8001 (peer discovery)
+- **Web UI** at http://localhost:8000
 
-The first inference node acts as a bootstrap node for the DHT network.
+### 2. Start Additional Nodes
 
-**Using Command Line Arguments:**
 ```bash
 python -m inference_node.server \
-  --model-path ./models/model.gguf \
-  --port 8000 \
-  --dht-port 8001 \
-  --node-id bootstrap-node
-```
-
-**Using Environment Variables:**
-```bash
-export MODEL_PATH=./models/model.gguf
-export PORT=8000
-export DHT_PORT=8001
-export NODE_ID=bootstrap-node
-export BOOTSTRAP_NODES=""
-
-python -m inference_node.server
-```
-
-### 3. Start Additional Inference Nodes
-
-**Using Command Line Arguments:**
-```bash
-python -m inference_node.server \
-  --model-path ./models/model.gguf \
+  --model-path ./models/your-model.gguf \
   --port 8002 \
   --dht-port 8003 \
   --bootstrap-nodes localhost:8001
 ```
 
-**Using Environment Variables:**
-```bash
-export MODEL_PATH=./models/model.gguf
-export PORT=8002
-export DHT_PORT=8003
-export BOOTSTRAP_NODES="localhost:8001"
+### 3. Use the Web Interface
 
-python -m inference_node.server
+Open http://localhost:8000 in your browser for an interactive chat interface with:
+- **Real-time streaming responses**
+- **API mode switching** (LlamaNet ↔ OpenAI Compatible)
+- **Network status monitoring**
+- **Streaming toggle** for instant vs. complete responses
+
+## API Usage
+
+### Native LlamaNet API
+
+#### Non-streaming Generation
+```python
+import requests
+
+response = requests.post("http://localhost:8000/generate", json={
+    "prompt": "What is artificial intelligence?",
+    "max_tokens": 150,
+    "temperature": 0.7
+})
+print(response.json()["text"])
 ```
 
-### 4. Use the Client
+#### Streaming Generation
+```python
+import requests
+import json
 
+response = requests.post("http://localhost:8000/generate/stream", 
+    json={
+        "prompt": "Explain quantum computing",
+        "max_tokens": 200,
+        "temperature": 0.7
+    }, 
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line.startswith(b'data: '):
+        data = json.loads(line[6:])
+        if not data.get("finished"):
+            print(data["text"], end="", flush=True)
+        else:
+            print(f"\n[Generated {data['tokens_generated']} tokens in {data['generation_time']:.2f}s]")
+            break
+```
+
+### OpenAI-Compatible API
+
+#### Using OpenAI Python Library
+```python
+import openai
+
+# Configure to use LlamaNet
+openai.api_base = "http://localhost:8000/v1"
+openai.api_key = "dummy-key"  # Not used but required
+
+# Streaming chat completion
+response = openai.ChatCompletion.create(
+    model="llamanet",
+    messages=[{"role": "user", "content": "Hello!"}],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.get("content"):
+        print(chunk.choices[0].delta.content, end="", flush=True)
+```
+
+#### Direct HTTP Streaming
+```python
+import requests
+import json
+
+response = requests.post("http://localhost:8000/v1/chat/completions",
+    json={
+        "model": "llamanet",
+        "messages": [{"role": "user", "content": "Explain machine learning"}],
+        "stream": True,
+        "max_tokens": 150
+    },
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line.startswith(b'data: '):
+        data_str = line[6:].decode()
+        if data_str.strip() == '[DONE]':
+            break
+        
+        data = json.loads(data_str)
+        if data["choices"][0]["delta"].get("content"):
+            print(data["choices"][0]["delta"]["content"], end="", flush=True)
+```
+
+### Python Client Library
+
+#### Async Client with Discovery
 ```python
 import asyncio
 from client.api import Client
 
 async def main():
-    client = Client(
-        bootstrap_nodes="localhost:8001",
-        model="model"  # Use the model name (filename without extension)
-    )
+    client = Client(bootstrap_nodes="localhost:8001")
     
     try:
+        # Discover available nodes
+        nodes = await client.dht_discovery.get_nodes()
+        print(f"Found {len(nodes)} nodes")
+        
+        # Generate text
         response = await client.generate(
             prompt="What is LlamaNet?",
             max_tokens=150,
@@ -117,129 +195,208 @@ async def main():
         )
         
         if response:
-            print(f"Generated by node {response.node_id}:")
-            print(response.text)
-        else:
-            print("Failed to generate text")
+            print(f"Response: {response.text}")
+            print(f"Node: {response.node_id}")
+            print(f"Tokens: {response.tokens_generated}")
     finally:
         await client.close()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-## Quick Start Commands
+## Web UI Features
 
-```bash
-# 1. Install dependencies
-pip install -e .
+The built-in web interface (http://localhost:8000) provides:
 
-# 2. Download a model (example)
-mkdir models
-# Place your .gguf model file in the models directory
+### Chat Interface
+- **Real-time streaming** - watch responses appear live
+- **API mode toggle** - switch between LlamaNet and OpenAI compatible modes
+- **Parameter controls** - adjust max tokens, temperature
+- **Streaming toggle** - enable/disable real-time responses
 
-# 3. Start bootstrap node
-python -m inference_node.server --model-path ./models/your-model.gguf
+### Network Monitoring
+- **Live node discovery** - see all connected nodes
+- **Performance metrics** - load, tokens/second, uptime
+- **Health status** - monitor node availability
+- **DHT network status** - peer connections and routing table
 
-# 4. In another terminal, start additional node
-python -m inference_node.server \
-  --model-path ./models/your-model.gguf \
-  --port 8002 \
-  --dht-port 8003 \
-  --bootstrap-nodes localhost:8001
-
-# 5. Use the client (see examples/simple_client.py for full example)
-# Note: client.generate() must be awaited in an async function
-```
+### Configuration Options
+- **Max Tokens**: Control response length (1-2048)
+- **Temperature**: Adjust creativity (0.0-2.0)
+- **Streaming Mode**: Toggle real-time vs. complete responses
 
 ## Docker Deployment
 
-### Using docker-compose
+### Using Docker Compose
 
-1. Place your model files in the `models` directory
+```yaml
+version: '3'
+services:
+  bootstrap:
+    build:
+      context: .
+      dockerfile: docker/inference.Dockerfile
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    environment:
+      - MODEL_PATH=/models/model.gguf
+    volumes:
+      - ./models:/models
 
-2. Start the services:
-   ```bash
-   cd docker
-   docker-compose up -d
-   ```
+  inference1:
+    build:
+      context: .
+      dockerfile: docker/inference.Dockerfile
+    ports:
+      - "8002:8000"
+      - "8003:8001"
+    environment:
+      - MODEL_PATH=/models/model.gguf
+      - BOOTSTRAP_NODES=bootstrap:8001
+    volumes:
+      - ./models:/models
+    depends_on:
+      - bootstrap
+```
 
-This will start:
-- Bootstrap node on ports 8000 (HTTP) and 8001 (DHT)
-- Additional inference nodes that automatically join the DHT network
+```bash
+docker-compose up
+```
 
-### Manual Docker Setup
+## Network Monitoring
 
-1. Build the inference image:
-   ```bash
-   docker build -f docker/inference.Dockerfile -t llamanet-inference .
-   ```
+### Command Line Tools
 
-2. Start bootstrap node:
-   ```bash
-   docker run -d -p 8000:8000 -p 8001:8001 \
-     -v /path/to/models:/models \
-     -e MODEL_PATH=/models/your-model.gguf \
-     -e PORT=8000 \
-     -e DHT_PORT=8001 \
-     -e NODE_ID=bootstrap-node \
-     -e BOOTSTRAP_NODES="" \
-     --name llamanet-bootstrap llamanet-inference
-   ```
+```bash
+# Show network status
+python -m tools.network_status localhost:8001
 
-3. Start additional nodes:
-   ```bash
-   docker run -d -p 8002:8000 -p 8003:8001 \
-     -v /path/to/models:/models \
-     -e MODEL_PATH=/models/your-model.gguf \
-     -e PORT=8000 \
-     -e DHT_PORT=8001 \
-     -e BOOTSTRAP_NODES="host-ip:8001" \
-     --name llamanet-node1 llamanet-inference
-   ```
+# Monitor network in real-time
+python -m tools.monitor localhost:8001
+
+# Quick health check
+python -m tools.quick_check
+```
+
+### Web Dashboard
+
+Visit http://localhost:8000 for:
+- **Real-time network status**
+- **Node performance metrics**
+- **Interactive chat interface**
+- **Streaming response testing**
+
+## API Endpoints
+
+### LlamaNet Native
+- `POST /generate` - Text generation
+- `POST /generate/stream` - **Streaming text generation**
+- `GET /status` - Node metrics
+- `GET /info` - Node information
+- `GET /health` - Health check
+- `GET /dht/status` - DHT network status
+
+### OpenAI Compatible
+- `GET /v1/models` - List models
+- `POST /v1/completions` - Text completion (**streaming supported**)
+- `POST /v1/chat/completions` - Chat completion (**streaming supported**)
+
+### Web Interface
+- `GET /` - Web UI dashboard
+- `GET /static/*` - Static assets
 
 ## Configuration
 
-### Inference Node
+### Environment Variables
+```bash
+MODEL_PATH=/path/to/model.gguf    # Required: Path to GGUF model
+HOST=0.0.0.0                      # Bind address
+PORT=8000                         # HTTP API port
+DHT_PORT=8001                     # DHT protocol port
+NODE_ID=unique-node-id            # Node identifier
+BOOTSTRAP_NODES=ip:port,ip:port   # Bootstrap nodes
+HEARTBEAT_INTERVAL=10             # DHT publish interval
+N_CTX=2048                        # Context size
+N_BATCH=8                         # Batch size
+N_GPU_LAYERS=0                    # GPU layers (0 = CPU only)
+```
 
-| Environment Variable | Default | Description |
-|----------------------|---------|-------------|
-| MODEL_PATH           | -       | Path to the GGUF model file |
-| HOST                 | 0.0.0.0 | Host to bind the inference service |
-| PORT                 | 8000    | Port for the inference HTTP API |
-| DHT_PORT             | 8001    | Port for Kademlia DHT protocol |
-| NODE_ID              | auto    | Unique identifier for this node |
-| BOOTSTRAP_NODES      | ""      | Comma-separated list of bootstrap nodes (ip:port) |
-| HEARTBEAT_INTERVAL   | 10      | Interval (in seconds) for DHT updates |
-| N_CTX                | 2048    | Context size for the model |
-| N_BATCH              | 8       | Batch size for inference |
-| N_GPU_LAYERS         | 0       | Number of layers to offload to GPU (0 = CPU only) |
-
-### Client Configuration
-
-```python
-client = Client(
-    bootstrap_nodes="node1:8001,node2:8001",  # Bootstrap DHT nodes
-    model="model-name",                       # Filter by model (optional)
-    min_tps=1.0,                             # Minimum tokens per second
-    max_load=0.8,                            # Maximum load threshold
-    dht_port=8001                            # DHT port for client
-)
-
-# Note: All client operations are async and must be awaited
-response = await client.generate("Your prompt here")
-await client.close()  # Always close the client when done
+### Command Line Options
+```bash
+python -m inference_node.server \
+  --model-path ./models/model.gguf \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --dht-port 8001 \
+  --node-id my-node \
+  --bootstrap-nodes localhost:8001
 ```
 
 ## Architecture
 
-LlamaNet uses a **Kademlia Distributed Hash Table (DHT)** for node discovery:
+### Streaming Architecture
+- **Server-Sent Events (SSE)** for real-time communication
+- **Functional programming** approach with async generators
+- **Event-driven UI** with real-time DOM updates
+- **Non-blocking streaming** using async/await patterns
 
-1. **No Central Registry**: Nodes discover each other through the DHT network
-2. **Bootstrap Process**: First node creates the network, others join via bootstrap nodes
-3. **Automatic Discovery**: Clients query the DHT to find available inference nodes
-4. **Fault Tolerance**: Network continues operating even if nodes leave
-5. **Scalability**: Logarithmic lookup time O(log n) for node discovery
+### DHT Network
+- **Kademlia protocol** for distributed hash table
+- **Automatic node discovery** without central registry
+- **Load balancing** based on node performance
+- **Fault tolerance** with automatic failover
+
+### OpenAI Compatibility
+- **Drop-in replacement** for OpenAI API
+- **Streaming support** with identical format
+- **Chat and completion** endpoints
+- **Compatible with existing tools** (curl, Postman, OpenAI libraries)
+
+## Performance
+
+### Streaming Benefits
+- **Immediate feedback** - users see responses instantly
+- **Better UX** - no waiting for complete generation
+- **Lower perceived latency** - streaming feels faster
+- **Cancellable requests** - stop generation early
+
+### Network Efficiency
+- **Distributed load** across multiple nodes
+- **Automatic scaling** as nodes join/leave
+- **Smart routing** to least loaded nodes
+- **Fault tolerance** with automatic retry
+
+## Streaming Implementation Details
+
+### Frontend Streaming
+The web UI uses a custom `StreamUI` class that:
+- Handles Server-Sent Events from both LlamaNet and OpenAI endpoints
+- Updates the chat interface in real-time
+- Manages streaming state and error handling
+- Provides visual feedback with animated cursors
+
+### Backend Streaming
+The server implements streaming via:
+- **Async generators** for token-by-token generation
+- **FastAPI StreamingResponse** for HTTP streaming
+- **OpenAI-compatible format** for existing client compatibility
+- **Functional programming patterns** avoiding blocking loops
+
+### Stream Formats
+
+**LlamaNet Native Format:**
+```json
+data: {"text": "Hello", "accumulated_text": "Hello", "tokens_generated": 1, "finished": false}
+data: {"text": " world", "accumulated_text": "Hello world", "tokens_generated": 2, "finished": true}
+```
+
+**OpenAI Compatible Format:**
+```json
+data: {"choices": [{"delta": {"content": "Hello"}, "finish_reason": null}]}
+data: {"choices": [{"delta": {"content": " world"}, "finish_reason": "stop"}]}
+data: [DONE]
+```
 
 ## Use Cases & Scenarios
 
@@ -829,103 +986,113 @@ This architecture ensures **high availability**, **automatic scaling**, and **fa
 
 ## Troubleshooting
 
-### No Nodes Available
-- Ensure bootstrap nodes are running and accessible
-- Check DHT_PORT is not blocked by firewall
-- Verify BOOTSTRAP_NODES environment variable is set correctly
+### Common Issues
 
-### Connection Issues
-- Check that inference nodes are publishing to DHT (logs should show "Published node info")
-- Verify client can reach bootstrap nodes on DHT port
-- Ensure model names match between nodes and client requests
-
-## OpenAI-Compatible API
-
-LlamaNet now supports OpenAI-compatible endpoints, making it a drop-in replacement for OpenAI's API in many applications.
-
-### Supported Endpoints
-
-- `GET /v1/models` - List available models
-- `POST /v1/completions` - Text completion (compatible with OpenAI's completions API)
-- `POST /v1/chat/completions` - Chat completion (compatible with OpenAI's chat API)
-
-### Using with OpenAI Python Library
-
-```python
-import openai
-
-# Configure to use LlamaNet
-openai.api_base = "http://localhost:8000/v1"
-openai.api_key = "dummy-key"  # Not used but required by the library
-
-# Text completion
-response = openai.Completion.create(
-    model="llamanet",
-    prompt="What is artificial intelligence?",
-    max_tokens=100,
-    temperature=0.7
-)
-print(response.choices[0].text)
-
-# Chat completion
-response = openai.ChatCompletion.create(
-    model="llamanet",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Explain quantum computing."}
-    ],
-    max_tokens=150
-)
-print(response.choices[0].message.content)
-```
-
-### Using with curl
-
+**Streaming not working:**
 ```bash
-# List models
-curl http://localhost:8000/v1/models
-
-# Text completion
-curl -X POST http://localhost:8000/v1/completions \
+# Check if streaming is enabled
+curl -X POST http://localhost:8000/generate/stream \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "llamanet",
-    "prompt": "What is machine learning?",
-    "max_tokens": 100,
-    "temperature": 0.7
-  }'
-
-# Chat completion
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "llamanet",
-    "messages": [
-      {"role": "user", "content": "Hello, how are you?"}
-    ],
-    "max_tokens": 100
-  }'
+  -d '{"prompt":"test","max_tokens":10}' \
+  --no-buffer
 ```
 
-### Compatibility Notes
+**No nodes discovered:**
+```bash
+# Check DHT status
+curl http://localhost:8000/dht/status
 
-- The API is compatible with most OpenAI client libraries
-- Some advanced features (like function calling) are not yet supported
-- Token counting is approximate and may differ from OpenAI's implementation
-- Streaming responses are not yet implemented but planned for future releases
+# Verify bootstrap nodes
+python -m tools.network_status localhost:8001
+```
+
+**Web UI not loading:**
+```bash
+# Check if static files are served
+curl http://localhost:8000/static/style.css
+```
+
+**Streaming responses cut off:**
+- Ensure your HTTP client supports streaming
+- Check for proxy/firewall interference
+- Verify Content-Type headers are correct
+
+### Debug Mode
+```bash
+# Enable debug logging
+export LOG_LEVEL=DEBUG
+python -m inference_node.server --model-path ./model.gguf
+```
+
+## Use Cases & Scenarios
+
+LlamaNet's decentralized architecture with streaming support makes it ideal for:
+
+### 🏢 Enterprise & Corporate Environments
+- **Real-time AI assistance** with immediate feedback
+- **Multi-office deployment** with local streaming nodes
+- **Compliance-friendly** - data never leaves your infrastructure
+
+### 🎓 Research & Academic Institutions
+- **Interactive research tools** with streaming responses
+- **Collaborative AI** across multiple departments
+- **Resource sharing** with real-time load balancing
+
+### 🌐 Community & Open Source Projects
+- **Community-driven AI** with shared streaming infrastructure
+- **Real-time collaboration** tools and assistants
+- **Cost-effective scaling** with streaming efficiency
+
+### 🔒 Privacy & Security Focused
+- **Private streaming AI** within secure networks
+- **No external dependencies** for sensitive data processing
+- **Real-time processing** without cloud latency
+
+## Getting Started for Your Use Case
+
+1. **Choose Your Deployment**: Single node for testing, multi-node for production
+2. **Enable Streaming**: Use the web UI or API endpoints with `stream: true`
+3. **Configure Parameters**: Adjust max tokens, temperature for your use case
+4. **Monitor Performance**: Use the web dashboard to track streaming performance
+5. **Scale as Needed**: Add more nodes for increased capacity
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure streaming works in both modes
+5. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details.
+
+## Roadmap
+
+- [x] **Real-time streaming** for both LlamaNet and OpenAI APIs
+- [x] **Interactive web UI** with streaming support
+- [x] **Functional programming** streaming implementation
+- [ ] **WebSocket streaming** alternative to SSE
+- [ ] **Advanced streaming features** (token-by-token control)
+- [ ] **Multi-model support** per node
+- [ ] **Authentication and rate limiting**
+- [ ] **Mobile-responsive web UI**
+- [ ] **Distributed model loading**
+- [ ] **Auto-scaling based on demand**
 
 ---
 
 ## Made with ❤️ using MACH-AI
 
-This project was built with love using [MACH-AI](https://machaao.com), an AI-powered development platform that enables rapid creation of production-scale applications. MACH-AI helped accelerate the development of LlamaNet's distributed architecture, OpenAI-compatible APIs, and web interface.
+This project was built with love using [MACH-AI](https://machaao.com), an AI-powered development platform that enables rapid creation of production-scale applications. MACH-AI helped accelerate the development of LlamaNet's distributed architecture, streaming capabilities, OpenAI-compatible APIs, and interactive web interface.
 
-**Key features developed with MACH-AI:**
-- 🌐 Decentralized DHT-based node discovery
-- 🤖 OpenAI-compatible API endpoints
-- 💻 Interactive web UI with real-time updates
-- 🔄 Real-time network monitoring
-- 📊 Performance metrics and health checks
+**Key streaming features developed with MACH-AI:**
+- 🌊 **Real-time streaming inference** with Server-Sent Events
+- 🎯 **OpenAI-compatible streaming** for existing client support
+- 💻 **Interactive web UI** with live streaming responses
+- 🔄 **Event-driven architecture** using functional programming
+- 📊 **Real-time performance monitoring** and health checks
 
 Learn more about building AI-powered applications at [machaao.com](https://machaao.com)
 
