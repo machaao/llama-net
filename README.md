@@ -1085,7 +1085,7 @@ MIT License - see LICENSE file for details.
 
 ## Made with ❤️ using MACH-AI
 
-This project was built with love using [MACH-AI](https://machaao.com), an AI-powered development platform that enables rapid creation of production-scale applications. MACH-AI helped accelerate the development of LlamaNet's distributed architecture, streaming capabilities, OpenAI-compatible APIs, and interactive web interface.
+This project was built with love using [MACH-AI](https://machai.live).
 
 **Key streaming features developed with MACH-AI:**
 - 🌊 **Real-time streaming inference** with Server-Sent Events
@@ -1093,8 +1093,6 @@ This project was built with love using [MACH-AI](https://machaao.com), an AI-pow
 - 💻 **Interactive web UI** with live streaming responses
 - 🔄 **Event-driven architecture** using functional programming
 - 📊 **Real-time performance monitoring** and health checks
-
-Learn more about building AI-powered applications at [machaao.com](https://machaao.com)
 
 ## License
 
