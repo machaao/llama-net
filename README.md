@@ -470,54 +470,60 @@ LlamaNet's flexibility allows it to adapt to virtually any scenario where distri
 
 ### 1. Network Formation Flow
 
-```mermaid
-graph TD
-    A[Bootstrap Node] -->|Starts DHT| B[DHT Network]
-    C[Node 1] -->|Joins via Bootstrap| B
-    D[Node 2] -->|Joins via Bootstrap| B
-    E[Node 3] -->|Joins via Node 1| B
+```
+                    LlamaNet Network Formation
+                           
+    Step 1: Bootstrap Node Starts
+    ┌─────────────────┐
+    │  Bootstrap Node │ ──► Starts DHT Network
+    │    (Node A)     │     Creates initial routing table
+    └─────────────────┘
+            │
+            ▼
+    ┌─────────────────┐
+    │   DHT Network   │
+    │   Storage Keys: │
+    │ • model:llama   │
+    │ • node:abc123   │
+    │ • all_nodes     │
+    └─────────────────┘
+            │
+            ▼
+    Step 2: Additional Nodes Join
     
-    B --> F[Distributed Hash Table]
-    F --> G[Key: model:llama-7b]
-    F --> H[Key: node:abc123...]
-    F --> I[Key: all_nodes]
-    
-    style A fill:#e1f5fe
-    style B fill:#f3e5f5
-    style F fill:#fff3e0
+    Node B ──► Connects to Bootstrap ──► Joins DHT
+    Node C ──► Connects to Bootstrap ──► Joins DHT
+    Node D ──► Connects to Node B    ──► Joins DHT
 ```
 
 ### 2. Node Discovery Process
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant DHT as DHT Network
-    participant N1 as Node 1
-    participant N2 as Node 2
-    participant N3 as Node 3
+```
+Client Discovery Sequence:
 
-    C->>DHT: Query "model:llama-7b"
-    DHT->>C: Return [Node1, Node2, Node3]
-    
-    C->>N1: Check load/health
-    N1->>C: Load: 0.3, TPS: 15.2
-    
-    C->>N2: Check load/health
-    N2->>C: Load: 0.7, TPS: 12.1
-    
-    C->>N3: Check load/health
-    N3->>C: Load: 0.1, TPS: 18.5
-    
-    Note over C: Select Node 3 (lowest load)
-    C->>N3: Send inference request
-    N3->>C: Return generated text
+1. Client Query:
+   Client ──► DHT Network: "Find model:llama-7b"
+
+2. DHT Response:
+   DHT Network ──► Client: [Node1, Node2, Node3]
+
+3. Health Checks:
+   Client ──► Node1: /status ──► Response: Load=0.3, TPS=15.2
+   Client ──► Node2: /status ──► Response: Load=0.7, TPS=12.1  
+   Client ──► Node3: /status ──► Response: Load=0.1, TPS=18.5
+
+4. Node Selection:
+   Client selects Node3 (lowest load)
+
+5. Inference Request:
+   Client ──► Node3: /generate ──► Generated Text Response
 ```
 
 ### 3. DHT Key Distribution
 
 ```
-DHT Storage Keys:
+DHT Storage Structure:
+
 ┌─────────────────────────────────────────────────────────────┐
 │ Key: "model:llama-7b"                                       │
 │ Value: [                                                    │
@@ -543,133 +549,239 @@ DHT Storage Keys:
 
 ### 4. Client Request Flow
 
-```mermaid
-graph LR
-    A[Client Request] --> B{Select API Mode}
-    B -->|LlamaNet| C[Native API]
-    B -->|OpenAI| D[OpenAI Compatible]
-    
-    C --> E[DHT Discovery]
-    D --> E
-    
-    E --> F[Node Selection]
-    F --> G{Load Balancing}
-    G -->|Lowest Load| H[Selected Node]
-    G -->|Failover| I[Backup Node]
-    
-    H --> J[HTTP Request]
-    I --> J
-    J --> K[LLM Inference]
-    K --> L[Response]
-    
-    style A fill:#e8f5e8
-    style H fill:#fff2cc
-    style K fill:#ffe6cc
-    style L fill:#e1f5fe
+```
+                    Client Request Processing Flow
+
+    ┌─────────────┐
+    │   Client    │
+    │   Request   │
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │ Select API  │
+    │    Mode     │ ──► LlamaNet API (/generate)
+    └──────┬──────┘ ──► OpenAI API (/v1/chat/completions)
+           │
+           ▼
+    ┌─────────────┐
+    │ DHT Node    │
+    │ Discovery   │ ──► Query: "model:llama" or "all_nodes"
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │ Node        │
+    │ Selection   │ ──► Load Balancing (lowest load)
+    └──────┬──────┘ ──► Health Check (/status)
+           │
+           ▼
+    ┌─────────────┐
+    │ HTTP        │
+    │ Request     │ ──► POST /generate or /v1/chat/completions
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │ LLM         │
+    │ Inference   │ ──► llama.cpp processing
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │ Response    │
+    │ Formatting  │ ──► LlamaNet or OpenAI format
+    └─────────────┘
 ```
 
 ### 5. Network Topology Example
 
 ```
+                    LlamaNet Network Topology
+                           
                     Internet/Local Network
                            │
         ┌──────────────────┼──────────────────┐
         │                  │                  │
    ┌────▼────┐        ┌────▼────┐        ┌────▼────┐
    │ Node A  │◄──────►│ Node B  │◄──────►│ Node C  │
-   │ :8000   │   DHT  │ :8002   │   DHT  │ :8004   │
+   │ HTTP:   │   DHT  │ HTTP:   │   DHT  │ HTTP:   │
+   │ :8000   │ Gossip │ :8002   │ Gossip │ :8004   │
+   │ DHT:    │        │ DHT:    │        │ DHT:    │
    │ :8001   │        │ :8003   │        │ :8005   │
    └─────────┘        └─────────┘        └─────────┘
         ▲                  ▲                  ▲
-        │ HTTP             │ HTTP             │ HTTP
+        │ HTTP API         │ HTTP API         │ HTTP API
         │                  │                  │
    ┌────▼────┐        ┌────▼────┐        ┌────▼────┐
    │Client 1 │        │Client 2 │        │Web UI   │
-   │         │        │         │        │         │
+   │Python   │        │OpenAI   │        │Browser  │
+   │API      │        │Library  │        │         │
    └─────────┘        └─────────┘        └─────────┘
 
 Legend:
-- HTTP Ports: 8000, 8002, 8004 (Inference API)
-- DHT Ports:  8001, 8003, 8005 (Node Discovery)
-- DHT: Kademlia protocol connections
+━━━ HTTP API Connections (Inference)
+◄─► DHT Protocol Connections (Discovery)
 ```
 
 ### 6. OpenAI API Compatibility Layer
 
-```mermaid
-graph TD
-    A[OpenAI Client] --> B[/v1/chat/completions]
-    A --> C[/v1/completions]
-    A --> D[/v1/models]
-    
-    B --> E[Message Conversion]
-    C --> F[Prompt Processing]
-    D --> G[Model Listing]
-    
-    E --> H[LlamaNet Core]
-    F --> H
-    G --> H
-    
-    H --> I[DHT Discovery]
-    I --> J[Node Selection]
-    J --> K[llama.cpp Inference]
-    K --> L[Response Formatting]
-    
-    L --> M[OpenAI Format]
-    M --> A
-    
-    style A fill:#e3f2fd
-    style H fill:#f3e5f5
-    style K fill:#fff3e0
-    style M fill:#e8f5e8
+```
+                OpenAI Compatibility Architecture
+
+    ┌─────────────────┐
+    │   OpenAI        │
+    │   Client        │ ──► Uses standard OpenAI library
+    │   Application   │
+    └─────────┬───────┘
+              │
+              ▼
+    ┌─────────────────┐
+    │ LlamaNet        │
+    │ Compatibility   │ ──► /v1/models
+    │ Endpoints       │ ──► /v1/completions  
+    └─────────┬───────┘ ──► /v1/chat/completions
+              │
+              ▼
+    ┌─────────────────┐
+    │ Request         │
+    │ Translation     │ ──► OpenAI format → LlamaNet format
+    └─────────┬───────┘
+              │
+              ▼
+    ┌─────────────────┐
+    │ LlamaNet        │
+    │ Core Engine     │ ──► DHT Discovery
+    └─────────┬───────┘ ──► Node Selection
+              │         ──► Load Balancing
+              ▼
+    ┌─────────────────┐
+    │ llama.cpp       │
+    │ Inference       │ ──► Model Processing
+    └─────────┬───────┘ ──► Text Generation
+              │
+              ▼
+    ┌─────────────────┐
+    │ Response        │
+    │ Translation     │ ──► LlamaNet format → OpenAI format
+    └─────────────────┘
 ```
 
 ### 7. Web UI Architecture
 
-```mermaid
-graph TB
-    A[Web Browser] --> B[Static Files]
-    B --> C[Bootstrap CSS]
-    B --> D[Custom CSS]
-    B --> E[JavaScript App]
-    
-    E --> F[Network Monitor]
-    E --> G[Chat Interface]
-    E --> H[API Selector]
-    
-    F --> I[/dht/status]
-    G --> J{API Mode}
-    J -->|LlamaNet| K[/generate]
-    J -->|OpenAI| L[/v1/chat/completions]
-    
-    I --> M[DHT Network Info]
-    K --> N[Native Response]
-    L --> O[OpenAI Response]
-    
-    N --> P[Markdown Rendering]
-    O --> P
-    P --> Q[Chat Display]
-    
-    style A fill:#e1f5fe
-    style E fill:#f3e5f5
-    style P fill:#fff3e0
-    style Q fill:#e8f5e8
+```
+                    Web UI Component Architecture
+
+    ┌─────────────────┐
+    │   Web Browser   │
+    └─────────┬───────┘
+              │ HTTP Request
+              ▼
+    ┌─────────────────┐
+    │ Static Files    │
+    │ Server          │ ──► Bootstrap CSS
+    └─────────┬───────┘ ──► Font Awesome Icons
+              │         ──► Custom CSS
+              ▼         ──► JavaScript App
+    ┌─────────────────┐
+    │ JavaScript      │
+    │ Application     │ ──► Network Monitor
+    └─────────┬───────┘ ──► Chat Interface
+              │         ──► API Mode Selector
+              ▼
+    ┌─────────────────┐
+    │ Backend API     │
+    │ Endpoints       │ ──► /dht/status (Network Info)
+    └─────────┬───────┘ ──► /generate (LlamaNet)
+              │         ──► /v1/chat/completions (OpenAI)
+              ▼
+    ┌─────────────────┐
+    │ Response        │
+    │ Processing      │ ──► Markdown Rendering
+    └─────────┬───────┘ ──► Syntax Highlighting
+              │         ──► Chat Display
+              ▼
+    ┌─────────────────┐
+    │ User Interface  │
+    │ Updates         │ ──► Real-time Chat
+    └─────────────────┘ ──► Network Status
+                        ──► Performance Metrics
 ```
 
 ### 8. Data Flow Summary
 
 ```
+                    End-to-End Data Flow
+
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │   Client    │───►│ DHT Network │───►│ Node Select │───►│ Inference   │
 │             │    │             │    │             │    │             │
 │ • Web UI    │    │ • Discovery │    │ • Load Bal. │    │ • llama.cpp │
 │ • API Call  │    │ • Routing   │    │ • Failover  │    │ • Generate  │
 │ • OpenAI    │    │ • Storage   │    │ • Health    │    │ • Response  │
+│ • Python    │    │ • Gossip    │    │ • Metrics   │    │ • Tokens    │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
        ▲                                                         │
-       │                                                         │
+       │                    Response Flow                        │
        └─────────────────────────────────────────────────────────┘
-                           Response Flow
+                           
+Request Types:
+• Text Generation    • Chat Completion    • Model Listing
+• Node Discovery     • Health Checks      • Status Updates
+```
+
+### 9. Component Interaction Flow
+
+```
+Node Startup Sequence:
+┌─────────────────┐
+│ 1. Load Config  │ ──► Parse CLI args & environment
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 2. Init LLM     │ ──► Load GGUF model with llama.cpp
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 3. Start DHT    │ ──► Create Kademlia node
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 4. Join Network │ ──► Connect to bootstrap nodes
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 5. HTTP Server  │ ──► Serve API & Web UI
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 6. Publish Info │ ──► Announce to DHT every 10s
+└─────────────────┘
+
+Client Discovery Process:
+┌─────────────────┐
+│ 1. DHT Client   │ ──► Initialize Kademlia client
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 2. Query Net    │ ──► Search by model or all nodes
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 3. Health Check │ ──► Verify availability & performance
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 4. Load Balance │ ──► Select optimal node
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 5. Send Request │ ──► HTTP call to selected node
+└─────────┬───────┘
+          ▼
+┌─────────────────┐
+│ 6. Handle Resp  │ ──► Process result or failover
+└─────────────────┘
 ```
 
 ### Network Formation
