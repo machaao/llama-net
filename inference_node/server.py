@@ -2,8 +2,10 @@ import asyncio
 import time
 import uuid
 import uvicorn
+import os
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse, FileResponse
 from typing import Dict, Any, Union, List
 from contextlib import asynccontextmanager
 import json
@@ -63,6 +65,26 @@ async def lifespan(app: FastAPI):
         await dht_publisher.stop()
 
 app = FastAPI(title="LlamaNet Inference Node", lifespan=lifespan)
+
+# Serve static files
+static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Web UI endpoint
+@app.get("/")
+async def web_ui():
+    """Serve the web UI"""
+    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+    index_path = os.path.join(static_dir, "index.html")
+    
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    else:
+        return {"message": "LlamaNet Inference Node", "web_ui": "Not available", "endpoints": {
+            "llamanet": ["/generate", "/status", "/info", "/health"],
+            "openai": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
+        }}
 
 # Original LlamaNet endpoints
 @app.post("/generate", response_model=GenerationResponse)
