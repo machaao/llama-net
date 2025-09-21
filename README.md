@@ -1053,19 +1053,6 @@ LlamaNet's decentralized architecture with streaming support makes it ideal for:
 
 MIT License - see LICENSE file for details.
 
-## Roadmap
-
-- [x] **Real-time streaming** for both LlamaNet and OpenAI APIs
-- [x] **Interactive web UI** with streaming support
-- [x] **Functional programming** streaming implementation
-- [ ] **WebSocket streaming** alternative to SSE
-- [ ] **Advanced streaming features** (token-by-token control)
-- [ ] **Multi-model support** per node
-- [ ] **Authentication and rate limiting**
-- [ ] **Mobile-responsive web UI**
-- [ ] **Distributed model loading**
-- [ ] **Auto-scaling based on demand**
-
 ---
 
 ## Made with ❤️ using MACH-AI
