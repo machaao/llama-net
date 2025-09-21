@@ -342,6 +342,21 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 - Token counting is approximate and may differ from OpenAI's implementation
 - Streaming responses are not yet implemented but planned for future releases
 
+---
+
+## Made with ❤️ using MACH-AI
+
+This project was built with love using [MACH-AI](https://machaao.com), an AI-powered development platform that enables rapid creation of production-scale applications. MACH-AI helped accelerate the development of LlamaNet's distributed architecture, OpenAI-compatible APIs, and web interface.
+
+**Key features developed with MACH-AI:**
+- 🌐 Decentralized DHT-based node discovery
+- 🤖 OpenAI-compatible API endpoints
+- 💻 Interactive web UI with real-time updates
+- 🔄 Real-time network monitoring
+- 📊 Performance metrics and health checks
+
+Learn more about building AI-powered applications at [machaao.com](https://machaao.com)
+
 ## License
 
 MIT
