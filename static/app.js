@@ -147,11 +147,12 @@ class LlamaNetUI {
         // Add user message to chat
         this.addMessageToChat('user', message);
         
-        // Get API mode
+        // Get API mode - this determines which endpoint to use
         const apiMode = document.querySelector('input[name="apiMode"]:checked').value;
         
         try {
             let response;
+            // Only call the endpoint that matches the selected API mode
             if (apiMode === 'openai') {
                 response = await this.sendOpenAIMessage(message);
             } else {
@@ -175,6 +176,7 @@ class LlamaNetUI {
     async sendLlamaNetMessage(message) {
         const maxTokens = parseInt(document.getElementById('max-tokens').value) || 150;
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
+        const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
         
         const request = {
             prompt: message,
@@ -182,13 +184,11 @@ class LlamaNetUI {
             temperature: temperature
         };
 
-        // Check if streaming is enabled
-        const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
-        
         if (streamingEnabled) {
+            // Use LlamaNet streaming endpoint
             return await this.sendStreamingMessage(request);
         } else {
-            // Keep existing non-streaming logic
+            // Use LlamaNet non-streaming endpoint
             const response = await fetch(`${this.baseUrl}/generate`, {
                 method: 'POST',
                 headers: {
@@ -327,9 +327,10 @@ class LlamaNetUI {
         };
 
         if (streamingEnabled) {
+            // Use OpenAI streaming endpoint
             return await this.sendOpenAIStreamingMessage(requestBody);
         } else {
-            // Keep existing non-streaming logic
+            // Use OpenAI non-streaming endpoint
             const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
                 method: 'POST',
                 headers: {
