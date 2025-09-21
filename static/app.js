@@ -4,6 +4,7 @@ class LlamaNetUI {
         this.nodes = [];
         this.selectedNode = null;
         this.chatHistory = [];
+        this.streamUI = new StreamUI(this.baseUrl);
         
         this.init();
     }
@@ -175,32 +176,127 @@ class LlamaNetUI {
         const maxTokens = parseInt(document.getElementById('max-tokens').value) || 150;
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
         
-        const response = await fetch(`${this.baseUrl}/generate`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                prompt: message,
-                max_tokens: maxTokens,
-                temperature: temperature
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        return {
-            text: data.text,
-            metadata: {
-                node_id: data.node_id,
-                tokens: data.tokens_generated,
-                time: data.generation_time,
-                api: 'LlamaNet'
-            }
+        const request = {
+            prompt: message,
+            max_tokens: maxTokens,
+            temperature: temperature
         };
+
+        // Check if streaming is enabled
+        const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
+        
+        if (streamingEnabled) {
+            return await this.sendStreamingMessage(request);
+        } else {
+            // Keep existing non-streaming logic
+            const response = await fetch(`${this.baseUrl}/generate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(request)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            return {
+                text: data.text,
+                metadata: {
+                    node_id: data.node_id,
+                    tokens: data.tokens_generated,
+                    time: data.generation_time,
+                    api: 'LlamaNet'
+                }
+            };
+        }
+    }
+
+    async sendStreamingMessage(request) {
+        return new Promise((resolve, reject) => {
+            let currentMessageDiv = null;
+            let currentBubbleDiv = null;
+            let accumulatedText = '';
+            
+            // Create initial message bubble
+            const chatContainer = document.getElementById('chat-messages');
+            currentMessageDiv = document.createElement('div');
+            currentMessageDiv.className = 'message assistant';
+            
+            currentBubbleDiv = document.createElement('div');
+            currentBubbleDiv.className = 'message-bubble';
+            currentBubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><span class="streaming-text"></span><span class="streaming-cursor">▋</span>';
+            
+            currentMessageDiv.appendChild(currentBubbleDiv);
+            chatContainer.appendChild(currentMessageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            // Remove welcome message if it exists
+            const welcomeMsg = chatContainer.querySelector('.text-center.text-muted');
+            if (welcomeMsg) {
+                welcomeMsg.remove();
+            }
+            
+            this.streamUI.startStream(
+                request,
+                // onToken callback
+                (data) => {
+                    accumulatedText = data.accumulatedText;
+                    const textSpan = currentBubbleDiv.querySelector('.streaming-text');
+                    if (textSpan) {
+                        textSpan.textContent = accumulatedText;
+                    }
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                },
+                // onComplete callback
+                (data) => {
+                    // Remove streaming cursor
+                    const cursor = currentBubbleDiv.querySelector('.streaming-cursor');
+                    if (cursor) {
+                        cursor.remove();
+                    }
+                    
+                    // Add metadata
+                    const metadataHtml = `<div class="message-meta">Node: ${data.nodeId.substring(0, 8)}... • Tokens: ${data.tokensGenerated} • Time: ${data.generationTime.toFixed(2)}s • API: LlamaNet (Streaming)</div>`;
+                    currentMessageDiv.insertAdjacentHTML('beforeend', metadataHtml);
+                    
+                    // Store in chat history
+                    this.chatHistory.push({ 
+                        role: 'assistant', 
+                        content: accumulatedText, 
+                        timestamp: Date.now() 
+                    });
+                    
+                    resolve({
+                        text: accumulatedText,
+                        metadata: {
+                            node_id: data.nodeId,
+                            tokens: data.tokensGenerated,
+                            time: data.generationTime,
+                            api: 'LlamaNet (Streaming)'
+                        }
+                    });
+                },
+                // onError callback
+                (error) => {
+                    // Remove streaming cursor and show error
+                    const cursor = currentBubbleDiv.querySelector('.streaming-cursor');
+                    if (cursor) {
+                        cursor.remove();
+                    }
+                    
+                    const textSpan = currentBubbleDiv.querySelector('.streaming-text');
+                    if (textSpan) {
+                        textSpan.textContent = accumulatedText + ' [Error: ' + error.message + ']';
+                        textSpan.style.color = 'red';
+                    }
+                    
+                    reject(error);
+                }
+            );
+        });
     }
     
     async sendOpenAIMessage(message) {

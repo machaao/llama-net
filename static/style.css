@@ -168,3 +168,45 @@ pre {
     border-radius: 0.25rem;
     border: 1px solid #dee2e6;
 }
+
+/* Streaming-specific styles */
+.streaming-cursor {
+    animation: blink 1s infinite;
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.streaming-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.message.assistant .message-bubble.streaming {
+    border-left: 3px solid var(--primary-color);
+}
+
+.form-check-input:checked {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.streaming-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--success-color);
+    animation: pulse 1.5s infinite;
+    margin-right: 0.5rem;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.1); }
+    100% { opacity: 1; transform: scale(1); }
+}

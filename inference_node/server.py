@@ -117,6 +117,50 @@ async def generate(request: GenerationRequest):
         logger.error(f"Generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/generate/stream")
+async def generate_stream(request: GenerationRequest):
+    """Generate text with streaming support"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    async def stream_generator():
+        try:
+            async for chunk in llm.generate_stream_async(
+                prompt=request.prompt,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k,
+                stop=request.stop,
+                repeat_penalty=request.repeat_penalty
+            ):
+                # Format as Server-Sent Events
+                data = {
+                    "text": chunk["text"],
+                    "accumulated_text": chunk["accumulated_text"],
+                    "tokens_generated": chunk["tokens_generated"],
+                    "generation_time": chunk["generation_time"],
+                    "finished": chunk["finished"],
+                    "node_id": config.node_id
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+                
+                if chunk["finished"]:
+                    break
+        except Exception as e:
+            error_data = {"error": str(e), "finished": True}
+            yield f"data: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/plain; charset=utf-8"
+        }
+    )
+
 # OpenAI-compatible endpoints
 @app.get("/v1/models")
 async def list_models():
