@@ -241,6 +241,212 @@ LlamaNet uses a **Kademlia Distributed Hash Table (DHT)** for node discovery:
 4. **Fault Tolerance**: Network continues operating even if nodes leave
 5. **Scalability**: Logarithmic lookup time O(log n) for node discovery
 
+## System Architecture Diagrams
+
+### 1. Network Formation Flow
+
+```mermaid
+graph TD
+    A[Bootstrap Node] -->|Starts DHT| B[DHT Network]
+    C[Node 1] -->|Joins via Bootstrap| B
+    D[Node 2] -->|Joins via Bootstrap| B
+    E[Node 3] -->|Joins via Node 1| B
+    
+    B --> F[Distributed Hash Table]
+    F --> G[Key: model:llama-7b]
+    F --> H[Key: node:abc123...]
+    F --> I[Key: all_nodes]
+    
+    style A fill:#e1f5fe
+    style B fill:#f3e5f5
+    style F fill:#fff3e0
+```
+
+### 2. Node Discovery Process
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant DHT as DHT Network
+    participant N1 as Node 1
+    participant N2 as Node 2
+    participant N3 as Node 3
+
+    C->>DHT: Query "model:llama-7b"
+    DHT->>C: Return [Node1, Node2, Node3]
+    
+    C->>N1: Check load/health
+    N1->>C: Load: 0.3, TPS: 15.2
+    
+    C->>N2: Check load/health
+    N2->>C: Load: 0.7, TPS: 12.1
+    
+    C->>N3: Check load/health
+    N3->>C: Load: 0.1, TPS: 18.5
+    
+    Note over C: Select Node 3 (lowest load)
+    C->>N3: Send inference request
+    N3->>C: Return generated text
+```
+
+### 3. DHT Key Distribution
+
+```
+DHT Storage Keys:
+┌─────────────────────────────────────────────────────────────┐
+│ Key: "model:llama-7b"                                       │
+│ Value: [                                                    │
+│   {node_id: "abc123", ip: "192.168.1.10", port: 8000},    │
+│   {node_id: "def456", ip: "192.168.1.11", port: 8000},    │
+│   {node_id: "ghi789", ip: "192.168.1.12", port: 8000}     │
+│ ]                                                           │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ Key: "node:abc123"                                          │
+│ Value: {                                                    │
+│   node_id: "abc123", ip: "192.168.1.10", port: 8000,     │
+│   model: "llama-7b", load: 0.3, tps: 15.2, uptime: 3600  │
+│ }                                                           │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ Key: "all_nodes"                                            │
+│ Value: [All active nodes regardless of model]              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4. Client Request Flow
+
+```mermaid
+graph LR
+    A[Client Request] --> B{Select API Mode}
+    B -->|LlamaNet| C[Native API]
+    B -->|OpenAI| D[OpenAI Compatible]
+    
+    C --> E[DHT Discovery]
+    D --> E
+    
+    E --> F[Node Selection]
+    F --> G{Load Balancing}
+    G -->|Lowest Load| H[Selected Node]
+    G -->|Failover| I[Backup Node]
+    
+    H --> J[HTTP Request]
+    I --> J
+    J --> K[LLM Inference]
+    K --> L[Response]
+    
+    style A fill:#e8f5e8
+    style H fill:#fff2cc
+    style K fill:#ffe6cc
+    style L fill:#e1f5fe
+```
+
+### 5. Network Topology Example
+
+```
+                    Internet/Local Network
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+   ┌────▼────┐        ┌────▼────┐        ┌────▼────┐
+   │ Node A  │◄──────►│ Node B  │◄──────►│ Node C  │
+   │ :8000   │   DHT  │ :8002   │   DHT  │ :8004   │
+   │ :8001   │        │ :8003   │        │ :8005   │
+   └─────────┘        └─────────┘        └─────────┘
+        ▲                  ▲                  ▲
+        │ HTTP             │ HTTP             │ HTTP
+        │                  │                  │
+   ┌────▼────┐        ┌────▼────┐        ┌────▼────┐
+   │Client 1 │        │Client 2 │        │Web UI   │
+   │         │        │         │        │         │
+   └─────────┘        └─────────┘        └─────────┘
+
+Legend:
+- HTTP Ports: 8000, 8002, 8004 (Inference API)
+- DHT Ports:  8001, 8003, 8005 (Node Discovery)
+- DHT: Kademlia protocol connections
+```
+
+### 6. OpenAI API Compatibility Layer
+
+```mermaid
+graph TD
+    A[OpenAI Client] --> B[/v1/chat/completions]
+    A --> C[/v1/completions]
+    A --> D[/v1/models]
+    
+    B --> E[Message Conversion]
+    C --> F[Prompt Processing]
+    D --> G[Model Listing]
+    
+    E --> H[LlamaNet Core]
+    F --> H
+    G --> H
+    
+    H --> I[DHT Discovery]
+    I --> J[Node Selection]
+    J --> K[llama.cpp Inference]
+    K --> L[Response Formatting]
+    
+    L --> M[OpenAI Format]
+    M --> A
+    
+    style A fill:#e3f2fd
+    style H fill:#f3e5f5
+    style K fill:#fff3e0
+    style M fill:#e8f5e8
+```
+
+### 7. Web UI Architecture
+
+```mermaid
+graph TB
+    A[Web Browser] --> B[Static Files]
+    B --> C[Bootstrap CSS]
+    B --> D[Custom CSS]
+    B --> E[JavaScript App]
+    
+    E --> F[Network Monitor]
+    E --> G[Chat Interface]
+    E --> H[API Selector]
+    
+    F --> I[/dht/status]
+    G --> J{API Mode}
+    J -->|LlamaNet| K[/generate]
+    J -->|OpenAI| L[/v1/chat/completions]
+    
+    I --> M[DHT Network Info]
+    K --> N[Native Response]
+    L --> O[OpenAI Response]
+    
+    N --> P[Markdown Rendering]
+    O --> P
+    P --> Q[Chat Display]
+    
+    style A fill:#e1f5fe
+    style E fill:#f3e5f5
+    style P fill:#fff3e0
+    style Q fill:#e8f5e8
+```
+
+### 8. Data Flow Summary
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Client    │───►│ DHT Network │───►│ Node Select │───►│ Inference   │
+│             │    │             │    │             │    │             │
+│ • Web UI    │    │ • Discovery │    │ • Load Bal. │    │ • llama.cpp │
+│ • API Call  │    │ • Routing   │    │ • Failover  │    │ • Generate  │
+│ • OpenAI    │    │ • Storage   │    │ • Health    │    │ • Response  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+       ▲                                                         │
+       │                                                         │
+       └─────────────────────────────────────────────────────────┘
+                           Response Flow
+```
+
 ### Network Formation
 
 ```
@@ -254,6 +460,35 @@ Bootstrap Node (8001) ← Node 1 (8003) ← Node 2 (8005)
 - `model:{model_name}` - Find nodes serving specific models
 - `node:{node_id}` - Find specific nodes by ID  
 - `all_nodes` - Discover any available nodes
+
+## Component Interaction Flow
+
+### 1. Node Startup Sequence
+1. **Load Configuration** - Parse CLI args and environment variables
+2. **Initialize LLM** - Load GGUF model with llama.cpp
+3. **Start DHT Node** - Create Kademlia node on available port
+4. **Join Network** - Connect to bootstrap nodes if specified
+5. **Start HTTP Server** - Serve inference API and web UI
+6. **Begin Publishing** - Announce availability to DHT every 10 seconds
+
+### 2. Client Discovery Process
+1. **Create DHT Client** - Initialize Kademlia client
+2. **Query Network** - Search for nodes by model or all nodes
+3. **Health Check** - Verify node availability and performance
+4. **Load Balancing** - Select optimal node based on load/TPS
+5. **Send Request** - Make HTTP call to selected node
+6. **Handle Response** - Process result or failover to backup node
+
+### 3. Request Processing Pipeline
+1. **Receive Request** - HTTP endpoint receives generation request
+2. **Validate Input** - Check prompt, parameters, and format
+3. **Queue Processing** - Add to inference queue if needed
+4. **LLM Generation** - Call llama.cpp with specified parameters
+5. **Format Response** - Convert to LlamaNet or OpenAI format
+6. **Update Metrics** - Track tokens, timing, and load statistics
+7. **Return Result** - Send formatted response to client
+
+This architecture ensures **high availability**, **automatic scaling**, and **fault tolerance** while maintaining **compatibility** with existing OpenAI-based applications.
 
 ## Troubleshooting
 
