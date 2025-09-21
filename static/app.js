@@ -159,9 +159,12 @@ class LlamaNetUI {
                 response = await this.sendLlamaNetMessage(message);
             }
             
-            if (response) {
+            // Only add to chat if response exists and it's not from streaming
+            // (streaming methods handle their own UI updates)
+            const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
+            if (response && !streamingEnabled) {
                 this.addMessageToChat('assistant', response.text, response.metadata);
-            } else {
+            } else if (!response && !streamingEnabled) {
                 this.addMessageToChat('system', 'Failed to get response from the network');
             }
         } catch (error) {
@@ -276,7 +279,8 @@ class LlamaNetUI {
                             tokens: data.tokensGenerated,
                             time: data.generationTime,
                             api: 'LlamaNet (Streaming)'
-                        }
+                        },
+                        isStreaming: true // Flag to indicate this was handled by streaming
                     });
                 },
                 // onError callback
@@ -443,7 +447,8 @@ class LlamaNetUI {
                 id: streamState.responseId,
                 tokens: streamState.totalTokens,
                 api: 'OpenAI Compatible (Streaming)'
-            }
+            },
+            isStreaming: true // Flag to indicate this was handled by streaming
         });
     }
 
