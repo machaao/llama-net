@@ -383,21 +383,6 @@ The server implements streaming via:
 - **OpenAI-compatible format** for existing client compatibility
 - **Functional programming patterns** avoiding blocking loops
 
-### Stream Formats
-
-**LlamaNet Native Format:**
-```json
-data: {"text": "Hello", "accumulated_text": "Hello", "tokens_generated": 1, "finished": false}
-data: {"text": " world", "accumulated_text": "Hello world", "tokens_generated": 2, "finished": true}
-```
-
-**OpenAI Compatible Format:**
-```json
-data: {"choices": [{"delta": {"content": "Hello"}, "finish_reason": null}]}
-data: {"choices": [{"delta": {"content": " world"}, "finish_reason": "stop"}]}
-data: [DONE]
-```
-
 ## Use Cases & Scenarios
 
 LlamaNet's decentralized architecture makes it ideal for various scenarios where traditional centralized AI services fall short. Here are key use cases where LlamaNet provides significant advantages:
