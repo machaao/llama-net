@@ -302,6 +302,7 @@ class LlamaNetUI {
     async sendOpenAIMessage(message) {
         const maxTokens = parseInt(document.getElementById('max-tokens').value) || 150;
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
+        const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
         
         // Build chat history for context
         const messages = [
@@ -310,41 +311,259 @@ class LlamaNetUI {
         
         // Add recent chat history (last 5 exchanges)
         const recentHistory = this.chatHistory.slice(-10);
-        for (const msg of recentHistory) {
-            if (msg.role === 'user' || msg.role === 'assistant') {
-                messages.push({ role: msg.role, content: msg.content });
-            }
-        }
+        recentHistory
+            .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+            .forEach(msg => messages.push({ role: msg.role, content: msg.content }));
         
         // Add current message
         messages.push({ role: 'user', content: message });
         
-        const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'llamanet',
-                messages: messages,
-                max_tokens: maxTokens,
-                temperature: temperature
-            })
+        const requestBody = {
+            model: 'llamanet',
+            messages: messages,
+            max_tokens: maxTokens,
+            temperature: temperature,
+            stream: streamingEnabled
+        };
+
+        if (streamingEnabled) {
+            return await this.sendOpenAIStreamingMessage(requestBody);
+        } else {
+            // Keep existing non-streaming logic
+            const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            return {
+                text: data.choices[0].message.content,
+                metadata: {
+                    id: data.id,
+                    tokens: data.usage.total_tokens,
+                    api: 'OpenAI Compatible'
+                }
+            };
+        }
+    }
+
+    async sendOpenAIStreamingMessage(requestBody) {
+        return new Promise((resolve, reject) => {
+            const streamState = {
+                accumulatedText: '',
+                responseId: '',
+                totalTokens: 0,
+                messageDiv: null,
+                bubbleDiv: null
+            };
+            
+            // Initialize UI
+            this.initializeStreamingUI(streamState);
+            
+            // Define event handlers as a map
+            const handlers = new Map([
+                ['token', (data) => this.handleOpenAIToken(data, streamState)],
+                ['complete', () => this.handleOpenAIComplete(streamState, resolve)],
+                ['error', (error) => this.handleOpenAIError(error, streamState, reject)]
+            ]);
+            
+            // Start streaming with functional approach
+            this.processOpenAIStream(requestBody, handlers);
         });
+    }
+
+    initializeStreamingUI(streamState) {
+        const chatContainer = document.getElementById('chat-messages');
         
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        streamState.messageDiv = document.createElement('div');
+        streamState.messageDiv.className = 'message assistant';
+        
+        streamState.bubbleDiv = document.createElement('div');
+        streamState.bubbleDiv.className = 'message-bubble';
+        streamState.bubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><span class="streaming-text"></span><span class="streaming-cursor">▋</span>';
+        
+        streamState.messageDiv.appendChild(streamState.bubbleDiv);
+        chatContainer.appendChild(streamState.messageDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        
+        // Remove welcome message if it exists
+        const welcomeMsg = chatContainer.querySelector('.text-center.text-muted');
+        if (welcomeMsg) {
+            welcomeMsg.remove();
+        }
+    }
+
+    handleOpenAIToken(data, streamState) {
+        if (data.content) {
+            streamState.accumulatedText += data.content;
+            const textSpan = streamState.bubbleDiv.querySelector('.streaming-text');
+            if (textSpan) {
+                textSpan.textContent = streamState.accumulatedText;
+            }
+            document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
         }
         
-        const data = await response.json();
-        return {
-            text: data.choices[0].message.content,
+        if (data.id) {
+            streamState.responseId = data.id;
+        }
+    }
+
+    handleOpenAIComplete(streamState, resolve) {
+        // Remove streaming cursor
+        const cursor = streamState.bubbleDiv.querySelector('.streaming-cursor');
+        if (cursor) {
+            cursor.remove();
+        }
+        
+        // Estimate tokens (rough approximation)
+        streamState.totalTokens = Math.ceil(streamState.accumulatedText.split(' ').length * 1.3);
+        
+        // Add metadata
+        const metadataHtml = `<div class="message-meta">ID: ${streamState.responseId.substring(0, 8)}... • Tokens: ~${streamState.totalTokens} • API: OpenAI Compatible (Streaming)</div>`;
+        streamState.messageDiv.insertAdjacentHTML('beforeend', metadataHtml);
+        
+        // Store in chat history
+        this.chatHistory.push({ 
+            role: 'assistant', 
+            content: streamState.accumulatedText, 
+            timestamp: Date.now() 
+        });
+        
+        resolve({
+            text: streamState.accumulatedText,
             metadata: {
-                id: data.id,
-                tokens: data.usage.total_tokens,
-                api: 'OpenAI Compatible'
+                id: streamState.responseId,
+                tokens: streamState.totalTokens,
+                api: 'OpenAI Compatible (Streaming)'
             }
-        };
+        });
+    }
+
+    handleOpenAIError(error, streamState, reject) {
+        // Remove streaming cursor and show error
+        const cursor = streamState.bubbleDiv.querySelector('.streaming-cursor');
+        if (cursor) {
+            cursor.remove();
+        }
+        
+        const textSpan = streamState.bubbleDiv.querySelector('.streaming-text');
+        if (textSpan) {
+            textSpan.textContent = streamState.accumulatedText + ' [Error: ' + error.message + ']';
+            textSpan.style.color = 'red';
+        }
+        
+        reject(error);
+    }
+
+    async processOpenAIStream(requestBody, handlers) {
+        try {
+            const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            // Create async iterator for stream processing
+            const streamProcessor = this.createOpenAIStreamProcessor(response.body);
+            
+            // Process chunks functionally
+            await this.processStreamChunks(streamProcessor, handlers);
+            
+        } catch (error) {
+            console.error('OpenAI streaming error:', error);
+            handlers.get('error')(error);
+        }
+    }
+
+    async* createOpenAIStreamProcessor(body) {
+        const reader = body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+            const processChunk = async () => {
+                const { done, value } = await reader.read();
+                if (done) return null;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                return lines.filter(line => line.startsWith('data: ')).map(line => line.slice(6).trim()).filter(data => data && data !== '[DONE]');
+            };
+
+            let chunk;
+            while ((chunk = await processChunk()) !== null) {
+                yield* chunk.map(data => {
+                    try {
+                        return JSON.parse(data);
+                    } catch (error) {
+                        console.warn('Failed to parse OpenAI stream chunk:', data);
+                        return null;
+                    }
+                }).filter(parsed => parsed !== null);
+            }
+        } finally {
+            reader.releaseLock();
+        }
+    }
+
+    async processStreamChunks(streamProcessor, handlers) {
+        const tokenHandler = handlers.get('token');
+        const completeHandler = handlers.get('complete');
+        
+        try {
+            for await (const chunk of streamProcessor) {
+                const processedData = this.processOpenAIChunk(chunk);
+                if (processedData) {
+                    tokenHandler(processedData);
+                    
+                    if (processedData.finished) {
+                        completeHandler();
+                        break;
+                    }
+                }
+            }
+            
+            // Ensure completion is called if no explicit finish signal
+            completeHandler();
+            
+        } catch (error) {
+            handlers.get('error')(error);
+        }
+    }
+
+    processOpenAIChunk(chunk) {
+        // Handle OpenAI streaming format
+        if (chunk.choices && chunk.choices.length > 0) {
+            const choice = chunk.choices[0];
+            
+            if (choice.delta) {
+                const delta = choice.delta;
+                
+                return {
+                    content: delta.content || '',
+                    role: delta.role || null,
+                    id: chunk.id || '',
+                    finished: choice.finish_reason !== null
+                };
+            }
+        }
+        
+        return null;
     }
     
     addMessageToChat(role, content, metadata = null) {
