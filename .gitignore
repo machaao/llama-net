@@ -37,3 +37,6 @@ models/
 
 # Logs
 *.log
+
+# MACH-AI specific
+plans
