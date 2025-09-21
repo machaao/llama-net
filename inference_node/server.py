@@ -1,4 +1,5 @@
 import asyncio
+import time
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from typing import Dict, Any
@@ -9,6 +10,7 @@ from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo
 from inference_node.dht_publisher import DHTPublisher
+from inference_node.heartbeat import HeartbeatManager
 from common.utils import get_logger
 
 logger = get_logger(__name__)
@@ -18,11 +20,12 @@ config = None
 llm = None
 dht_publisher = None
 system_info = None
+heartbeat_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info
+    global config, llm, dht_publisher, system_info, heartbeat_manager
     
     # Load configuration
     config = InferenceConfig()
@@ -34,6 +37,10 @@ async def lifespan(app: FastAPI):
     # Get system info
     system_info = SystemInfo.get_all_info()
     
+    # Start heartbeat manager
+    heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
+    await heartbeat_manager.start()
+    
     # Start DHT publisher
     dht_publisher = DHTPublisher(config, llm.get_metrics)
     await dht_publisher.start()
@@ -41,6 +48,8 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    if heartbeat_manager:
+        await heartbeat_manager.stop()
     if dht_publisher:
         await dht_publisher.stop()
 
@@ -94,6 +103,23 @@ async def info():
         "system": system_info,
         "dht_port": config.dht_port
     }
+
+@app.get("/health")
+async def health():
+    """Get node health status"""
+    if not heartbeat_manager:
+        raise HTTPException(status_code=503, detail="Heartbeat manager not initialized")
+        
+    health_status = heartbeat_manager.get_health_status()
+    
+    # Add additional health checks
+    health_status.update({
+        "llm_loaded": llm is not None,
+        "dht_running": dht_publisher is not None and dht_publisher.running,
+        "timestamp": time.time()
+    })
+    
+    return health_status
 
 @app.get("/dht/status")
 async def dht_status():

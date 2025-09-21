@@ -1,6 +1,7 @@
 import asyncio
 import time
 import os
+import requests
 from client.dht_discovery import DHTDiscovery
 
 async def monitor_network(bootstrap_nodes="localhost:8001", interval=10):

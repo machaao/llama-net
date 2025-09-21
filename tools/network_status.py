@@ -29,6 +29,7 @@ async def show_network_status(bootstrap_nodes="localhost:8001"):
             
             # Try to get additional info from HTTP API
             try:
+                # Get basic info
                 response = requests.get(f"http://{node.ip}:{node.port}/info", timeout=5)
                 if response.status_code == 200:
                     info = response.json()
@@ -38,6 +39,14 @@ async def show_network_status(bootstrap_nodes="localhost:8001"):
                         print(f"   CPU: {system.get('cpu', 'unknown')}")
                         if system.get('gpu'):
                             print(f"   GPU: {system['gpu']}")
+                
+                # Get health status
+                health_response = requests.get(f"http://{node.ip}:{node.port}/health", timeout=5)
+                if health_response.status_code == 200:
+                    health = health_response.json()
+                    health_icon = "💚" if health.get('healthy', False) else "💔"
+                    print(f"   Health: {health_icon} {'Healthy' if health.get('healthy', False) else 'Unhealthy'}")
+                    
             except:
                 print(f"   Status: HTTP API not reachable")
             

@@ -4,10 +4,11 @@ from typing import List, Optional, Dict, Any, Tuple
 from dht.kademlia_node import KademliaNode
 from common.models import NodeInfo
 from common.utils import get_logger
+from client.discovery import DiscoveryInterface
 
 logger = get_logger(__name__)
 
-class DHTDiscovery:
+class DHTDiscovery(DiscoveryInterface):
     """Client for discovering nodes via Kademlia DHT"""
     
     def __init__(self, bootstrap_nodes: str = "", dht_port: int = 8001):
