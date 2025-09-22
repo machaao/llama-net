@@ -94,8 +94,13 @@ class LlamaNetUI {
                     </div>
                 </div>
                 
-                <div>
-                    <h6><i class="fas fa-users"></i> Available Nodes & Models</h6>
+                <div data-section="nodes">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6><i class="fas fa-users"></i> Available Nodes & Models</h6>
+                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.refreshNodesOnly()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
                     ${this.renderNodesWithModels(nodesData.nodes)}
                 </div>
             `;
@@ -155,15 +160,17 @@ class LlamaNetUI {
                     ${modelNodes.map(node => {
                         const isRecent = (Date.now() / 1000) - node.last_seen < 60;
                         const statusClass = isRecent ? 'online' : 'warning';
+                        const lastSeenText = this.formatLastSeen(node.last_seen);
                         
                         return `
-                            <div class="node-item small ms-2">
+                            <div class="node-item small ms-2" data-node-id="${node.node_id}">
                                 <div class="d-flex align-items-center">
-                                    <span class="node-status ${statusClass}"></span>
+                                    <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
                                     <div class="flex-grow-1">
-                                        <div>${node.node_id.substring(0, 8)}...</div>
+                                        <div class="fw-bold">${node.node_id.substring(0, 8)}...</div>
                                         <div class="text-muted">${node.ip}:${node.port}</div>
                                         <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
+                                        <div class="text-muted small">${lastSeenText}</div>
                                     </div>
                                 </div>
                             </div>
@@ -174,6 +181,89 @@ class LlamaNetUI {
         });
         
         return html;
+    }
+    
+    formatLastSeen(lastSeen) {
+        const now = Date.now() / 1000;
+        const diff = now - lastSeen;
+        
+        if (diff < 60) {
+            return 'Just now';
+        } else if (diff < 3600) {
+            const minutes = Math.floor(diff / 60);
+            return `${minutes}m ago`;
+        } else {
+            const hours = Math.floor(diff / 3600);
+            return `${hours}h ago`;
+        }
+    }
+    
+    async refreshNodesOnly() {
+        try {
+            const container = document.getElementById('network-status');
+            
+            // Show loading state for nodes section only
+            const nodesSection = container.querySelector('[data-section="nodes"]');
+            if (nodesSection) {
+                const header = nodesSection.querySelector('.d-flex');
+                const content = nodesSection.querySelector('.d-flex').nextElementSibling;
+                if (content) {
+                    content.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Refreshing nodes...</div>';
+                }
+            }
+            
+            // Get fresh node data
+            const nodesResponse = await fetch(`${this.baseUrl}/nodes`);
+            const nodesData = await nodesResponse.json();
+            
+            // Update just the nodes section content
+            if (nodesSection) {
+                const header = nodesSection.querySelector('.d-flex');
+                const newContent = this.renderNodesWithModels(nodesData.nodes);
+                nodesSection.innerHTML = header.outerHTML + newContent;
+            }
+            
+            // Show success feedback
+            this.showToast('success', `Found ${nodesData.total_count} active nodes`);
+            
+        } catch (error) {
+            console.error('Error refreshing nodes:', error);
+            this.showToast('error', 'Failed to refresh nodes');
+            
+            // Restore the refresh button on error
+            const nodesSection = document.querySelector('[data-section="nodes"]');
+            if (nodesSection) {
+                const header = `
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6><i class="fas fa-users"></i> Available Nodes & Models</h6>
+                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.refreshNodesOnly()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                `;
+                nodesSection.innerHTML = header + '<div class="text-muted small">Error loading nodes</div>';
+            }
+        }
+    }
+    
+    showToast(type, message) {
+        // Create a simple toast notification
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type === 'success' ? 'success' : 'danger'} position-fixed`;
+        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        toast.innerHTML = `
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'}"></i>
+            ${message}
+            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+        `;
+        document.body.appendChild(toast);
+        
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.remove();
+            }
+        }, 3000);
     }
     
     showNetworkError(message) {
