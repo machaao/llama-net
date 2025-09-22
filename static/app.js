@@ -895,6 +895,15 @@ class LlamaNetUI {
             .trim();
     }
     
+    cleanResponse(text) {
+        // Remove any leaked conversation format
+        return text
+            .replace(/^(Human:|User:|Assistant:)\s*/i, '')
+            .replace(/\n\n(Human:|User:).*$/s, '')
+            .replace(/\n(Human:|User:).*$/s, '')
+            .trim();
+    }
+    
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
