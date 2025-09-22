@@ -1,7 +1,7 @@
 import time
 from typing import Dict, List, Optional, Any, Generator
 from llama_cpp import Llama
-from common.utils import get_logger
+from common.utils import get_logger, normalize_stop_tokens
 from inference_node.config import InferenceConfig
 
 logger = get_logger(__name__)
@@ -40,6 +40,9 @@ class LlamaWrapper:
         
         start_time = time.time()
         
+        # Normalize stop tokens for llama-cpp-python
+        stop_tokens = normalize_stop_tokens(stop)
+        
         # Generate text
         output = self.llm(
             prompt=prompt,
@@ -47,7 +50,7 @@ class LlamaWrapper:
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
-            stop=stop,
+            stop=stop_tokens,
             repeat_penalty=repeat_penalty
         )
         
@@ -76,6 +79,9 @@ class LlamaWrapper:
         self.request_count += 1
         start_time = time.time()
         
+        # Normalize stop tokens for llama-cpp-python
+        stop_tokens = normalize_stop_tokens(stop)
+        
         # Create streaming generator
         stream = self.llm(
             prompt=prompt,
@@ -83,7 +89,7 @@ class LlamaWrapper:
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
-            stop=stop,
+            stop=stop_tokens,
             repeat_penalty=repeat_penalty,
             stream=True  # Enable streaming
         )

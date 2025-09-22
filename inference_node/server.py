@@ -192,13 +192,16 @@ async def create_completion(request: OpenAICompletionRequest):
     else:
         prompt = request.prompt
     
-    # Convert stop to list if it's a string
-    stop = None
+    # Normalize stop tokens for consistent handling
+    stop_tokens = None
     if request.stop:
         if isinstance(request.stop, str):
-            stop = [request.stop]
+            stop_tokens = [request.stop] if request.stop.strip() else None
+        elif isinstance(request.stop, list):
+            stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
+            stop_tokens = stop_tokens if stop_tokens else None
         else:
-            stop = request.stop
+            stop_tokens = None
     
     try:
         # Handle streaming
@@ -211,7 +214,7 @@ async def create_completion(request: OpenAICompletionRequest):
                     max_tokens=request.max_tokens or 100,
                     temperature=request.temperature or 0.7,
                     top_p=request.top_p or 0.9,
-                    stop=stop,
+                    stop=stop_tokens,
                     repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
                 ):
                     yield chunk
@@ -236,7 +239,7 @@ async def create_completion(request: OpenAICompletionRequest):
             max_tokens=request.max_tokens or 100,
             temperature=request.temperature or 0.7,
             top_p=request.top_p or 0.9,
-            stop=stop,
+            stop=stop_tokens,
             repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
         )
         
@@ -287,13 +290,16 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
     
     prompt = "\n".join(prompt_parts) + "\nAssistant:"
     
-    # Convert stop to list if it's a string
-    stop = None
+    # Normalize stop tokens for consistent handling
+    stop_tokens = None
     if request.stop:
         if isinstance(request.stop, str):
-            stop = [request.stop]
+            stop_tokens = [request.stop] if request.stop.strip() else None
+        elif isinstance(request.stop, list):
+            stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
+            stop_tokens = stop_tokens if stop_tokens else None
         else:
-            stop = request.stop
+            stop_tokens = None
     
     try:
         # Handle streaming
@@ -306,7 +312,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
                     max_tokens=request.max_tokens or 100,
                     temperature=request.temperature or 0.7,
                     top_p=request.top_p or 0.9,
-                    stop=stop,
+                    stop=stop_tokens,
                     repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
                 ):
                     yield chunk
@@ -331,7 +337,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
             max_tokens=request.max_tokens or 100,
             temperature=request.temperature or 0.7,
             top_p=request.top_p or 0.9,
-            stop=stop,
+            stop=stop_tokens,
             repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
         )
         

@@ -31,3 +31,16 @@ def get_host_ip() -> str:
     finally:
         s.close()
     return ip
+
+def normalize_stop_tokens(stop):
+    """Normalize stop tokens to the format expected by llama-cpp-python"""
+    if stop is None:
+        return None
+    elif isinstance(stop, str):
+        return [stop] if stop.strip() else None
+    elif isinstance(stop, list):
+        # Filter out empty strings and ensure all items are strings
+        normalized = [str(token).strip() for token in stop if str(token).strip()]
+        return normalized if normalized else None
+    else:
+        return None
