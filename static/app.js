@@ -62,8 +62,12 @@ class LlamaNetUI {
             return;
         }
         
-        // Get current node info
         try {
+            // Get nodes with model information
+            const nodesResponse = await fetch(`${this.baseUrl}/nodes`);
+            const nodesData = await nodesResponse.json();
+            
+            // Get current node info
             const nodeResponse = await fetch(`${this.baseUrl}/info`);
             const nodeInfo = await nodeResponse.json();
             
@@ -84,19 +88,20 @@ class LlamaNetUI {
                 <div class="mb-3">
                     <h6><i class="fas fa-network-wired"></i> DHT Network</h6>
                     <div class="small">
-                        <div>Contacts: ${dhtStatus.contacts_count}</div>
-                        <div>Storage Keys: ${dhtStatus.storage_keys.length}</div>
+                        <div>Active Nodes: ${nodesData.total_count}</div>
+                        <div>DHT Contacts: ${dhtStatus.contacts_count}</div>
                         <div>DHT Port: ${dhtStatus.dht_port}</div>
                     </div>
                 </div>
                 
                 <div>
-                    <h6><i class="fas fa-users"></i> Connected Nodes</h6>
-                    ${this.renderNodeList(dhtStatus.contacts)}
+                    <h6><i class="fas fa-users"></i> Available Nodes & Models</h6>
+                    ${this.renderNodesWithModels(nodesData.nodes)}
                 </div>
             `;
+            
         } catch (error) {
-            console.error('Error getting node info:', error);
+            console.error('Error getting nodes with models:', error);
             this.showNetworkError('Failed to get node information');
         }
     }
@@ -122,6 +127,53 @@ class LlamaNetUI {
                 </div>
             `;
         }).join('');
+    }
+    
+    renderNodesWithModels(nodes) {
+        if (!nodes || nodes.length === 0) {
+            return '<div class="text-muted small">No nodes discovered</div>';
+        }
+        
+        // Group nodes by model
+        const nodesByModel = {};
+        nodes.forEach(node => {
+            const model = node.model || 'Unknown';
+            if (!nodesByModel[model]) {
+                nodesByModel[model] = [];
+            }
+            nodesByModel[model].push(node);
+        });
+        
+        let html = '';
+        Object.keys(nodesByModel).forEach(model => {
+            const modelNodes = nodesByModel[model];
+            html += `
+                <div class="model-group mb-2">
+                    <div class="fw-bold small text-primary">
+                        <i class="fas fa-brain"></i> ${model} (${modelNodes.length})
+                    </div>
+                    ${modelNodes.map(node => {
+                        const isRecent = (Date.now() / 1000) - node.last_seen < 60;
+                        const statusClass = isRecent ? 'online' : 'warning';
+                        
+                        return `
+                            <div class="node-item small ms-2">
+                                <div class="d-flex align-items-center">
+                                    <span class="node-status ${statusClass}"></span>
+                                    <div class="flex-grow-1">
+                                        <div>${node.node_id.substring(0, 8)}...</div>
+                                        <div class="text-muted">${node.ip}:${node.port}</div>
+                                        <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        });
+        
+        return html;
     }
     
     showNetworkError(message) {

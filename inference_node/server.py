@@ -416,6 +416,52 @@ async def health():
     
     return health_status
 
+@app.get("/nodes")
+async def get_all_nodes():
+    """Get all discovered nodes with their models"""
+    if not dht_publisher or not dht_publisher.kademlia_node:
+        raise HTTPException(status_code=503, detail="DHT not initialized")
+    
+    try:
+        # Query DHT for all nodes
+        all_nodes_data = await dht_publisher.kademlia_node.find_value("all_nodes")
+        
+        nodes = []
+        if all_nodes_data:
+            if isinstance(all_nodes_data, list):
+                nodes.extend(all_nodes_data)
+            else:
+                nodes.append(all_nodes_data)
+        
+        # Filter out stale nodes and format response
+        current_time = time.time()
+        active_nodes = []
+        
+        for node_data in nodes:
+            if isinstance(node_data, dict):
+                last_seen = node_data.get('last_seen', 0)
+                if current_time - last_seen < 60:  # Active within last minute
+                    active_nodes.append({
+                        "node_id": node_data.get('node_id'),
+                        "ip": node_data.get('ip'),
+                        "port": node_data.get('port'),
+                        "model": node_data.get('model'),
+                        "load": node_data.get('load', 0),
+                        "tps": node_data.get('tps', 0),
+                        "uptime": node_data.get('uptime', 0),
+                        "last_seen": last_seen
+                    })
+        
+        return {
+            "nodes": active_nodes,
+            "total_count": len(active_nodes),
+            "timestamp": current_time
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting nodes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/dht/status")
 async def dht_status():
     """Get DHT network status"""

@@ -210,3 +210,19 @@ pre {
     50% { opacity: 0.5; transform: scale(1.1); }
     100% { opacity: 1; transform: scale(1); }
 }
+
+.model-group {
+    border-left: 3px solid var(--primary-color);
+    padding-left: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.model-group .node-item {
+    margin-left: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.node-item .text-muted {
+    font-size: 0.7rem;
+    line-height: 1.2;
+}
