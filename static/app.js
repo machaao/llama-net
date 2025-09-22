@@ -323,17 +323,34 @@ class LlamaNetUI {
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
         const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
         
+        // Build a proper chat prompt for LlamaNet
+        let prompt = "";
+        
+        // Add recent context (last 3 exchanges)
+        const recentHistory = this.chatHistory.slice(-6); // 3 exchanges
+        if (recentHistory.length > 0) {
+            recentHistory.forEach(msg => {
+                if (msg.role === 'user') {
+                    prompt += `Human: ${msg.content}\n\n`;
+                } else if (msg.role === 'assistant') {
+                    prompt += `Assistant: ${msg.content}\n\n`;
+                }
+            });
+        }
+        
+        // Add current message
+        prompt += `Human: ${message}\n\nAssistant:`;
+        
         const request = {
-            prompt: message,
+            prompt: prompt,
             max_tokens: maxTokens,
-            temperature: temperature
+            temperature: temperature,
+            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"] // Comprehensive stop tokens
         };
 
         if (streamingEnabled) {
-            // Use LlamaNet streaming endpoint
             return await this.sendStreamingMessage(request);
         } else {
-            // Use LlamaNet non-streaming endpoint
             const response = await fetch(`${this.baseUrl}/generate`, {
                 method: 'POST',
                 headers: {
@@ -348,7 +365,7 @@ class LlamaNetUI {
             
             const data = await response.json();
             return {
-                text: data.text,
+                text: this.cleanResponse(data.text),
                 metadata: {
                     node_id: data.node_id,
                     tokens: data.tokens_generated,
@@ -450,13 +467,13 @@ class LlamaNetUI {
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
         const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
         
-        // Build chat history for context
+        // Build chat history for context - OPTIMIZED
         const messages = [
-            { role: 'system', content: 'You are a helpful assistant.' }
+            { role: 'system', content: 'You are a helpful AI assistant. Provide clear, concise responses without repeating the conversation format.' }
         ];
         
-        // Add recent chat history (last 5 exchanges)
-        const recentHistory = this.chatHistory.slice(-10);
+        // Add recent chat history (last 6 exchanges to keep context manageable)
+        const recentHistory = this.chatHistory.slice(-12); // 6 exchanges = 12 messages
         recentHistory
             .filter(msg => msg.role === 'user' || msg.role === 'assistant')
             .forEach(msg => messages.push({ role: msg.role, content: msg.content }));
@@ -469,14 +486,13 @@ class LlamaNetUI {
             messages: messages,
             max_tokens: maxTokens,
             temperature: temperature,
-            stream: streamingEnabled
+            stream: streamingEnabled,
+            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"] // Comprehensive stop tokens
         };
 
         if (streamingEnabled) {
-            // Use OpenAI streaming endpoint
             return await this.sendOpenAIStreamingMessage(requestBody);
         } else {
-            // Use OpenAI non-streaming endpoint
             const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -491,7 +507,7 @@ class LlamaNetUI {
             
             const data = await response.json();
             return {
-                text: data.choices[0].message.content,
+                text: this.cleanResponse(data.choices[0].message.content),
                 metadata: {
                     id: data.id,
                     tokens: data.usage.total_tokens,
@@ -868,6 +884,15 @@ class LlamaNetUI {
         
         const bsToast = new bootstrap.Toast(toast);
         bsToast.show();
+    }
+    
+    cleanResponse(text) {
+        // Remove any leaked conversation format
+        return text
+            .replace(/^(Human:|User:|Assistant:)\s*/i, '')
+            .replace(/\n\n(Human:|User:).*$/s, '')
+            .replace(/\n(Human:|User:).*$/s, '')
+            .trim();
     }
     
     escapeHtml(text) {
