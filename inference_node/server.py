@@ -432,27 +432,29 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
                 timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
                 if response.status == 200:
-                    # Check content type to handle streaming vs non-streaming
-                    content_type = response.headers.get('content-type', '')
-                    
-                    if 'text/plain' in content_type:
-                        # This is a streaming response, return it as-is
+                    # Check if this is a streaming response
+                    if request.stream:
+                        # Return streaming response with proper headers
                         return StreamingResponse(
                             response.content.iter_any(),
-                            media_type=content_type,
-                            headers=dict(response.headers)
+                            media_type="text/plain",
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "Content-Type": "text/plain; charset=utf-8"
+                            }
                         )
                     else:
-                        # This is a JSON response
+                        # Handle non-streaming JSON response
                         response_data = await response.json()
                         return OpenAIChatCompletionResponse(**response_data)
                 else:
                     error_text = await response.text()
-                    logger.error(f"Forwarded request failed: {response.status} {error_text}")
+                    logger.error(f"Forwarded chat completion failed: {response.status} {error_text}")
                     raise HTTPException(status_code=response.status, detail=error_text)
                     
     except Exception as e:
-        logger.error(f"Error forwarding request to {target_node.node_id[:8]}: {e}")
+        logger.error(f"Error forwarding chat completion to {target_node.node_id[:8]}: {e}")
         # Fall back to local processing
         return await _handle_chat_completion_locally(request)
 
