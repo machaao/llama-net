@@ -285,6 +285,31 @@ pre {
     height: 1rem;
 }
 
+/* Node info display styles */
+.node-info {
+    color: var(--info-color);
+    font-weight: 500;
+    background-color: rgba(13, 202, 240, 0.1);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    border: 1px solid rgba(13, 202, 240, 0.3);
+}
+
+.message-meta .node-info {
+    display: inline-block;
+    margin: 0 0.125rem;
+}
+
+.node-info-badge {
+    background-color: var(--info-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+}
+
 /* Markdown Content Styles */
 .markdown-content {
     line-height: 1.6;

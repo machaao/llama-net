@@ -84,6 +84,7 @@ class OpenAICompletionResponse(BaseModel):
     model: str
     choices: List[OpenAIChoice]
     usage: OpenAIUsage
+    node_info: Optional[Dict[str, Any]] = None
 
 class OpenAIChatCompletionResponse(BaseModel):
     """OpenAI-compatible chat completion response"""
@@ -93,6 +94,7 @@ class OpenAIChatCompletionResponse(BaseModel):
     model: str
     choices: List[OpenAIChoice]
     usage: OpenAIUsage
+    node_info: Optional[Dict[str, Any]] = None
 
 class OpenAIModel(BaseModel):
     """OpenAI model object"""

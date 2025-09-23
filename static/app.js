@@ -551,7 +551,8 @@ class LlamaNetUI {
                 metadata: {
                     id: data.id,
                     tokens: data.usage.total_tokens,
-                    api: 'OpenAI Compatible'
+                    api: 'OpenAI Compatible',
+                    node_info: data.node_info
                 }
             };
         }
@@ -621,6 +622,10 @@ class LlamaNetUI {
         if (data.id) {
             streamState.responseId = data.id;
         }
+        
+        if (data.node_info) {
+            streamState.nodeInfo = data.node_info;
+        }
     }
 
     handleOpenAIComplete(streamState, resolve) {
@@ -633,8 +638,21 @@ class LlamaNetUI {
         // Estimate tokens (rough approximation)
         streamState.totalTokens = Math.ceil(streamState.accumulatedText.split(' ').length * 1.3);
         
+        // Build metadata parts
+        const metadataParts = [
+            `ID: ${streamState.responseId.substring(0, 8)}...`,
+            `Tokens: ~${streamState.totalTokens}`,
+            `API: OpenAI Compatible (Streaming)`
+        ];
+        
+        // Add node info if available
+        if (streamState.nodeInfo) {
+            const nodeDisplay = `Node: ${streamState.nodeInfo.node_id.substring(0, 8)}... (${streamState.nodeInfo.ip}:${streamState.nodeInfo.port})`;
+            metadataParts.push(nodeDisplay);
+        }
+        
         // Add metadata
-        const metadataHtml = `<div class="message-meta">ID: ${streamState.responseId.substring(0, 8)}... • Tokens: ~${streamState.totalTokens} • API: OpenAI Compatible (Streaming)</div>`;
+        const metadataHtml = `<div class="message-meta">${metadataParts.join(' • ')}</div>`;
         streamState.messageDiv.insertAdjacentHTML('beforeend', metadataHtml);
         
         // Store in chat history
@@ -649,7 +667,8 @@ class LlamaNetUI {
             metadata: {
                 id: streamState.responseId,
                 tokens: streamState.totalTokens,
-                api: 'OpenAI Compatible (Streaming)'
+                api: 'OpenAI Compatible (Streaming)',
+                node_info: streamState.nodeInfo
             },
             isStreaming: true // Flag to indicate this was handled by streaming
         });
@@ -789,6 +808,14 @@ class LlamaNetUI {
             if (metadata.tokens) parts.push(`Tokens: ${metadata.tokens}`);
             if (metadata.api) parts.push(`API: ${metadata.api}`);
             if (metadata.id) parts.push(`ID: ${metadata.id.substring(0, 8)}...`);
+            
+            // Add node information display
+            if (metadata.node_info) {
+                const nodeInfo = metadata.node_info;
+                const processingType = nodeInfo.processing_node === 'forwarded' ? 'via' : 'on';
+                const nodeDisplay = `Node: ${processingType} ${nodeInfo.node_id.substring(0, 8)}... (${nodeInfo.ip}:${nodeInfo.port})`;
+                parts.push(`<span class="node-info">${nodeDisplay}</span>`);
+            }
             
             if (parts.length > 0) {
                 metadataHtml = `<div class="message-meta">${parts.join(' • ')}</div>`;

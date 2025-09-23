@@ -270,12 +270,22 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
             total_tokens=prompt_tokens + completion_tokens
         )
         
+        # Create node info
+        node_info = {
+            "node_id": config.node_id,
+            "ip": get_host_ip(),
+            "port": config.port,
+            "model": config.model_name,
+            "processing_node": "local"
+        }
+        
         return OpenAICompletionResponse(
             id=f"cmpl-{uuid.uuid4().hex[:8]}",
             created=int(time.time()),
             model=request.model,
             choices=[choice],
-            usage=usage
+            usage=usage,
+            node_info=node_info
         )
         
     except Exception as e:
@@ -325,6 +335,10 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
                     
                     if response.status == 200:
                         response_data = await response.json()
+                        # Add forwarding info to node_info if it exists
+                        if "node_info" in response_data and response_data["node_info"]:
+                            response_data["node_info"]["processing_node"] = "forwarded"
+                            response_data["node_info"]["forwarded_from"] = config.node_id
                         return OpenAICompletionResponse(**response_data)
                     else:
                         error_text = await response.text()
@@ -473,12 +487,22 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             total_tokens=prompt_tokens + completion_tokens
         )
         
+        # Create node info
+        node_info = {
+            "node_id": config.node_id,
+            "ip": get_host_ip(),
+            "port": config.port,
+            "model": config.model_name,
+            "processing_node": "local"
+        }
+        
         return OpenAIChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
             created=int(time.time()),
             model=request.model,
             choices=[choice],
-            usage=usage
+            usage=usage,
+            node_info=node_info
         )
         
     except Exception as e:
@@ -528,6 +552,10 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
                     
                     if response.status == 200:
                         response_data = await response.json()
+                        # Add forwarding info to node_info if it exists
+                        if "node_info" in response_data and response_data["node_info"]:
+                            response_data["node_info"]["processing_node"] = "forwarded"
+                            response_data["node_info"]["forwarded_from"] = config.node_id
                         return OpenAIChatCompletionResponse(**response_data)
                     else:
                         error_text = await response.text()
