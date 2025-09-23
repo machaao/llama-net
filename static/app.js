@@ -623,6 +623,7 @@ class LlamaNetUI {
             streamState.responseId = data.id;
         }
         
+        // Capture node info from any chunk that contains it
         if (data.node_info) {
             streamState.nodeInfo = data.node_info;
         }
@@ -645,10 +646,11 @@ class LlamaNetUI {
             `API: OpenAI Compatible (Streaming)`
         ];
         
-        // Add node info if available
+        // Add node info if available with proper styling
         if (streamState.nodeInfo) {
-            const nodeDisplay = `Node: ${streamState.nodeInfo.node_id.substring(0, 8)}... (${streamState.nodeInfo.ip}:${streamState.nodeInfo.port})`;
-            metadataParts.push(nodeDisplay);
+            const processingType = streamState.nodeInfo.processing_node === 'forwarded' ? 'via' : 'on';
+            const nodeDisplay = `Node: ${processingType} ${streamState.nodeInfo.node_id.substring(0, 8)}... (${streamState.nodeInfo.ip}:${streamState.nodeInfo.port})`;
+            metadataParts.push(`<span class="node-info">${nodeDisplay}</span>`);
         }
         
         // Add metadata

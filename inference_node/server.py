@@ -229,11 +229,21 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
                     logger.error(f"Error in local streaming: {e}")
                     # Don't re-raise, just end the stream gracefully
             
+            # Create node info for streaming
+            node_info = {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "model": config.model_name,
+                "processing_node": "local"
+            }
+            
             return StreamingResponse(
                 create_streaming_completion_response(
                     request_id=request_id,
                     model=request.model,
-                    stream_generator=local_stream_generator()
+                    stream_generator=local_stream_generator(),
+                    node_info=node_info
                 ),
                 media_type="text/plain",
                 headers={
@@ -310,11 +320,22 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
                 async for chunk in sse_forwarder.forward_completion_stream(url, request_dict):
                     yield chunk
             
+            # Create node info for forwarded streaming
+            node_info = {
+                "node_id": target_node.node_id,
+                "ip": target_node.ip,
+                "port": target_node.port,
+                "model": target_node.model,
+                "processing_node": "forwarded",
+                "forwarded_from": config.node_id
+            }
+            
             return StreamingResponse(
                 create_streaming_completion_response(
                     request_id=request_id,
                     model=request.model,
-                    stream_generator=forwarded_stream_generator()
+                    stream_generator=forwarded_stream_generator(),
+                    node_info=node_info
                 ),
                 media_type="text/plain",
                 headers={
@@ -441,11 +462,21 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                     logger.error(f"Error in local chat streaming: {e}")
                     # Don't re-raise, just end the stream gracefully
             
+            # Create node info for streaming
+            node_info = {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "model": config.model_name,
+                "processing_node": "local"
+            }
+            
             return StreamingResponse(
                 create_streaming_chat_response(
                     request_id=request_id,
                     model=request.model,
-                    stream_generator=local_stream_generator()
+                    stream_generator=local_stream_generator(),
+                    node_info=node_info
                 ),
                 media_type="text/plain",
                 headers={
@@ -527,11 +558,22 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
                 async for chunk in sse_forwarder.forward_chat_stream(url, request_dict):
                     yield chunk
             
+            # Create node info for forwarded streaming
+            node_info = {
+                "node_id": target_node.node_id,
+                "ip": target_node.ip,
+                "port": target_node.port,
+                "model": target_node.model,
+                "processing_node": "forwarded",
+                "forwarded_from": config.node_id
+            }
+            
             return StreamingResponse(
                 create_streaming_chat_response(
                     request_id=request_id,
                     model=request.model,
-                    stream_generator=forwarded_stream_generator()
+                    stream_generator=forwarded_stream_generator(),
+                    node_info=node_info
                 ),
                 media_type="text/plain",
                 headers={
