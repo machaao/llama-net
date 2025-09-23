@@ -39,25 +39,59 @@ class SystemInfo:
     
     @staticmethod
     def get_cpu_info() -> str:
-        """Get CPU information"""
-        return platform.processor() or "Unknown CPU"
+        """Get CPU information with fallback methods"""
+        try:
+            # Try multiple methods to get CPU info
+            cpu_info = platform.processor()
+            if cpu_info and cpu_info.strip():
+                return cpu_info.strip()
+            
+            # Fallback to machine type
+            machine = platform.machine()
+            system = platform.system()
+            return f"{system} {machine}"
+        except Exception:
+            return "Unknown CPU"
     
     @staticmethod
-    def get_ram_info() -> Dict[str, int]:
-        """Get RAM information"""
-        mem = psutil.virtual_memory()
-        return {
-            "total": mem.total,
-            "available": mem.available
-        }
+    def get_ram_info() -> Dict[str, Any]:
+        """Get RAM information with better formatting"""
+        try:
+            mem = psutil.virtual_memory()
+            return {
+                "total": mem.total,
+                "available": mem.available,
+                "total_gb": round(mem.total / (1024**3), 2),
+                "available_gb": round(mem.available / (1024**3), 2),
+                "used_percent": mem.percent
+            }
+        except Exception as e:
+            logger.error(f"Error getting RAM info: {e}")
+            return {
+                "total": 0,
+                "available": 0,
+                "total_gb": 0.0,
+                "available_gb": 0.0,
+                "used_percent": 0.0
+            }
     
     @staticmethod
     def get_gpu_info() -> Optional[str]:
-        """Get GPU information if available"""
+        """Get GPU information with better error handling"""
         try:
             gpus = GPUtil.getGPUs()
-            if gpus:
-                return f"{gpus[0].name}, {gpus[0].memoryTotal}MB"
+            if not gpus:
+                return None
+            
+            # Return info for all GPUs
+            gpu_info = []
+            for gpu in gpus:
+                memory_mb = int(gpu.memoryTotal)
+                gpu_info.append(f"{gpu.name} ({memory_mb}MB)")
+            
+            return ", ".join(gpu_info)
+        except ImportError:
+            logger.debug("GPUtil not available")
             return None
         except Exception as e:
             logger.warning(f"Could not get GPU info: {e}")
@@ -65,12 +99,34 @@ class SystemInfo:
     
     @staticmethod
     def get_current_load() -> Dict[str, float]:
-        """Get current system load metrics"""
-        return {
-            "cpu_percent": psutil.cpu_percent(interval=1),
-            "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/').percent
-        }
+        """Get current system load metrics without blocking"""
+        try:
+            # Use non-blocking CPU measurement
+            cpu_percent = psutil.cpu_percent(interval=0)  # Non-blocking
+            memory_percent = psutil.virtual_memory().percent
+            
+            # Safe disk usage check
+            try:
+                disk_percent = psutil.disk_usage('/').percent
+            except (OSError, PermissionError):
+                # Fallback for Windows or permission issues
+                try:
+                    disk_percent = psutil.disk_usage('.').percent
+                except:
+                    disk_percent = 0.0
+            
+            return {
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory_percent,
+                "disk_percent": disk_percent
+            }
+        except Exception as e:
+            logger.error(f"Error getting load metrics: {e}")
+            return {
+                "cpu_percent": 0.0,
+                "memory_percent": 0.0,
+                "disk_percent": 0.0
+            }
 
     @staticmethod
     def is_overloaded(cpu_threshold: float = 80.0, 
