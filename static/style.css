@@ -595,3 +595,92 @@ pre {
 .copy-code-btn:hover {
     background-color: #5a6268;
 }
+
+/* Real-time update animations */
+.model-updated {
+    animation: modelUpdatePulse 0.5s ease-in-out;
+}
+
+.node-updated {
+    animation: nodeUpdateGlow 0.3s ease-in-out;
+}
+
+@keyframes modelUpdatePulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); box-shadow: 0 0 10px rgba(13, 110, 253, 0.3); }
+    100% { transform: scale(1); }
+}
+
+@keyframes nodeUpdateGlow {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(13, 202, 240, 0.1); }
+    100% { background-color: transparent; }
+}
+
+.live-indicator {
+    display: inline-block;
+    animation: livePulse 2s infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.metric-value {
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.connection-status {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+}
+
+.update-timestamp {
+    opacity: 0.7;
+    font-size: 0.65rem;
+}
+
+/* Smooth transitions for network display updates */
+#network-status {
+    transition: opacity 0.2s ease;
+}
+
+.model-group {
+    transition: all 0.3s ease;
+}
+
+.node-item {
+    transition: all 0.2s ease;
+}
+
+/* Status indicators */
+.node-status.online {
+    animation: onlinePulse 2s infinite;
+}
+
+@keyframes onlinePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.node-status.warning {
+    animation: warningBlink 1s infinite;
+}
+
+@keyframes warningBlink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.5; }
+}
+
+/* Update indicators */
+.fas.fa-circle[title*="Recently"] {
+    animation: recentIndicator 1s ease-in-out;
+}
+
+@keyframes recentIndicator {
+    0% { opacity: 0; transform: scale(0); }
+    50% { opacity: 1; transform: scale(1.2); }
+    100% { opacity: 1; transform: scale(1); }
+}

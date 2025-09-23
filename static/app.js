@@ -92,6 +92,17 @@ class LlamaNetUI {
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
         
+        // Real-time update properties
+        this.updateInterval = null;
+        this.isUpdating = false;
+        this.updateFrequency = 15000; // 15 seconds
+        this.lastUpdateTime = 0;
+        this.connectionStatus = 'connected';
+        this.previousModelStats = null;
+        this.previousNodeStates = null;
+        this.currentNodeStates = null;
+        this.errorCount = 0;
+        
         this.init();
     }
     
@@ -99,8 +110,18 @@ class LlamaNetUI {
         this.refreshNetworkStatus();
         this.setupEventListeners();
         
-        // Refresh network status every 30 seconds
-        setInterval(() => this.refreshNetworkStatus(), 30000);
+        // Start real-time updates
+        this.startRealTimeUpdates();
+        
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.stopRealTimeUpdates();
+            } else {
+                this.startRealTimeUpdates();
+                this.refreshNetworkStatus(); // Immediate refresh when page becomes visible
+            }
+        });
     }
     
     setupEventListeners() {
@@ -132,6 +153,32 @@ class LlamaNetUI {
     }
     
     async updateNetworkDisplay(dhtStatus, modelsData, statsData) {
+        // Store previous stats for change detection
+        this.previousModelStats = this.currentModelStats || {};
+        this.currentModelStats = statsData.models || {};
+        
+        this.previousNodeStates = this.currentNodeStates || {};
+        this.currentNodeStates = {};
+        
+        // Build current node states
+        if (modelsData.data) {
+            modelsData.data.forEach(model => {
+                if (model.nodes) {
+                    model.nodes.forEach(node => {
+                        this.currentNodeStates[node.node_id] = {
+                            lastSeen: node.last_seen,
+                            load: node.load,
+                            tps: node.tps
+                        };
+                    });
+                }
+            });
+        }
+        
+        await this.updateNetworkDisplaySmooth(dhtStatus, modelsData, statsData);
+    }
+    
+    async updateNetworkDisplaySmooth(dhtStatus, modelsData, statsData) {
         const container = document.getElementById('network-status');
         
         if (!dhtStatus.running) {
@@ -149,9 +196,15 @@ class LlamaNetUI {
             const nodeResponse = await fetch(`${this.baseUrl}/info`);
             const nodeInfo = await nodeResponse.json();
             
-            container.innerHTML = `
+            // Create new content
+            const newContent = `
                 <div class="mb-3">
-                    <h6><i class="fas fa-server"></i> Current Node</h6>
+                    <h6>
+                        <i class="fas fa-server"></i> Current Node
+                        <span class="update-timestamp small text-muted ms-2" title="Last updated: ${new Date().toLocaleTimeString()}">
+                            <i class="fas fa-clock"></i>
+                        </span>
+                    </h6>
                     <div class="node-item">
                         <div class="d-flex align-items-center">
                             <span class="node-status online"></span>
@@ -165,23 +218,38 @@ class LlamaNetUI {
                 </div>
                 
                 <div class="mb-3">
-                    <h6><i class="fas fa-brain"></i> Available Models</h6>
+                    <h6>
+                        <i class="fas fa-brain"></i> Available Models
+                        <span class="live-indicator ms-2" title="Live updates every ${this.updateFrequency/1000}s">
+                            <i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i>
+                        </span>
+                    </h6>
                     <div class="small mb-2">
-                        <div>Total Models: ${modelsData.total_models}</div>
-                        <div>Total Nodes: ${modelsData.total_nodes}</div>
+                        <div>Total Models: <span class="metric-value">${modelsData.total_models}</span></div>
+                        <div>Total Nodes: <span class="metric-value">${modelsData.total_nodes}</span></div>
                         <div>Network Health: ${this.getHealthBadge(statsData.network_summary)}</div>
                     </div>
-                    ${this.renderAvailableModels(modelsData.data, statsData.models)}
+                    ${this.renderAvailableModelsWithAnimation(modelsData.data, statsData.models)}
                 </div>
                 
                 <div class="mb-3">
                     <h6><i class="fas fa-network-wired"></i> DHT Network</h6>
                     <div class="small">
-                        <div>DHT Contacts: ${dhtStatus.contacts_count}</div>
+                        <div>DHT Contacts: <span class="metric-value">${dhtStatus.contacts_count}</span></div>
                         <div>DHT Port: ${dhtStatus.dht_port}</div>
                     </div>
                 </div>
             `;
+            
+            // Smooth update with fade transition
+            container.style.opacity = '0.7';
+            setTimeout(() => {
+                container.innerHTML = newContent;
+                container.style.opacity = '1';
+                
+                // Highlight changed metrics
+                this.highlightChangedMetrics(container);
+            }, 150);
             
         } catch (error) {
             console.error('Error updating network display:', error);
@@ -257,6 +325,59 @@ class LlamaNetUI {
         }).join('');
     }
     
+    renderAvailableModelsWithAnimation(models, modelStats) {
+        if (!models || models.length === 0) {
+            return '<div class="text-muted small">No models discovered on network</div>';
+        }
+        
+        return models.map(model => {
+            const stats = modelStats[model.id] || {};
+            const availability = stats.availability || 'unknown';
+            const avgLoad = stats.avg_load || 0;
+            const totalTps = stats.total_tps || 0;
+            
+            const availabilityClass = {
+                'high': 'success',
+                'medium': 'warning', 
+                'low': 'danger',
+                'unknown': 'secondary'
+            }[availability] || 'secondary';
+            
+            // Add animation classes for new or updated models
+            const animationClass = this.isModelUpdated(model.id, stats) ? 'model-updated' : '';
+            
+            return `
+                <div class="model-group mb-2 ${animationClass}" data-model="${model.id}">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <div class="fw-bold small text-primary">
+                            <i class="fas fa-brain"></i> ${model.id}
+                            <span class="badge bg-${availabilityClass} ms-1">${availability}</span>
+                            ${this.getModelChangeIndicator(model.id, stats)}
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel('${model.id}')" title="Select this model">
+                            <i class="fas fa-check"></i>
+                        </button>
+                    </div>
+                    <div class="small text-muted mb-1">
+                        <div>
+                            Nodes: <span class="metric-value">${model.node_count}</span> | 
+                            Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span> | 
+                            Total TPS: <span class="metric-value">${totalTps.toFixed(1)}</span>
+                        </div>
+                    </div>
+                    <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
+                        ${this.renderModelNodesWithStatus(model.nodes)}
+                    </div>
+                    <div class="mt-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="llamaNetUI.showModelDetails('${model.id}')" title="View model details">
+                            <i class="fas fa-info-circle"></i> Details
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
     renderModelNodes(nodes) {
         if (!nodes || nodes.length === 0) {
             return '<div class="text-muted small">No nodes available</div>';
@@ -275,6 +396,56 @@ class LlamaNetUI {
                             <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
                             <div class="text-muted">${node.ip}:${node.port}</div>
                             <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
+                            <div class="text-muted small">${lastSeenText}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    renderModelNodesWithStatus(nodes) {
+        if (!nodes || nodes.length === 0) {
+            return '<div class="text-muted small">No nodes available</div>';
+        }
+        
+        return nodes.map(node => {
+            const currentTime = Date.now() / 1000;
+            const isRecent = currentTime - node.last_seen < 60;
+            const isVeryRecent = currentTime - node.last_seen < 30;
+            
+            let statusClass = 'offline';
+            let statusTitle = 'Offline';
+            
+            if (isVeryRecent) {
+                statusClass = 'online';
+                statusTitle = 'Online (very recent)';
+            } else if (isRecent) {
+                statusClass = 'online';
+                statusTitle = 'Online';
+            } else if (currentTime - node.last_seen < 120) {
+                statusClass = 'warning';
+                statusTitle = 'Stale';
+            }
+            
+            const lastSeenText = this.formatLastSeen(node.last_seen);
+            const nodeChangeClass = this.isNodeUpdated(node.node_id) ? 'node-updated' : '';
+            
+            return `
+                <div class="node-item small ms-2 clickable-node ${nodeChangeClass}" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
+                    <div class="d-flex align-items-center">
+                        <span class="node-status ${statusClass}" title="${statusTitle} - Last seen: ${lastSeenText}"></span>
+                        <div class="flex-grow-1">
+                            <div class="fw-bold">
+                                ${node.node_id.substring(0, 8)}... 
+                                <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i>
+                                ${this.getNodeChangeIndicator(node.node_id)}
+                            </div>
+                            <div class="text-muted">${node.ip}:${node.port}</div>
+                            <div class="text-muted">
+                                Load: <span class="metric-value">${node.load.toFixed(2)}</span> | 
+                                TPS: <span class="metric-value">${node.tps.toFixed(1)}</span>
+                            </div>
                             <div class="text-muted small">${lastSeenText}</div>
                         </div>
                     </div>
@@ -1243,6 +1414,186 @@ class LlamaNetUI {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    // Real-time update methods
+    startRealTimeUpdates() {
+        if (this.updateInterval) {
+            return; // Already running
+        }
+        
+        this.updateInterval = setInterval(async () => {
+            if (!this.isUpdating) {
+                await this.performRealTimeUpdate();
+            }
+        }, this.updateFrequency);
+        
+        console.log('Real-time model updates started');
+        this.updateConnectionStatus('connected');
+    }
+    
+    stopRealTimeUpdates() {
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+            console.log('Real-time model updates stopped');
+        }
+    }
+    
+    async performRealTimeUpdate() {
+        if (this.isUpdating) return;
+        
+        this.isUpdating = true;
+        
+        try {
+            // Show subtle update indicator
+            this.showUpdateIndicator(true);
+            
+            // Get fresh data with minimal UI disruption
+            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
+                fetch(`${this.baseUrl}/dht/status`),
+                fetch(`${this.baseUrl}/v1/models/network`),
+                fetch(`${this.baseUrl}/models/statistics`)
+            ]);
+            
+            if (dhtResponse.ok && modelsResponse.ok && statsResponse.ok) {
+                const dhtStatus = await dhtResponse.json();
+                const modelsData = await modelsResponse.json();
+                const statsData = await statsResponse.json();
+                
+                // Update display with smooth transitions
+                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
+                this.updateConnectionStatus('connected');
+                this.lastUpdateTime = Date.now();
+                this.errorCount = 0; // Reset error count on success
+                
+            } else {
+                this.updateConnectionStatus('warning');
+                console.warn('Some network endpoints returned errors during real-time update');
+            }
+            
+        } catch (error) {
+            console.error('Real-time update failed:', error);
+            this.updateConnectionStatus('error');
+            
+            // Implement exponential backoff on errors
+            this.handleUpdateError();
+            
+        } finally {
+            this.isUpdating = false;
+            this.showUpdateIndicator(false);
+        }
+    }
+    
+    // Helper methods for tracking changes and animations
+    isModelUpdated(modelId, currentStats) {
+        if (!this.previousModelStats) return false;
+        
+        const previousStats = this.previousModelStats[modelId];
+        if (!previousStats) return true; // New model
+        
+        // Check for significant changes
+        return (
+            Math.abs(currentStats.avg_load - previousStats.avg_load) > 0.1 ||
+            Math.abs(currentStats.total_tps - previousStats.total_tps) > 1.0 ||
+            currentStats.node_count !== previousStats.node_count
+        );
+    }
+    
+    isNodeUpdated(nodeId) {
+        if (!this.previousNodeStates) return false;
+        
+        const previousState = this.previousNodeStates[nodeId];
+        return !previousState || previousState.lastSeen !== this.currentNodeStates?.[nodeId]?.lastSeen;
+    }
+    
+    getModelChangeIndicator(modelId, stats) {
+        if (this.isModelUpdated(modelId, stats)) {
+            return '<i class="fas fa-circle text-warning ms-1" style="font-size: 0.4rem;" title="Recently updated"></i>';
+        }
+        return '';
+    }
+    
+    getNodeChangeIndicator(nodeId) {
+        if (this.isNodeUpdated(nodeId)) {
+            return '<i class="fas fa-circle text-info ms-1" style="font-size: 0.4rem;" title="Recently seen"></i>';
+        }
+        return '';
+    }
+    
+    showUpdateIndicator(show) {
+        const indicator = document.querySelector('.live-indicator');
+        if (indicator) {
+            if (show) {
+                indicator.innerHTML = '<i class="fas fa-sync-alt fa-spin text-primary" style="font-size: 0.5rem;" title="Updating..."></i>';
+            } else {
+                indicator.innerHTML = '<i class="fas fa-circle text-success" style="font-size: 0.5rem;" title="Live updates active"></i>';
+            }
+        }
+    }
+    
+    updateConnectionStatus(status) {
+        this.connectionStatus = status;
+        
+        // Update UI indicators based on connection status
+        const statusIndicators = document.querySelectorAll('.connection-status');
+        statusIndicators.forEach(indicator => {
+            indicator.className = `connection-status badge bg-${this.getStatusColor(status)}`;
+            indicator.textContent = this.getStatusText(status);
+        });
+    }
+    
+    getStatusColor(status) {
+        switch (status) {
+            case 'connected': return 'success';
+            case 'warning': return 'warning';
+            case 'error': return 'danger';
+            default: return 'secondary';
+        }
+    }
+    
+    getStatusText(status) {
+        switch (status) {
+            case 'connected': return 'Live';
+            case 'warning': return 'Partial';
+            case 'error': return 'Offline';
+            default: return 'Unknown';
+        }
+    }
+    
+    handleUpdateError() {
+        // Implement exponential backoff
+        const baseDelay = 5000; // 5 seconds
+        const maxDelay = 60000; // 1 minute
+        
+        if (!this.errorCount) this.errorCount = 0;
+        this.errorCount++;
+        
+        const delay = Math.min(baseDelay * Math.pow(2, this.errorCount - 1), maxDelay);
+        
+        setTimeout(() => {
+            if (this.connectionStatus === 'error') {
+                this.performRealTimeUpdate();
+            }
+        }, delay);
+    }
+    
+    highlightChangedMetrics(container) {
+        // Add subtle animation to changed metrics
+        const metricValues = container.querySelectorAll('.metric-value');
+        metricValues.forEach(metric => {
+            metric.style.transition = 'background-color 0.3s ease';
+            metric.style.backgroundColor = 'rgba(13, 110, 253, 0.1)';
+            
+            setTimeout(() => {
+                metric.style.backgroundColor = 'transparent';
+            }, 1000);
+        });
+    }
+    
+    // Add cleanup method
+    cleanup() {
+        this.stopRealTimeUpdates();
     }
 }
 
