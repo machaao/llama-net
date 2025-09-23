@@ -58,12 +58,12 @@ async def lifespan(app: FastAPI):
     heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
     await heartbeat_manager.start()
     
-    # Start DHT publisher
+    # Start DHT publisher FIRST (this initializes the shared service)
     dht_publisher = DHTPublisher(config, llm.get_metrics)
     await dht_publisher.start()
     
-    # Initialize DHT discovery for routing (use different port to avoid conflicts)
-    dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port + 100)
+    # THEN initialize DHT discovery (this will use the shared service)
+    dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
     await dht_discovery.start()
     
     # Initialize node selector for request routing
@@ -78,6 +78,11 @@ async def lifespan(app: FastAPI):
         await dht_publisher.stop()
     if dht_discovery:
         await dht_discovery.stop()
+    
+    # Stop the shared DHT service last
+    from common.dht_service import SharedDHTService
+    dht_service = SharedDHTService()
+    await dht_service.stop()
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 

@@ -37,19 +37,26 @@ class DHTDiscovery(DiscoveryInterface):
         return nodes
     
     async def start(self):
-        """Start the DHT client"""
+        """Start the DHT client using shared DHT service"""
         if self.kademlia_node:
             return
         
-        self.kademlia_node = KademliaNode(port=self.dht_port)
-        await self.kademlia_node.start(self.bootstrap_nodes)
-        logger.info("DHT discovery client started")
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
+        
+        if dht_service.is_initialized():
+            # Use existing shared instance
+            self.kademlia_node = dht_service.kademlia_node
+            logger.info("DHT discovery using existing shared service")
+        else:
+            # This shouldn't happen if server starts first, but handle gracefully
+            logger.warning("Shared DHT service not initialized, discovery may not work properly")
+            return
     
     async def stop(self):
         """Stop the DHT client"""
-        if self.kademlia_node:
-            await self.kademlia_node.stop()
-            self.kademlia_node = None
+        # Don't stop the shared DHT service - just clear our reference
+        self.kademlia_node = None
     
     async def get_nodes(self, model: Optional[str] = None, force_refresh: bool = False) -> List[NodeInfo]:
         """Get all active nodes, optionally filtered by model"""

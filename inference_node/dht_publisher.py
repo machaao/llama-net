@@ -37,20 +37,22 @@ class DHTPublisher:
         return nodes
     
     async def start(self):
-        """Start the DHT publisher"""
+        """Start the DHT publisher using shared DHT service"""
         if self.running:
             return
         
         self.running = True
         
-        # Create and start Kademlia node
-        self.kademlia_node = KademliaNode(
-            node_id=self.config.node_id,
-            port=self.config.dht_port
-        )
+        # Use shared DHT service instead of creating new instance
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
         
         try:
-            await self.kademlia_node.start(self.bootstrap_nodes)
+            self.kademlia_node = await dht_service.initialize(
+                node_id=self.config.node_id,
+                port=self.config.dht_port,
+                bootstrap_nodes=self.bootstrap_nodes
+            )
             
             # Update config with actual port used (in case it changed)
             if self.kademlia_node.port != self.config.dht_port:
@@ -65,7 +67,7 @@ class DHTPublisher:
         # Start publishing loop
         self.publish_task = asyncio.create_task(self._publish_loop())
         
-        logger.info(f"DHT publisher started on port {self.config.dht_port}")
+        logger.info(f"DHT publisher started using shared service")
         
         if self.bootstrap_nodes:
             logger.info(f"🌐 Joining DHT network via bootstrap nodes: {self.bootstrap_nodes}")
@@ -83,8 +85,8 @@ class DHTPublisher:
             except asyncio.CancelledError:
                 pass
         
-        if self.kademlia_node:
-            await self.kademlia_node.stop()
+        # Don't stop the shared DHT service here - let the main service handle it
+        self.kademlia_node = None
     
     async def _publish_loop(self):
         """Periodically publish node info to DHT"""
