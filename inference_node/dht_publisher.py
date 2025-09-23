@@ -99,7 +99,7 @@ class DHTPublisher:
                 await asyncio.sleep(5)  # Wait before retrying
     
     async def _publish_node_info(self):
-        """Publish current node info to DHT"""
+        """Publish current node info to DHT with proper aggregation"""
         # Get current metrics
         metrics = self.metrics_callback()
         
@@ -116,14 +116,13 @@ class DHTPublisher:
             'dht_port': self.config.dht_port
         }
         
-        # Store under multiple keys for different discovery patterns
-        keys = [
-            f"model:{self.config.model_name}",  # Find by model
-            f"node:{self.config.node_id}",      # Find specific node
-            f"all_nodes"                        # Find any node
+        # Store individual node data
+        individual_keys = [
+            f"model:{self.config.model_name}",
+            f"node:{self.config.node_id}"
         ]
         
-        for key in keys:
+        for key in individual_keys:
             try:
                 success = await self.kademlia_node.store(key, node_info)
                 if success:
@@ -132,3 +131,34 @@ class DHTPublisher:
                     logger.warning(f"Failed to publish under key: {key}")
             except Exception as e:
                 logger.error(f"Error publishing to key {key}: {e}")
+        
+        # For all_nodes, we need to aggregate with existing data
+        await self._update_all_nodes_registry(node_info)
+
+    async def _update_all_nodes_registry(self, node_info):
+        """Update the all_nodes registry with proper aggregation"""
+        try:
+            # Get existing all_nodes data
+            existing_data = await self.kademlia_node.find_value("all_nodes")
+            
+            if existing_data is None:
+                existing_data = []
+            elif not isinstance(existing_data, list):
+                existing_data = [existing_data]
+            
+            # Remove our old entry if it exists
+            existing_data = [node for node in existing_data 
+                            if node.get('node_id') != self.config.node_id]
+            
+            # Add our current info
+            existing_data.append(node_info)
+            
+            # Store updated list
+            success = await self.kademlia_node.store("all_nodes", existing_data)
+            if success:
+                logger.debug(f"Updated all_nodes registry with {len(existing_data)} nodes")
+            else:
+                logger.warning("Failed to update all_nodes registry")
+            
+        except Exception as e:
+            logger.error(f"Error updating all_nodes registry: {e}")

@@ -139,17 +139,30 @@ class DHTDiscovery(DiscoveryInterface):
         return nodes
 
     async def _refresh_nodes(self, model: Optional[str] = None):
-        """Refresh the nodes cache from DHT with proper deduplication"""
+        """Refresh the nodes cache from DHT with enhanced discovery"""
         try:
             # Use a dict to ensure uniqueness by node_id
             unique_nodes = {}
             
-            # Get published nodes from DHT storage first (higher priority)
+            # Get published nodes from multiple DHT sources
             published_nodes = await self._get_published_nodes(model)
+            
+            # Also try to get from model-specific keys if no model filter
+            if not model:
+                try:
+                    # Try common model names
+                    for common_model in ["llamanet", "llama", "mistral"]:
+                        model_nodes = await self._get_published_nodes(common_model)
+                        published_nodes.extend(model_nodes)
+                except Exception as e:
+                    logger.debug(f"Error getting model-specific nodes: {e}")
+            
+            # Process published nodes (higher priority)
             for node_data in published_nodes:
                 if isinstance(node_data, dict) and node_data.get('node_id'):
                     node_id = node_data['node_id']
-                    if time.time() - node_data.get('last_seen', 0) < 60:
+                    # Use longer timeout for published data (2 minutes)
+                    if time.time() - node_data.get('last_seen', 0) < 120:
                         try:
                             node_info = NodeInfo(**node_data)
                             unique_nodes[node_id] = {
@@ -186,13 +199,15 @@ class DHTDiscovery(DiscoveryInterface):
             
             self.cache_time = time.time()
             
-            # Log deduplication stats
-            total_before = len(published_nodes) + len(routing_contacts)
-            total_after = len(self.nodes_cache)
-            duplicates_removed = total_before - total_after
+            # Enhanced logging with source breakdown
+            published_count = len([n for n in unique_nodes.values() if n['source'] == 'published'])
+            contact_count = len([n for n in unique_nodes.values() if n['source'] == 'dht_contact'])
             
-            logger.info(f"Refreshed nodes cache: {total_after} unique nodes (removed {duplicates_removed} duplicates)")
-            logger.debug(f"Sources: {len(published_nodes)} published + {len(routing_contacts)} DHT contacts = {total_before} total")
+            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} unique nodes")
+            logger.info(f"Sources: {published_count} published, {contact_count} DHT contacts")
+            
+            if published_count == 0 and len(published_nodes) > 0:
+                logger.warning("Published nodes found but none were valid - possible data corruption")
             
         except Exception as e:
             logger.error(f"Error refreshing nodes from DHT: {e}")

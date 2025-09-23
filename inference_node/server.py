@@ -477,101 +477,105 @@ async def health():
 
 @app.get("/nodes")
 async def get_all_nodes():
-    """Get all discovered nodes with their models"""
+    """Get all discovered nodes with enhanced discovery"""
     if not dht_publisher or not dht_publisher.kademlia_node:
         raise HTTPException(status_code=503, detail="DHT not initialized")
     
     try:
-        # Get published nodes from DHT storage
-        all_nodes_data = await dht_publisher.kademlia_node.find_value("all_nodes")
+        # Get published nodes from multiple sources
+        all_published_nodes = []
         
-        published_nodes = []
+        # 1. Get from all_nodes key
+        all_nodes_data = await dht_publisher.kademlia_node.find_value("all_nodes")
         if all_nodes_data:
             if isinstance(all_nodes_data, list):
-                published_nodes.extend(all_nodes_data)
+                all_published_nodes.extend(all_nodes_data)
             else:
-                published_nodes.append(all_nodes_data)
+                all_published_nodes.append(all_nodes_data)
         
-        # ALSO get contacts from routing table
+        # 2. Get from model-specific keys
+        try:
+            model_data = await dht_publisher.kademlia_node.find_value(f"model:{config.model_name}")
+            if model_data:
+                if isinstance(model_data, list):
+                    all_published_nodes.extend(model_data)
+                else:
+                    all_published_nodes.append(model_data)
+        except Exception as e:
+            logger.debug(f"No model-specific data found: {e}")
+        
+        # 3. Get routing table contacts
         routing_contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
         
-        # Convert to unified format
+        # Deduplicate and process
         current_time = time.time()
-        active_nodes = []
-        seen_node_ids = set()
+        unique_nodes = {}
         
-        # Process published nodes first (they have complete info)
-        for node_data in published_nodes:
-            if isinstance(node_data, dict):
-                node_id = node_data.get('node_id')
+        # Process published nodes first (higher priority)
+        for node_data in all_published_nodes:
+            if isinstance(node_data, dict) and node_data.get('node_id'):
+                node_id = node_data['node_id']
                 last_seen = node_data.get('last_seen', 0)
                 
-                if node_id and current_time - last_seen < 60:  # Active within last minute
-                    active_nodes.append({
-                        "node_id": node_id,
-                        "ip": node_data.get('ip'),
-                        "port": node_data.get('port'),
-                        "model": node_data.get('model'),
-                        "load": node_data.get('load', 0),
-                        "tps": node_data.get('tps', 0),
-                        "uptime": node_data.get('uptime', 0),
-                        "last_seen": last_seen,
+                if current_time - last_seen < 120:  # 2 minute window for published data
+                    unique_nodes[node_id] = {
+                        **node_data,
                         "source": "published"
-                    })
-                    seen_node_ids.add(node_id)
+                    }
         
-        # Add routing table contacts that aren't already included
+        # Add routing contacts that aren't already present
         for contact in routing_contacts:
-            if contact.node_id not in seen_node_ids and current_time - contact.last_seen < 60:
-                # Try to get HTTP port and model info
-                http_port = 8000  # Default assumption
-                model = "unknown"
+            if contact.node_id not in unique_nodes and current_time - contact.last_seen < 60:
+                # Try to get HTTP info
+                http_port, model = await _probe_node_info(contact.ip, contact.node_id)
                 
-                # Try to detect HTTP port by testing common ports
-                import requests
-                for test_port in [8000, 8002, 8004]:
-                    try:
-                        response = requests.get(f"http://{contact.ip}:{test_port}/info", timeout=1)
-                        if response.status_code == 200:
-                            info = response.json()
-                            http_port = test_port
-                            model = info.get('model', 'unknown')
-                            break
-                    except:
-                        continue
-                
-                active_nodes.append({
+                unique_nodes[contact.node_id] = {
                     "node_id": contact.node_id,
                     "ip": contact.ip,
                     "port": http_port,
                     "model": model,
-                    "load": 0.0,  # Unknown
-                    "tps": 0.0,   # Unknown
-                    "uptime": 0,  # Unknown
+                    "load": 0.0,
+                    "tps": 0.0,
+                    "uptime": 0,
                     "last_seen": int(contact.last_seen),
                     "source": "dht_contact"
-                })
-                seen_node_ids.add(contact.node_id)
+                }
+        
+        active_nodes = list(unique_nodes.values())
         
         return {
             "nodes": active_nodes,
             "total_count": len(active_nodes),
-            "unique_node_ids": len(set(n["node_id"] for n in active_nodes)),
-            "timestamp": current_time,
             "sources": {
                 "published": len([n for n in active_nodes if n.get("source") == "published"]),
                 "dht_contacts": len([n for n in active_nodes if n.get("source") == "dht_contact"])
             },
-            "deduplication": {
-                "total_before_dedup": len(published_nodes) + len(routing_contacts),
-                "total_after_dedup": len(active_nodes),
-                "duplicates_removed": (len(published_nodes) + len(routing_contacts)) - len(active_nodes)
-            }
+            "discovery_methods": {
+                "all_nodes_key": len([n for n in all_published_nodes if isinstance(n, dict)]),
+                "routing_table": len(routing_contacts)
+            },
+            "timestamp": current_time
         }
         
     except Exception as e:
         logger.error(f"Error getting nodes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+async def _probe_node_info(ip: str, node_id: str) -> tuple:
+    """Probe a node to get HTTP port and model info"""
+    import aiohttp
+    
+    for test_port in [8000, 8002, 8004, 8006]:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                async with session.get(f"http://{ip}:{test_port}/info") as response:
+                    if response.status == 200:
+                        info = await response.json()
+                        return test_port, info.get('model', 'unknown')
+        except:
+            continue
+    
+    return 8000, "unknown"  # Default fallback
 
 @app.get("/dht/status")
 async def dht_status():
@@ -611,6 +615,67 @@ async def dht_status():
         "bootstrap_nodes": dht_publisher.bootstrap_nodes,
         "cleanup_stats": cleanup_stats
     }
+
+@app.get("/dht/verify")
+async def verify_dht_network():
+    """Verify DHT network connectivity and data propagation"""
+    if not dht_publisher or not dht_publisher.kademlia_node:
+        raise HTTPException(status_code=503, detail="DHT not initialized")
+    
+    verification_results = {
+        "local_storage": {},
+        "network_lookup": {},
+        "routing_table": {},
+        "connectivity": {}
+    }
+    
+    try:
+        # Check local storage
+        verification_results["local_storage"] = {
+            "keys": list(dht_publisher.kademlia_node.storage.keys()),
+            "all_nodes_local": "all_nodes" in dht_publisher.kademlia_node.storage
+        }
+        
+        # Check network lookup
+        all_nodes_network = await dht_publisher.kademlia_node.find_value("all_nodes")
+        verification_results["network_lookup"] = {
+            "all_nodes_found": all_nodes_network is not None,
+            "all_nodes_type": type(all_nodes_network).__name__,
+            "all_nodes_count": len(all_nodes_network) if isinstance(all_nodes_network, list) else (1 if all_nodes_network else 0)
+        }
+        
+        # Check routing table
+        contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
+        verification_results["routing_table"] = {
+            "contact_count": len(contacts),
+            "contacts": [{"id": c.node_id[:8], "ip": c.ip, "port": c.port} for c in contacts[:5]]
+        }
+        
+        # Test connectivity to other nodes
+        connectivity_tests = []
+        for contact in contacts[:3]:  # Test first 3 contacts
+            try:
+                ping_result = await dht_publisher.kademlia_node._ping_node(contact.ip, contact.port)
+                connectivity_tests.append({
+                    "node_id": contact.node_id[:8],
+                    "address": f"{contact.ip}:{contact.port}",
+                    "reachable": ping_result is not None
+                })
+            except Exception as e:
+                connectivity_tests.append({
+                    "node_id": contact.node_id[:8],
+                    "address": f"{contact.ip}:{contact.port}",
+                    "reachable": False,
+                    "error": str(e)
+                })
+        
+        verification_results["connectivity"] = connectivity_tests
+        
+        return verification_results
+        
+    except Exception as e:
+        logger.error(f"DHT verification error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def start_server():
     """Start the inference server"""
