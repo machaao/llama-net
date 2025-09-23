@@ -87,7 +87,7 @@ class DHTDiscovery(DiscoveryInterface):
             try:
                 # Create basic NodeInfo from contact
                 node_info = NodeInfo(
-                    node_id=contact.node_id,
+                    node_id=f"{contact.ip}:8000",  # Use IP:port format
                     ip=contact.ip,
                     port=8000,  # Default HTTP port assumption
                     model="unknown",
@@ -124,9 +124,10 @@ class DHTDiscovery(DiscoveryInterface):
                     async with session.get(f"http://{ip}:{port}/info") as resp:
                         if resp.status == 200:
                             info = await resp.json()
-                            # Verify this is the correct node by checking node_id
-                            if info.get('node_id') == node_id:
-                                logger.debug(f"Found HTTP port {port} for node {node_id[:8]}...")
+                            # Verify this is the correct node by checking IP:port format
+                            expected_node_id = f"{ip}:{port}"
+                            if info.get('node_id') == expected_node_id:
+                                logger.debug(f"Found HTTP port {port} for node {expected_node_id}")
                                 return port
             except:
                 continue
