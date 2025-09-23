@@ -790,7 +790,8 @@ class LlamaNetUI {
                     content: delta.content || '',
                     role: delta.role || null,
                     id: chunk.id || '',
-                    finished: choice.finish_reason !== null
+                    finished: choice.finish_reason !== null,
+                    node_info: chunk.node_info || null
                 };
             }
         }
