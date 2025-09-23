@@ -321,6 +321,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         try:
             # Get available nodes
             nodes = await dht_discovery.get_nodes()
+            print(f"Found {len(nodes)} nodes")
             if len(nodes) > 1:  # Only route if there are other nodes
                 selected_node = await node_selector.select_node(
                     model=request.model,
