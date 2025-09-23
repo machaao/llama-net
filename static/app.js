@@ -240,11 +240,11 @@ class LlamaNetUI {
                         const lastSeenText = this.formatLastSeen(node.last_seen);
                         
                         return `
-                            <div class="node-item small ms-2" data-node-id="${node.node_id}">
+                            <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
                                 <div class="d-flex align-items-center">
                                     <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
                                     <div class="flex-grow-1">
-                                        <div class="fw-bold">${node.node_id.substring(0, 8)}...</div>
+                                        <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
                                         <div class="text-muted">${node.ip}:${node.port}</div>
                                         <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
                                         <div class="text-muted small">${lastSeenText}</div>
@@ -321,6 +321,121 @@ class LlamaNetUI {
                 nodesSection.innerHTML = header + '<div class="text-muted small">Error loading nodes</div>';
             }
         }
+    }
+    
+    async showNodeInfo(nodeId) {
+        """Show detailed information about a specific node"""
+        const modal = new bootstrap.Modal(document.getElementById('nodeInfoModal'));
+        modal.show();
+        
+        // Show loading state
+        document.getElementById('node-info-details').innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2">Loading node information...</p>
+            </div>
+        `;
+        
+        try {
+            const response = await fetch(`${this.baseUrl}/node/${nodeId}`);
+            
+            if (response.ok) {
+                const nodeInfo = await response.json();
+                document.getElementById('node-info-details').innerHTML = this.renderNodeDetails(nodeInfo);
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('Error loading node info:', error);
+            document.getElementById('node-info-details').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Failed to load node information: ${error.message}
+                </div>
+            `;
+        }
+    }
+    
+    renderNodeDetails(nodeInfo) {
+        """Render detailed node information"""
+        const isCurrentNode = nodeInfo.is_current_node;
+        const statusBadge = nodeInfo.status === 'online' ? 
+            '<span class="badge bg-success">Online</span>' : 
+            '<span class="badge bg-warning">Stale</span>';
+        
+        const lastSeenText = nodeInfo.last_seen ? 
+            new Date(nodeInfo.last_seen * 1000).toLocaleString() : 'Unknown';
+        
+        let systemInfoHtml = '';
+        if (nodeInfo.system) {
+            const ramInfo = nodeInfo.system.ram || {};
+            systemInfoHtml = `
+                <div class="col-md-6">
+                    <h6 class="mt-3"><i class="fas fa-microchip"></i> System Information</h6>
+                    <div class="network-detail-item">
+                        <strong>CPU:</strong> ${nodeInfo.system.cpu || 'Unknown'}<br>
+                        <strong>RAM:</strong> ${ramInfo.total_gb ? `${ramInfo.total_gb} GB total, ${ramInfo.available_gb} GB available` : 'Unknown'}<br>
+                        <strong>GPU:</strong> ${nodeInfo.system.gpu || 'None detected'}<br>
+                        <strong>Platform:</strong> ${nodeInfo.system.platform || 'Unknown'}
+                    </div>
+                </div>
+            `;
+        }
+        
+        let endpointsHtml = '';
+        if (nodeInfo.endpoints) {
+            endpointsHtml = `
+                <div class="mt-3">
+                    <h6><i class="fas fa-link"></i> Available Endpoints</h6>
+                    <div class="network-detail-item">
+                        <strong>OpenAI Compatible:</strong>
+                        <ul class="list-unstyled small mt-2">
+                            ${nodeInfo.endpoints.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-server"></i> Node Information</h6>
+                    <div class="network-detail-item">
+                        <strong>Node ID:</strong> ${nodeInfo.node_id}<br>
+                        <strong>Status:</strong> ${statusBadge} ${isCurrentNode ? '<span class="badge bg-primary ms-1">Current Node</span>' : ''}<br>
+                        <strong>Address:</strong> ${nodeInfo.ip}:${nodeInfo.port}<br>
+                        <strong>DHT Port:</strong> ${nodeInfo.dht_port || 'Unknown'}<br>
+                        <strong>Model:</strong> ${nodeInfo.model}<br>
+                        ${nodeInfo.model_path ? `<strong>Model Path:</strong> ${nodeInfo.model_path}<br>` : ''}
+                        <strong>Last Seen:</strong> ${lastSeenText}
+                    </div>
+                    
+                    <h6 class="mt-3"><i class="fas fa-chart-line"></i> Performance Metrics</h6>
+                    <div class="network-detail-item">
+                        <strong>Load:</strong> ${nodeInfo.load ? nodeInfo.load.toFixed(2) : '0.00'}<br>
+                        <strong>TPS:</strong> ${nodeInfo.tps ? nodeInfo.tps.toFixed(1) : '0.0'}<br>
+                        <strong>Uptime:</strong> ${nodeInfo.uptime ? `${Math.floor(nodeInfo.uptime / 60)} minutes` : 'Unknown'}<br>
+                        ${nodeInfo.total_tokens ? `<strong>Total Tokens:</strong> ${nodeInfo.total_tokens.toLocaleString()}<br>` : ''}
+                        <strong>API:</strong> <span class="badge bg-success">OpenAI Compatible</span>
+                    </div>
+                </div>
+                
+                ${systemInfoHtml}
+            </div>
+            
+            ${endpointsHtml}
+            
+            ${isCurrentNode ? '' : `
+                <div class="mt-3">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Remote Node:</strong> This node is part of the distributed LlamaNet network. 
+                        You can send requests to it using the same OpenAI-compatible API endpoints.
+                    </div>
+                </div>
+            `}
+        `;
     }
     
     showToast(type, message) {

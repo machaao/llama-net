@@ -233,6 +233,30 @@ pre {
     line-height: 1.2;
 }
 
+.clickable-node {
+    transition: all 0.2s ease;
+}
+
+.clickable-node:hover {
+    background-color: #f8f9fa !important;
+    border-color: var(--primary-color) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.clickable-node:active {
+    transform: translateY(0);
+}
+
+.node-info-icon {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.clickable-node:hover .node-info-icon {
+    opacity: 1;
+}
+
 .btn-sm .fas {
     font-size: 0.75rem;
 }

@@ -744,6 +744,116 @@ async def verify_dht_network():
         logger.error(f"DHT verification error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/node/{node_id}")
+async def get_node_info(node_id: str):
+    """Get detailed information about a specific node"""
+    if not dht_publisher or not dht_publisher.kademlia_node:
+        raise HTTPException(status_code=503, detail="DHT not initialized")
+    
+    try:
+        # Check if this is the current node
+        if node_id == config.node_id:
+            # Return current node info with full details
+            metrics = llm.get_metrics() if llm else {}
+            return {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "dht_port": config.dht_port,
+                "model": config.model_name,
+                "model_path": config.model_path,
+                "load": metrics.get("load", 0.0),
+                "tps": metrics.get("tps", 0.0),
+                "uptime": metrics.get("uptime", 0),
+                "total_tokens": metrics.get("total_tokens", 0),
+                "last_seen": int(time.time()),
+                "system": system_info,
+                "status": "online",
+                "is_current_node": True,
+                "openai_compatible": True,
+                "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
+            }
+        
+        # Look for the node in published data
+        all_nodes_data = await dht_publisher.kademlia_node.find_value("all_nodes")
+        if all_nodes_data:
+            if isinstance(all_nodes_data, list):
+                for node_data in all_nodes_data:
+                    if isinstance(node_data, dict) and node_data.get('node_id') == node_id:
+                        # Try to get additional info from the node directly
+                        additional_info = await _get_remote_node_info(node_data.get('ip'), node_data.get('port'))
+                        if additional_info:
+                            node_data.update(additional_info)
+                        
+                        node_data["is_current_node"] = False
+                        node_data["status"] = "online" if time.time() - node_data.get('last_seen', 0) < 60 else "stale"
+                        return node_data
+        
+        # Look in routing table contacts
+        contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
+        for contact in contacts:
+            if contact.node_id == node_id:
+                # Try to get HTTP info
+                http_port, model = await _probe_node_info(contact.ip, contact.node_id)
+                additional_info = await _get_remote_node_info(contact.ip, http_port)
+                
+                node_info = {
+                    "node_id": contact.node_id,
+                    "ip": contact.ip,
+                    "port": http_port,
+                    "dht_port": contact.port,
+                    "model": model,
+                    "load": 0.0,
+                    "tps": 0.0,
+                    "uptime": 0,
+                    "last_seen": int(contact.last_seen),
+                    "status": "online" if time.time() - contact.last_seen < 60 else "stale",
+                    "is_current_node": False,
+                    "source": "dht_contact"
+                }
+                
+                if additional_info:
+                    node_info.update(additional_info)
+                
+                return node_info
+        
+        # Node not found
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting node info for {node_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def _get_remote_node_info(ip: str, port: int) -> Optional[Dict[str, Any]]:
+    """Get additional information from a remote node"""
+    if not ip or not port:
+        return None
+    
+    import aiohttp
+    
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+            # Get basic info
+            async with session.get(f"http://{ip}:{port}/info") as response:
+                if response.status == 200:
+                    info = await response.json()
+                    
+                    # Get status/metrics
+                    try:
+                        async with session.get(f"http://{ip}:{port}/status") as status_response:
+                            if status_response.status == 200:
+                                status_data = await status_response.json()
+                                info.update(status_data)
+                    except:
+                        pass
+                    
+                    return info
+    except Exception as e:
+        logger.debug(f"Failed to get remote node info from {ip}:{port}: {e}")
+        return None
+
 @app.get("/debug/routing")
 async def debug_routing():
     """Debug endpoint to show routing information"""
