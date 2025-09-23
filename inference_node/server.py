@@ -148,6 +148,120 @@ async def list_models():
         ]
     )
 
+@app.get("/v1/models/network")
+async def list_network_models():
+    """List all available models across the network (OpenAI-compatible extension)"""
+    if not dht_discovery:
+        raise HTTPException(status_code=503, detail="DHT discovery not initialized")
+    
+    try:
+        # Get all nodes from the network
+        all_nodes = await dht_discovery.get_nodes(force_refresh=True)
+        
+        # Group by model and create OpenAI-compatible response
+        models_dict = {}
+        for node in all_nodes:
+            model_name = node.model
+            if model_name not in models_dict:
+                models_dict[model_name] = {
+                    "id": model_name,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": "llamanet",
+                    "node_count": 0,
+                    "nodes": []
+                }
+            
+            models_dict[model_name]["node_count"] += 1
+            models_dict[model_name]["nodes"].append({
+                "node_id": node.node_id,
+                "ip": node.ip,
+                "port": node.port,
+                "load": node.load,
+                "tps": node.tps,
+                "last_seen": node.last_seen
+            })
+        
+        return {
+            "object": "list",
+            "data": list(models_dict.values()),
+            "total_models": len(models_dict),
+            "total_nodes": len(all_nodes)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing network models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models/statistics")
+async def get_models_statistics():
+    """Get detailed statistics about models available on the network"""
+    if not dht_discovery:
+        raise HTTPException(status_code=503, detail="DHT discovery not initialized")
+    
+    try:
+        # Get all nodes from the network
+        all_nodes = await dht_discovery.get_nodes(force_refresh=True)
+        
+        # Calculate statistics
+        models_dict = {}
+        total_load = 0
+        total_tps = 0
+        
+        for node in all_nodes:
+            model_name = node.model
+            if model_name not in models_dict:
+                models_dict[model_name] = {
+                    "nodes": [],
+                    "total_load": 0,
+                    "total_tps": 0
+                }
+            
+            models_dict[model_name]["nodes"].append(node)
+            models_dict[model_name]["total_load"] += node.load
+            models_dict[model_name]["total_tps"] += node.tps
+            total_load += node.load
+            total_tps += node.tps
+        
+        # Format response
+        statistics = {
+            "network_summary": {
+                "total_models": len(models_dict),
+                "total_nodes": len(all_nodes),
+                "avg_network_load": total_load / len(all_nodes) if all_nodes else 0,
+                "total_network_tps": total_tps,
+                "timestamp": time.time()
+            },
+            "models": {}
+        }
+        
+        for model_name, model_data in models_dict.items():
+            nodes = model_data["nodes"]
+            statistics["models"][model_name] = {
+                "node_count": len(nodes),
+                "avg_load": model_data["total_load"] / len(nodes),
+                "total_tps": model_data["total_tps"],
+                "best_node": min(nodes, key=lambda n: n.load).__dict__ if nodes else None,
+                "availability": "high" if len(nodes) > 2 else "medium" if len(nodes) > 1 else "low",
+                "nodes": [
+                    {
+                        "node_id": n.node_id,
+                        "ip": n.ip,
+                        "port": n.port,
+                        "load": n.load,
+                        "tps": n.tps,
+                        "uptime": n.uptime,
+                        "last_seen": n.last_seen
+                    } for n in nodes
+                ]
+            }
+        
+        return statistics
+        
+    except Exception as e:
+        logger.error(f"Error getting model statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/v1/completions")
 async def create_completion(request: OpenAICompletionRequest):
     """Create a completion (OpenAI-compatible)"""
