@@ -6,7 +6,7 @@ import os
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
-from typing import Dict, Any, Union, List
+from typing import Dict, Any, Union, List, Optional
 from contextlib import asynccontextmanager
 import json
 

@@ -324,7 +324,7 @@ class LlamaNetUI {
     }
     
     async showNodeInfo(nodeId) {
-        """Show detailed information about a specific node"""
+        // Show detailed information about a specific node
         const modal = new bootstrap.Modal(document.getElementById('nodeInfoModal'));
         modal.show();
         
@@ -357,7 +357,7 @@ class LlamaNetUI {
     }
     
     renderNodeDetails(nodeInfo) {
-        """Render detailed node information"""
+        // Render detailed node information
         const isCurrentNode = nodeInfo.is_current_node;
         const statusBadge = nodeInfo.status === 'online' ? 
             '<span class="badge bg-success">Online</span>' : 
