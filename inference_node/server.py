@@ -556,10 +556,16 @@ async def get_all_nodes():
         return {
             "nodes": active_nodes,
             "total_count": len(active_nodes),
+            "unique_node_ids": len(set(n["node_id"] for n in active_nodes)),
             "timestamp": current_time,
             "sources": {
                 "published": len([n for n in active_nodes if n.get("source") == "published"]),
                 "dht_contacts": len([n for n in active_nodes if n.get("source") == "dht_contact"])
+            },
+            "deduplication": {
+                "total_before_dedup": len(published_nodes) + len(routing_contacts),
+                "total_after_dedup": len(active_nodes),
+                "duplicates_removed": (len(published_nodes) + len(routing_contacts)) - len(active_nodes)
             }
         }
         
@@ -576,8 +582,8 @@ async def dht_status():
     kademlia_node = dht_publisher.kademlia_node
     routing_table = kademlia_node.routing_table
     
-    # Get all contacts from routing table
-    all_contacts = routing_table.get_all_contacts()
+    # Get all unique contacts from routing table
+    all_contacts = routing_table.get_unique_contacts()
     
     # Format contact information
     contacts = []
