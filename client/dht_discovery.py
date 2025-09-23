@@ -259,3 +259,295 @@ class DHTDiscovery(DiscoveryInterface):
             logger.error(f"Error finding node {node_id}: {e}")
         
         return None
+
+    async def get_models_by_category(self, force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+        """Get models organized by categories with detailed statistics"""
+        try:
+            all_nodes = await self.get_nodes(force_refresh=force_refresh)
+            
+            models_by_category = {}
+            
+            for node in all_nodes:
+                model_name = node.model
+                if model_name not in models_by_category:
+                    models_by_category[model_name] = {
+                        "model_name": model_name,
+                        "nodes": [],
+                        "total_nodes": 0,
+                        "avg_load": 0.0,
+                        "total_tps": 0.0,
+                        "best_node": None,
+                        "availability_status": "unknown",
+                        "last_updated": time.time()
+                    }
+                
+                models_by_category[model_name]["nodes"].append(node)
+            
+            # Calculate statistics for each model
+            for model_name, model_data in models_by_category.items():
+                nodes = model_data["nodes"]
+                model_data["total_nodes"] = len(nodes)
+                
+                if nodes:
+                    # Calculate averages
+                    total_load = sum(n.load for n in nodes)
+                    total_tps = sum(n.tps for n in nodes)
+                    
+                    model_data["avg_load"] = total_load / len(nodes)
+                    model_data["total_tps"] = total_tps
+                    
+                    # Find best node (lowest load)
+                    model_data["best_node"] = min(nodes, key=lambda n: n.load)
+                    
+                    # Determine availability status
+                    if len(nodes) >= 3:
+                        model_data["availability_status"] = "high"
+                    elif len(nodes) >= 2:
+                        model_data["availability_status"] = "medium"
+                    else:
+                        model_data["availability_status"] = "low"
+                    
+                    # Sort nodes by load for consistent ordering
+                    model_data["nodes"].sort(key=lambda n: n.load)
+            
+            logger.info(f"Categorized {len(models_by_category)} models with detailed statistics")
+            return models_by_category
+            
+        except Exception as e:
+            logger.error(f"Error getting models by category: {e}")
+            return {}
+
+    async def get_network_health_metrics(self) -> Dict[str, Any]:
+        """Get overall network health and performance metrics"""
+        try:
+            all_nodes = await self.get_nodes(force_refresh=True)
+            
+            if not all_nodes:
+                return {
+                    "status": "no_nodes",
+                    "total_nodes": 0,
+                    "models_available": 0,
+                    "network_load": 0.0,
+                    "total_capacity": 0.0,
+                    "health_score": 0.0
+                }
+            
+            # Calculate network-wide metrics
+            total_load = sum(n.load for n in all_nodes)
+            total_tps = sum(n.tps for n in all_nodes)
+            avg_load = total_load / len(all_nodes)
+            
+            # Count unique models
+            unique_models = len(set(n.model for n in all_nodes))
+            
+            # Calculate health score (0-100)
+            # Based on: node count, load distribution, model diversity
+            node_score = min(100, len(all_nodes) * 10)  # 10 points per node, max 100
+            load_score = max(0, 100 - (avg_load * 100))  # Lower load = higher score
+            diversity_score = min(100, unique_models * 25)  # 25 points per unique model
+            
+            health_score = (node_score + load_score + diversity_score) / 3
+            
+            # Determine overall status
+            if health_score >= 80:
+                status = "excellent"
+            elif health_score >= 60:
+                status = "good"
+            elif health_score >= 40:
+                status = "fair"
+            else:
+                status = "poor"
+            
+            return {
+                "status": status,
+                "total_nodes": len(all_nodes),
+                "models_available": unique_models,
+                "network_load": round(avg_load, 3),
+                "total_capacity": round(total_tps, 2),
+                "health_score": round(health_score, 1),
+                "node_distribution": self._analyze_node_distribution(all_nodes),
+                "last_updated": time.time()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting network health metrics: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "total_nodes": 0,
+                "models_available": 0
+            }
+
+    def _analyze_node_distribution(self, nodes: List[NodeInfo]) -> Dict[str, Any]:
+        """Analyze how nodes are distributed across the network"""
+        if not nodes:
+            return {"by_model": {}, "by_load": {}, "by_performance": {}}
+        
+        # Distribution by model
+        by_model = {}
+        for node in nodes:
+            model = node.model
+            if model not in by_model:
+                by_model[model] = 0
+            by_model[model] += 1
+        
+        # Distribution by load ranges
+        by_load = {"low": 0, "medium": 0, "high": 0}
+        for node in nodes:
+            if node.load < 0.3:
+                by_load["low"] += 1
+            elif node.load < 0.7:
+                by_load["medium"] += 1
+            else:
+                by_load["high"] += 1
+        
+        # Distribution by performance (TPS)
+        by_performance = {"fast": 0, "medium": 0, "slow": 0}
+        if nodes:
+            avg_tps = sum(n.tps for n in nodes) / len(nodes)
+            for node in nodes:
+                if node.tps > avg_tps * 1.2:
+                    by_performance["fast"] += 1
+                elif node.tps > avg_tps * 0.8:
+                    by_performance["medium"] += 1
+                else:
+                    by_performance["slow"] += 1
+        
+        return {
+            "by_model": by_model,
+            "by_load": by_load,
+            "by_performance": by_performance
+        }
+
+    async def discover_model_capabilities(self, model_name: str) -> Dict[str, Any]:
+        """Discover detailed capabilities for a specific model"""
+        try:
+            model_nodes = await self.get_nodes(model=model_name, force_refresh=True)
+            
+            if not model_nodes:
+                return {
+                    "model_name": model_name,
+                    "available": False,
+                    "node_count": 0,
+                    "capabilities": {}
+                }
+            
+            # Aggregate capabilities from all nodes running this model
+            total_capacity = sum(n.tps for n in model_nodes)
+            avg_load = sum(n.load for n in model_nodes) / len(model_nodes)
+            
+            # Find best and worst performing nodes
+            best_node = min(model_nodes, key=lambda n: n.load)
+            worst_node = max(model_nodes, key=lambda n: n.load)
+            
+            # Calculate reliability score based on node availability
+            current_time = time.time()
+            recent_nodes = [n for n in model_nodes if current_time - n.last_seen < 60]
+            reliability_score = len(recent_nodes) / len(model_nodes) * 100
+            
+            return {
+                "model_name": model_name,
+                "available": True,
+                "node_count": len(model_nodes),
+                "capabilities": {
+                    "total_capacity_tps": round(total_capacity, 2),
+                    "average_load": round(avg_load, 3),
+                    "reliability_score": round(reliability_score, 1),
+                    "best_node": {
+                        "node_id": best_node.node_id,
+                        "ip": best_node.ip,
+                        "port": best_node.port,
+                        "load": best_node.load,
+                        "tps": best_node.tps
+                    },
+                    "performance_range": {
+                        "min_load": min(n.load for n in model_nodes),
+                        "max_load": max(n.load for n in model_nodes),
+                        "min_tps": min(n.tps for n in model_nodes),
+                        "max_tps": max(n.tps for n in model_nodes)
+                    },
+                    "geographic_distribution": self._analyze_geographic_distribution(model_nodes)
+                },
+                "nodes": [
+                    {
+                        "node_id": n.node_id,
+                        "ip": n.ip,
+                        "port": n.port,
+                        "load": n.load,
+                        "tps": n.tps,
+                        "uptime": n.uptime,
+                        "last_seen": n.last_seen,
+                        "status": "online" if current_time - n.last_seen < 60 else "stale"
+                    } for n in model_nodes
+                ],
+                "last_updated": time.time()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error discovering capabilities for model {model_name}: {e}")
+            return {
+                "model_name": model_name,
+                "available": False,
+                "error": str(e)
+            }
+
+    def _analyze_geographic_distribution(self, nodes: List[NodeInfo]) -> Dict[str, int]:
+        """Analyze geographic distribution of nodes (simplified by IP ranges)"""
+        distribution = {}
+        
+        for node in nodes:
+            # Simple geographic classification based on IP ranges
+            # This is a basic implementation - in production you'd use a proper GeoIP service
+            ip_parts = node.ip.split('.')
+            if len(ip_parts) >= 2:
+                region_key = f"{ip_parts[0]}.{ip_parts[1]}.x.x"
+                if region_key not in distribution:
+                    distribution[region_key] = 0
+                distribution[region_key] += 1
+            else:
+                if "unknown" not in distribution:
+                    distribution["unknown"] = 0
+                distribution["unknown"] += 1
+        
+        return distribution
+
+    async def get_real_time_model_status(self) -> Dict[str, Any]:
+        """Get real-time status of all models with live updates"""
+        try:
+            # Force refresh to get latest data
+            all_nodes = await self.get_nodes(force_refresh=True)
+            models_data = await self.get_models_by_category(force_refresh=True)
+            health_metrics = await self.get_network_health_metrics()
+            
+            # Combine all data for comprehensive status
+            real_time_status = {
+                "timestamp": time.time(),
+                "network_health": health_metrics,
+                "models": {},
+                "summary": {
+                    "total_models": len(models_data),
+                    "total_nodes": len(all_nodes),
+                    "active_nodes": len([n for n in all_nodes if time.time() - n.last_seen < 60]),
+                    "network_load": health_metrics.get("network_load", 0.0),
+                    "total_capacity": health_metrics.get("total_capacity", 0.0)
+                }
+            }
+            
+            # Add detailed model information
+            for model_name, model_info in models_data.items():
+                real_time_status["models"][model_name] = {
+                    **model_info,
+                    "capabilities": await self.discover_model_capabilities(model_name)
+                }
+            
+            logger.info(f"Generated real-time status for {len(models_data)} models")
+            return real_time_status
+            
+        except Exception as e:
+            logger.error(f"Error getting real-time model status: {e}")
+            return {
+                "timestamp": time.time(),
+                "error": str(e),
+                "models": {},
+                "summary": {"total_models": 0, "total_nodes": 0}
+            }
