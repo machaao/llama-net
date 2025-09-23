@@ -86,23 +86,24 @@ class DHTDiscovery(DiscoveryInterface):
         for contact in contacts:
             try:
                 # Create basic NodeInfo from contact
+                # Try to get actual node info via HTTP first
+                http_port = await self._probe_http_port(contact.ip, contact.node_id)
+                if http_port is None:
+                    http_port = 8000  # Default fallback
+                
+                # Create NodeInfo with IP:port format
                 node_info = NodeInfo(
-                    node_id=f"{contact.ip}:8000",  # Use IP:port format
+                    node_id=f"{contact.ip}:{http_port}",
                     ip=contact.ip,
-                    port=8000,  # Default HTTP port assumption
+                    port=http_port,
                     model="unknown",
                     last_seen=int(contact.last_seen)
                 )
                 
-                # Try to get actual node info via HTTP
-                http_port = await self._probe_http_port(contact.ip, contact.node_id)
-                if http_port:
-                    node_info.port = http_port
-                    
-                    # Get model info
-                    model_info = await self._get_node_model(contact.ip, http_port)
-                    if model_info:
-                        node_info.model = model_info
+                # Get model info
+                model_info = await self._get_node_model(contact.ip, http_port)
+                if model_info:
+                    node_info.model = model_info
                 
                 node_infos.append(node_info)
                 
