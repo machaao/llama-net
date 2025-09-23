@@ -646,8 +646,6 @@ class LlamaNetUI {
             `API: OpenAI Compatible (Streaming)`
         ];
 
-        console.log(streamState);
-        
         // Add node info if available with proper styling
         if (streamState.nodeInfo) {
             const processingType = streamState.nodeInfo.processing_node === 'forwarded' ? 'via' : 'on';
