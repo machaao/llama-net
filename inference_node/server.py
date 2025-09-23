@@ -677,6 +677,70 @@ async def verify_dht_network():
         logger.error(f"DHT verification error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/debug/routing")
+async def debug_routing():
+    """Debug endpoint to show routing information"""
+    if not dht_publisher or not dht_publisher.kademlia_node:
+        raise HTTPException(status_code=503, detail="DHT not initialized")
+    
+    debug_info = {
+        "local_node": {
+            "node_id": config.node_id,
+            "http_port": config.port,
+            "dht_port": config.dht_port,
+            "ip": get_host_ip()
+        },
+        "routing_table": {},
+        "storage": {},
+        "discovery_test": {}
+    }
+    
+    # Get routing table info
+    contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
+    debug_info["routing_table"] = {
+        "contact_count": len(contacts),
+        "contacts": [
+            {
+                "node_id": c.node_id,
+                "ip": c.ip,
+                "dht_port": c.port,
+                "last_seen": c.last_seen,
+                "seconds_ago": int(time.time() - c.last_seen)
+            }
+            for c in contacts
+        ]
+    }
+    
+    # Get storage info
+    debug_info["storage"] = {
+        "keys": list(dht_publisher.kademlia_node.storage.keys()),
+        "entries": {
+            key: value for key, value in dht_publisher.kademlia_node.storage.items()
+        }
+    }
+    
+    # Test discovery
+    try:
+        if dht_discovery:
+            discovered_nodes = await dht_discovery.get_nodes(force_refresh=True)
+            debug_info["discovery_test"] = {
+                "discovered_count": len(discovered_nodes),
+                "nodes": [
+                    {
+                        "node_id": n.node_id,
+                        "ip": n.ip,
+                        "http_port": n.port,
+                        "model": n.model,
+                        "last_seen": n.last_seen
+                    }
+                    for n in discovered_nodes
+                ]
+            }
+    except Exception as e:
+        debug_info["discovery_test"] = {"error": str(e)}
+    
+    return debug_info
+
 def start_server():
     """Start the inference server"""
     global config

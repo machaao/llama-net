@@ -77,34 +77,25 @@ class DHTDiscovery(DiscoveryInterface):
         node_infos = []
         
         for contact in contacts:
-            # Try to get detailed info from the contact
             try:
                 # Create basic NodeInfo from contact
                 node_info = NodeInfo(
                     node_id=contact.node_id,
                     ip=contact.ip,
                     port=8000,  # Default HTTP port assumption
-                    model="unknown",  # Will be updated when we get actual node info
+                    model="unknown",
                     last_seen=int(contact.last_seen)
                 )
                 
                 # Try to get actual node info via HTTP
-                try:
-                    import aiohttp
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
-                        # Try common HTTP ports
-                        for http_port in [8000, 8002, 8004]:
-                            try:
-                                async with session.get(f"http://{contact.ip}:{http_port}/info") as resp:
-                                    if resp.status == 200:
-                                        info = await resp.json()
-                                        node_info.port = http_port
-                                        node_info.model = info.get('model', 'unknown')
-                                        break
-                            except:
-                                continue
-                except:
-                    pass
+                http_port = await self._probe_http_port(contact.ip, contact.node_id)
+                if http_port:
+                    node_info.port = http_port
+                    
+                    # Get model info
+                    model_info = await self._get_node_model(contact.ip, http_port)
+                    if model_info:
+                        node_info.model = model_info
                 
                 node_infos.append(node_info)
                 
@@ -112,6 +103,44 @@ class DHTDiscovery(DiscoveryInterface):
                 logger.debug(f"Failed to get info for contact {contact.node_id[:8]}: {e}")
         
         return node_infos
+
+    async def _probe_http_port(self, ip: str, node_id: str) -> Optional[int]:
+        """Probe for the correct HTTP port for a node"""
+        import aiohttp
+        
+        # Try common HTTP ports
+        test_ports = [8000, 8002, 8004, 8006, 8008, 8010]
+        
+        for port in test_ports:
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1)) as session:
+                    async with session.get(f"http://{ip}:{port}/info") as resp:
+                        if resp.status == 200:
+                            info = await resp.json()
+                            # Verify this is the correct node by checking node_id
+                            if info.get('node_id') == node_id:
+                                logger.debug(f"Found HTTP port {port} for node {node_id[:8]}...")
+                                return port
+            except:
+                continue
+        
+        logger.warning(f"Could not find HTTP port for node {node_id[:8]}... on {ip}")
+        return None
+
+    async def _get_node_model(self, ip: str, port: int) -> Optional[str]:
+        """Get model information from a node"""
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1)) as session:
+                async with session.get(f"http://{ip}:{port}/info") as resp:
+                    if resp.status == 200:
+                        info = await resp.json()
+                        return info.get('model', 'unknown')
+        except:
+            pass
+        
+        return 'unknown'
 
     async def _get_published_nodes(self, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get published nodes from DHT storage"""
@@ -141,7 +170,7 @@ class DHTDiscovery(DiscoveryInterface):
     async def _refresh_nodes(self, model: Optional[str] = None):
         """Refresh the nodes cache from DHT with enhanced discovery"""
         try:
-            # Use a dict to ensure uniqueness by node_id
+            # Use a dict to ensure uniqueness by node_id (not ip:port)
             unique_nodes = {}
             
             # Get published nodes from multiple DHT sources
@@ -170,6 +199,7 @@ class DHTDiscovery(DiscoveryInterface):
                                 'source': 'published',
                                 'priority': 1
                             }
+                            logger.debug(f"Added published node: {node_id[:8]}... at {node_info.ip}:{node_info.port}")
                         except Exception as e:
                             logger.warning(f"Failed to parse published node: {e}")
             
@@ -185,6 +215,13 @@ class DHTDiscovery(DiscoveryInterface):
                             'source': 'dht_contact',
                             'priority': 2
                         }
+                        logger.debug(f"Added DHT contact: {node_id[:8]}... at {contact_node.ip}:{contact_node.port}")
+                else:
+                    # Update port info if we have better data from routing table
+                    existing = unique_nodes[node_id]['node']
+                    if existing.model == "unknown" and contact_node.model != "unknown":
+                        existing.model = contact_node.model
+                        logger.debug(f"Updated model for {node_id[:8]}...: {contact_node.model}")
             
             # Convert to list and update cache
             self.nodes_cache = [entry['node'] for entry in unique_nodes.values()]
@@ -205,6 +242,10 @@ class DHTDiscovery(DiscoveryInterface):
             
             logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} unique nodes")
             logger.info(f"Sources: {published_count} published, {contact_count} DHT contacts")
+            
+            # Log all discovered nodes for debugging
+            for node in self.nodes_cache:
+                logger.debug(f"Available node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
             
             if published_count == 0 and len(published_nodes) > 0:
                 logger.warning("Published nodes found but none were valid - possible data corruption")

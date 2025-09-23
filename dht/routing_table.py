@@ -61,12 +61,19 @@ class RoutingTable:
         existing_contact_ids = [c.node_id for c in self.buckets[bucket_index].contacts]
         is_new_contact = contact.node_id not in existing_contact_ids
         
+        # IMPORTANT: Remove old contact with same node_id (not ip:port combo)
+        # This ensures we update the contact info if ports change
+        self.buckets[bucket_index].contacts = [
+            c for c in self.buckets[bucket_index].contacts 
+            if c.node_id != contact.node_id
+        ]
+        
         self.buckets[bucket_index].add_contact(contact)
         
         if is_new_contact:
             logger.info(f"🔗 New DHT contact added: {contact.node_id[:12]}... ({contact.ip}:{contact.port})")
         else:
-            logger.debug(f"Updated contact {contact.node_id[:8]} in bucket {bucket_index}")
+            logger.debug(f"Updated contact {contact.node_id[:8]} in bucket {bucket_index} - new address: {contact.ip}:{contact.port}")
     
     def remove_contact(self, node_id: str):
         """Remove a contact from the routing table"""
