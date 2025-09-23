@@ -284,7 +284,7 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
             if request.stream:
-                # Handle streaming requests
+                # Handle streaming requests - REUSE STREAM_GENERATOR PATTERN
                 async with session.post(
                     url,
                     json=request_dict,
@@ -292,13 +292,41 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
                 ) as response:
                     
                     if response.status == 200:
-                        async def stream_generator():
+                        # Create new request ID for this forwarded stream
+                        request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+                        
+                        # Parse the forwarded SSE stream and convert to internal format
+                        async def forwarded_stream_generator():
+                            """Convert forwarded SSE to internal stream format using single-line processing"""
+                            buffer = ""
                             async for chunk in response.content.iter_any():
                                 if chunk:
-                                    yield chunk
+                                    buffer += chunk.decode('utf-8', errors='ignore')
+                                    lines = buffer.split('\n')
+                                    buffer = lines.pop()  # Keep incomplete line
+                                    
+                                    # Single-line SSE processing for completion format
+                                    for data in [line[6:].strip() for line in lines if line.startswith('data: ') and line[6:].strip() and line[6:].strip() != '[DONE]']:
+                                        try:
+                                            chunk_data = json.loads(data)
+                                            if chunk_data.get('choices') and len(chunk_data['choices']) > 0:
+                                                choice = chunk_data['choices'][0]
+                                                if choice.get('text'):
+                                                    yield {
+                                                        "text": choice['text'],
+                                                        "finished": choice.get('finish_reason') is not None
+                                                    }
+                                                if choice.get('finish_reason'):
+                                                    return
+                                        except json.JSONDecodeError:
+                                            continue
                         
                         return StreamingResponse(
-                            stream_generator(),
+                            create_streaming_completion_response(
+                                request_id=request_id,
+                                model=request.model,
+                                stream_generator=forwarded_stream_generator()
+                            ),
                             media_type="text/plain",
                             headers={
                                 "Cache-Control": "no-cache",
