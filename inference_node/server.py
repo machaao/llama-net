@@ -407,13 +407,19 @@ async def dht_status():
     
     # Format contact information
     contacts = []
+    current_time = time.time()
     for contact in all_contacts:
         contacts.append({
             "node_id": contact.node_id,
             "ip": contact.ip,
             "port": contact.port,
-            "last_seen": contact.last_seen
+            "last_seen": contact.last_seen,
+            "seconds_ago": int(current_time - contact.last_seen),
+            "status": "active" if current_time - contact.last_seen < 30 else "stale"
         })
+    
+    # Get cleanup stats
+    cleanup_stats = kademlia_node.get_cleanup_stats()
     
     return {
         "node_id": kademlia_node.node_id,
@@ -422,7 +428,8 @@ async def dht_status():
         "contacts_count": len(all_contacts),
         "contacts": contacts,
         "storage_keys": list(kademlia_node.storage.keys()),
-        "bootstrap_nodes": dht_publisher.bootstrap_nodes
+        "bootstrap_nodes": dht_publisher.bootstrap_nodes,
+        "cleanup_stats": cleanup_stats
     }
 
 def start_server():

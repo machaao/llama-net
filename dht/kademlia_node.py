@@ -60,6 +60,11 @@ class KademliaNode:
         self.alpha = 3  # concurrency parameter
         self.ttl = 86400  # 24 hours in seconds
         
+        # Cleanup parameters
+        self.cleanup_interval = 30  # Cleanup every 30 seconds
+        self.cleanup_task = None
+        self.last_cleanup = 0
+        
     def _generate_node_id(self) -> str:
         """Generate a random 160-bit node ID"""
         return hashlib.sha1(str(random.random()).encode()).hexdigest()
@@ -136,6 +141,10 @@ class KademliaNode:
         
         logger.info(f"Kademlia node {self.node_id[:8]} started on port {self.port}")
         
+        # Start cleanup task
+        self.cleanup_task = asyncio.create_task(self._cleanup_loop())
+        logger.info(f"🧹 Started cleanup task (interval: {self.cleanup_interval}s)")
+        
         # Bootstrap if nodes provided
         if bootstrap_nodes:
             await self._bootstrap(bootstrap_nodes)
@@ -143,6 +152,16 @@ class KademliaNode:
     async def stop(self):
         """Stop the Kademlia node"""
         self.running = False
+        
+        # Stop cleanup task
+        if self.cleanup_task:
+            self.cleanup_task.cancel()
+            try:
+                await self.cleanup_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("🧹 Cleanup task stopped")
+        
         if self.server:
             try:
                 # self.server is a tuple (transport, protocol) from create_datagram_endpoint
@@ -152,6 +171,96 @@ class KademliaNode:
                 logger.warning(f"Error closing UDP transport: {e}")
             finally:
                 self.server = None
+    
+    async def _cleanup_loop(self):
+        """Periodically clean up stale contacts and verify connectivity"""
+        while self.running:
+            try:
+                await asyncio.sleep(self.cleanup_interval)
+                if self.running:
+                    await self._verify_contacts()
+                    removed_count = self.routing_table.cleanup_stale_contacts()
+                    await self._cleanup_storage()
+                    self.last_cleanup = time.time()
+                    
+                    if removed_count > 0:
+                        logger.info(f"🧹 Cleanup completed: removed {removed_count} stale contacts")
+                    else:
+                        logger.debug("🧹 Cleanup completed: no stale contacts found")
+                        
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cleanup loop: {e}")
+    
+    async def _verify_contacts(self):
+        """Ping contacts to verify they're still alive"""
+        all_contacts = self.routing_table.get_all_contacts()
+        current_time = time.time()
+        
+        # Check contacts that haven't been seen recently (30+ seconds)
+        stale_contacts = [
+            contact for contact in all_contacts
+            if current_time - contact.last_seen > 30
+        ]
+        
+        if not stale_contacts:
+            logger.debug("🔍 No stale contacts to verify")
+            return
+        
+        logger.info(f"🔍 Verifying {len(stale_contacts)} potentially stale contacts")
+        
+        # Ping stale contacts concurrently (limit to 5 at a time)
+        semaphore = asyncio.Semaphore(5)
+        tasks = [self._verify_contact(contact, semaphore) for contact in stale_contacts]
+        
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            alive_count = sum(1 for result in results if result is True)
+            logger.info(f"🔍 Contact verification: {alive_count}/{len(stale_contacts)} contacts are alive")
+    
+    async def _verify_contact(self, contact, semaphore):
+        """Verify a single contact is still alive"""
+        async with semaphore:
+            try:
+                verified_contact = await self._ping_node(contact.ip, contact.port)
+                if verified_contact:
+                    # Contact is alive, update last_seen
+                    self.routing_table.update_contact_seen(contact.node_id)
+                    logger.debug(f"✅ Contact {contact.node_id[:8]}... is alive")
+                    return True
+                else:
+                    # Contact is dead, will be removed by cleanup
+                    logger.info(f"💀 Contact {contact.node_id[:8]}... is unreachable")
+                    return False
+            except Exception as e:
+                logger.debug(f"Error verifying contact {contact.node_id[:8]}...: {e}")
+                return False
+    
+    async def _cleanup_storage(self):
+        """Clean up expired storage entries"""
+        current_time = time.time()
+        expired_keys = []
+        
+        for key, stored_item in self.storage.items():
+            if current_time - stored_item['timestamp'] > self.ttl:
+                expired_keys.append(key)
+        
+        for key in expired_keys:
+            del self.storage[key]
+            logger.debug(f"🗑️ Removed expired storage key: {key}")
+        
+        if expired_keys:
+            logger.info(f"🗑️ Cleaned up {len(expired_keys)} expired storage entries")
+    
+    def get_cleanup_stats(self) -> Dict[str, Any]:
+        """Get cleanup statistics"""
+        return {
+            "last_cleanup": self.last_cleanup,
+            "cleanup_interval": self.cleanup_interval,
+            "routing_table_stats": self.routing_table.get_stats(),
+            "storage_entries": len(self.storage)
+        }
     
     async def _bootstrap(self, bootstrap_nodes: List[Tuple[str, int]]):
         """Bootstrap by connecting to existing nodes"""
