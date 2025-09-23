@@ -182,7 +182,7 @@ async def create_completion(request: OpenAICompletionRequest):
         return await _handle_completion_locally(request)
 
 async def _handle_completion_locally(request: OpenAICompletionRequest):
-    """Handle completion on this node"""
+    """Handle completion on this node with robust SSE handling"""
     # Handle prompt (can be string or list)
     if isinstance(request.prompt, list):
         if len(request.prompt) == 0:
@@ -203,26 +203,37 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
             stop_tokens = None
     
     try:
-        # Handle streaming
+        # Handle streaming with robust error handling
         if request.stream:
             request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
             
-            async def stream_generator():
-                async for chunk in llm.generate_stream_async(
-                    prompt=prompt,
-                    max_tokens=request.max_tokens or 100,
-                    temperature=request.temperature or 0.7,
-                    top_p=request.top_p or 0.9,
-                    stop=stop_tokens,
-                    repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
-                ):
-                    yield chunk
+            async def local_stream_generator():
+                try:
+                    async for chunk in llm.generate_stream_async(
+                        prompt=prompt,
+                        max_tokens=request.max_tokens or 100,
+                        temperature=request.temperature or 0.7,
+                        top_p=request.top_p or 0.9,
+                        stop=stop_tokens,
+                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                    ):
+                        # Transform to consistent format
+                        yield {
+                            "text": chunk.get("text", ""),
+                            "finished": chunk.get("finished", False)
+                        }
+                except asyncio.CancelledError:
+                    logger.info("Local streaming cancelled")
+                    raise
+                except Exception as e:
+                    logger.error(f"Error in local streaming: {e}")
+                    # Don't re-raise, just end the stream gracefully
             
             return StreamingResponse(
                 create_streaming_completion_response(
                     request_id=request_id,
                     model=request.model,
-                    stream_generator=stream_generator()
+                    stream_generator=local_stream_generator()
                 ),
                 media_type="text/plain",
                 headers={
@@ -268,7 +279,7 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
         )
         
     except Exception as e:
-        logger.error(f"Completion error: {e}")
+        logger.error(f"Local completion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_completion(request: OpenAICompletionRequest, target_node):
@@ -363,7 +374,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         return await _handle_chat_completion_locally(request)
 
 async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
-    """Handle chat completion on this node"""
+    """Handle chat completion on this node with robust SSE handling"""
     # Convert messages to a single prompt - IMPROVED FORMAT
     prompt_parts = []
     for message in request.messages:
@@ -390,26 +401,37 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         stop_tokens = ["\n\nHuman:", "\n\nUser:", "\nHuman:", "\nUser:", "Human:", "User:"]
     
     try:
-        # Handle streaming with FIXED response format
+        # Handle streaming with robust error handling
         if request.stream:
             request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
             
-            async def stream_generator():
-                async for chunk in llm.generate_stream_async(
-                    prompt=prompt,
-                    max_tokens=request.max_tokens or 100,
-                    temperature=request.temperature or 0.7,
-                    top_p=request.top_p or 0.9,
-                    stop=stop_tokens,
-                    repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
-                ):
-                    yield chunk
+            async def local_stream_generator():
+                try:
+                    async for chunk in llm.generate_stream_async(
+                        prompt=prompt,
+                        max_tokens=request.max_tokens or 100,
+                        temperature=request.temperature or 0.7,
+                        top_p=request.top_p or 0.9,
+                        stop=stop_tokens,
+                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                    ):
+                        # Transform to consistent format
+                        yield {
+                            "text": chunk.get("text", ""),
+                            "finished": chunk.get("finished", False)
+                        }
+                except asyncio.CancelledError:
+                    logger.info("Local chat streaming cancelled")
+                    raise
+                except Exception as e:
+                    logger.error(f"Error in local chat streaming: {e}")
+                    # Don't re-raise, just end the stream gracefully
             
             return StreamingResponse(
                 create_streaming_chat_response(
                     request_id=request_id,
                     model=request.model,
-                    stream_generator=stream_generator()
+                    stream_generator=local_stream_generator()
                 ),
                 media_type="text/plain",
                 headers={
@@ -460,7 +482,7 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         )
         
     except Exception as e:
-        logger.error(f"Chat completion error: {e}")
+        logger.error(f"Local chat completion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_node):
