@@ -18,6 +18,7 @@ from common.models import (
     OpenAIChoice, OpenAIUsage, OpenAIMessage,
     create_streaming_chat_response, create_streaming_completion_response
 )
+from common.sse_handler import SSEForwarder
 
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
@@ -271,7 +272,7 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_completion(request: OpenAICompletionRequest, target_node):
-    """Forward completion request to another node using async HTTP client"""
+    """Forward completion request to another node using robust SSE handling"""
     try:
         # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
@@ -279,67 +280,32 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
         
         url = f"http://{target_node.ip}:{target_node.port}/v1/completions"
         
-        # Use async HTTP client with proper timeout
-        timeout = aiohttp.ClientTimeout(total=30, connect=5)
-        
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            if request.stream:
-                # Handle streaming requests - REUSE STREAM_GENERATOR PATTERN
-                async with session.post(
-                    url,
-                    json=request_dict,
-                    headers={"Content-Type": "application/json"}
-                ) as response:
-                    
-                    if response.status == 200:
-                        # Create new request ID for this forwarded stream
-                        request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
-                        
-                        # Parse the forwarded SSE stream and convert to internal format
-                        async def forwarded_stream_generator():
-                            """Convert forwarded SSE to internal stream format using single-line processing"""
-                            buffer = ""
-                            async for chunk in response.content.iter_any():
-                                if chunk:
-                                    buffer += chunk.decode('utf-8', errors='ignore')
-                                    lines = buffer.split('\n')
-                                    buffer = lines.pop()  # Keep incomplete line
-                                    
-                                    # Single-line SSE processing for completion format
-                                    for data in [line[6:].strip() for line in lines if line.startswith('data: ') and line[6:].strip() and line[6:].strip() != '[DONE]']:
-                                        try:
-                                            chunk_data = json.loads(data)
-                                            if chunk_data.get('choices') and len(chunk_data['choices']) > 0:
-                                                choice = chunk_data['choices'][0]
-                                                if choice.get('text'):
-                                                    yield {
-                                                        "text": choice['text'],
-                                                        "finished": choice.get('finish_reason') is not None
-                                                    }
-                                                if choice.get('finish_reason'):
-                                                    return
-                                        except json.JSONDecodeError:
-                                            continue
-                        
-                        return StreamingResponse(
-                            create_streaming_completion_response(
-                                request_id=request_id,
-                                model=request.model,
-                                stream_generator=forwarded_stream_generator()
-                            ),
-                            media_type="text/plain",
-                            headers={
-                                "Cache-Control": "no-cache",
-                                "Connection": "keep-alive",
-                                "Content-Type": "text/plain; charset=utf-8"
-                            }
-                        )
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Forwarded streaming completion failed: {response.status} {error_text}")
-                        raise HTTPException(status_code=response.status, detail=error_text)
-            else:
-                # Non-streaming request
+        if request.stream:
+            # Use the new SSE forwarder for streaming
+            request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+            sse_forwarder = SSEForwarder(timeout=30)
+            
+            async def forwarded_stream_generator():
+                async for chunk in sse_forwarder.forward_completion_stream(url, request_dict):
+                    yield chunk
+            
+            return StreamingResponse(
+                create_streaming_completion_response(
+                    request_id=request_id,
+                    model=request.model,
+                    stream_generator=forwarded_stream_generator()
+                ),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
+            )
+        else:
+            # Non-streaming request (unchanged)
+            timeout = aiohttp.ClientTimeout(total=30, connect=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     url,
                     json=request_dict,
@@ -498,47 +464,40 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_node):
-    """Forward chat completion request to another node using async HTTP client"""
+    """Forward chat completion request to another node using robust SSE handling"""
     try:
         # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
-        request_dict.pop('strategy', 'local')
+        request_dict.pop('strategy', None)
         
         url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
         
-        # Use async HTTP client with proper timeout
-        timeout = aiohttp.ClientTimeout(total=30, connect=5)
-        
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            if request.stream:
-                # Handle streaming requests
-                async with session.post(
-                    url,
-                    json=request_dict,
-                    headers={"Content-Type": "application/json"}
-                ) as response:
-                    
-                    if response.status == 200:
-                        async def stream_generator():
-                            async for chunk in response.content.iter_any():
-                                if chunk:
-                                    yield chunk
-                        
-                        return StreamingResponse(
-                            stream_generator(),
-                            media_type="text/plain",
-                            headers={
-                                "Cache-Control": "no-cache",
-                                "Connection": "keep-alive",
-                                "Content-Type": "text/plain; charset=utf-8"
-                            }
-                        )
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Forwarded streaming chat completion failed: {response.status} {error_text}")
-                        raise HTTPException(status_code=response.status, detail=error_text)
-            else:
-                # Non-streaming request
+        if request.stream:
+            # Use the new SSE forwarder for streaming
+            request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            sse_forwarder = SSEForwarder(timeout=30)
+            
+            async def forwarded_stream_generator():
+                async for chunk in sse_forwarder.forward_chat_stream(url, request_dict):
+                    yield chunk
+            
+            return StreamingResponse(
+                create_streaming_chat_response(
+                    request_id=request_id,
+                    model=request.model,
+                    stream_generator=forwarded_stream_generator()
+                ),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
+            )
+        else:
+            # Non-streaming request (unchanged)
+            timeout = aiohttp.ClientTimeout(total=30, connect=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     url,
                     json=request_dict,
