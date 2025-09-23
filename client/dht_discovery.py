@@ -199,24 +199,10 @@ class DHTDiscovery(DiscoveryInterface):
                                 'source': 'published',
                                 'priority': 1
                             }
-                            logger.debug(f"Added published node: {node_id[:8]}... at {node_info.ip}:{node_info.port}")
+                            logger.info(f"Added published node: {node_id[:8]}... at {node_info.ip}:{node_info.port}")
                         except Exception as e:
                             logger.warning(f"Failed to parse published node: {e}")
-            
-            # 2. If no published nodes found, fall back to DHT routing table contacts
-            if not unique_nodes:
-                logger.warning("No published nodes found, falling back to DHT routing table contacts")
-                routing_contacts = await self._get_routing_table_contacts()
-                
-                for node_info in routing_contacts:
-                    if node_info.node_id not in unique_nodes:
-                        unique_nodes[node_info.node_id] = {
-                            'node': node_info,
-                            'source': 'dht_contact',
-                            'priority': 2
-                        }
-                        logger.debug(f"Added DHT contact: {node_info.node_id[:8]}... at {node_info.ip}:{node_info.port}")
-            
+
             # Convert to list and update cache
             self.nodes_cache = [entry['node'] for entry in unique_nodes.values()]
             
