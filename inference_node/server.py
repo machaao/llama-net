@@ -258,8 +258,20 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
                 timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
                 if response.status == 200:
-                    response_data = await response.json()
-                    return OpenAICompletionResponse(**response_data)
+                    # Check content type to handle streaming vs non-streaming
+                    content_type = response.headers.get('content-type', '')
+                    
+                    if 'text/plain' in content_type:
+                        # This is a streaming response, return it as-is
+                        return StreamingResponse(
+                            response.content.iter_any(),
+                            media_type=content_type,
+                            headers=dict(response.headers)
+                        )
+                    else:
+                        # This is a JSON response
+                        response_data = await response.json()
+                        return OpenAICompletionResponse(**response_data)
                 else:
                     error_text = await response.text()
                     logger.error(f"Forwarded request failed: {response.status} {error_text}")
@@ -420,8 +432,20 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
                 timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
                 if response.status == 200:
-                    response_data = await response.json()
-                    return OpenAIChatCompletionResponse(**response_data)
+                    # Check content type to handle streaming vs non-streaming
+                    content_type = response.headers.get('content-type', '')
+                    
+                    if 'text/plain' in content_type:
+                        # This is a streaming response, return it as-is
+                        return StreamingResponse(
+                            response.content.iter_any(),
+                            media_type=content_type,
+                            headers=dict(response.headers)
+                        )
+                    else:
+                        # This is a JSON response
+                        response_data = await response.json()
+                        return OpenAIChatCompletionResponse(**response_data)
                 else:
                     error_text = await response.text()
                     logger.error(f"Forwarded request failed: {response.status} {error_text}")
