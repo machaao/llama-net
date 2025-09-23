@@ -645,6 +645,8 @@ class LlamaNetUI {
             `Tokens: ~${streamState.totalTokens}`,
             `API: OpenAI Compatible (Streaming)`
         ];
+
+        console.log(streamState);
         
         // Add node info if available with proper styling
         if (streamState.nodeInfo) {
