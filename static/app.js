@@ -4,7 +4,6 @@ class LlamaNetUI {
         this.nodes = [];
         this.selectedNode = null;
         this.chatHistory = [];
-        this.streamUI = new StreamUI(this.baseUrl);
         
         this.init();
     }
