@@ -354,39 +354,85 @@ async def get_all_nodes():
         raise HTTPException(status_code=503, detail="DHT not initialized")
     
     try:
-        # Query DHT for all nodes
+        # Get published nodes from DHT storage
         all_nodes_data = await dht_publisher.kademlia_node.find_value("all_nodes")
         
-        nodes = []
+        published_nodes = []
         if all_nodes_data:
             if isinstance(all_nodes_data, list):
-                nodes.extend(all_nodes_data)
+                published_nodes.extend(all_nodes_data)
             else:
-                nodes.append(all_nodes_data)
+                published_nodes.append(all_nodes_data)
         
-        # Filter out stale nodes and format response
+        # ALSO get contacts from routing table
+        routing_contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
+        
+        # Convert to unified format
         current_time = time.time()
         active_nodes = []
+        seen_node_ids = set()
         
-        for node_data in nodes:
+        # Process published nodes first (they have complete info)
+        for node_data in published_nodes:
             if isinstance(node_data, dict):
+                node_id = node_data.get('node_id')
                 last_seen = node_data.get('last_seen', 0)
-                if current_time - last_seen < 60:  # Active within last minute
+                
+                if node_id and current_time - last_seen < 60:  # Active within last minute
                     active_nodes.append({
-                        "node_id": node_data.get('node_id'),
+                        "node_id": node_id,
                         "ip": node_data.get('ip'),
                         "port": node_data.get('port'),
                         "model": node_data.get('model'),
                         "load": node_data.get('load', 0),
                         "tps": node_data.get('tps', 0),
                         "uptime": node_data.get('uptime', 0),
-                        "last_seen": last_seen
+                        "last_seen": last_seen,
+                        "source": "published"
                     })
+                    seen_node_ids.add(node_id)
+        
+        # Add routing table contacts that aren't already included
+        for contact in routing_contacts:
+            if contact.node_id not in seen_node_ids and current_time - contact.last_seen < 60:
+                # Try to get HTTP port and model info
+                http_port = 8000  # Default assumption
+                model = "unknown"
+                
+                # Try to detect HTTP port by testing common ports
+                import requests
+                for test_port in [8000, 8002, 8004]:
+                    try:
+                        response = requests.get(f"http://{contact.ip}:{test_port}/info", timeout=1)
+                        if response.status_code == 200:
+                            info = response.json()
+                            http_port = test_port
+                            model = info.get('model', 'unknown')
+                            break
+                    except:
+                        continue
+                
+                active_nodes.append({
+                    "node_id": contact.node_id,
+                    "ip": contact.ip,
+                    "port": http_port,
+                    "model": model,
+                    "load": 0.0,  # Unknown
+                    "tps": 0.0,   # Unknown
+                    "uptime": 0,  # Unknown
+                    "last_seen": int(contact.last_seen),
+                    "source": "dht_contact"
+                })
+                seen_node_ids.add(contact.node_id)
         
         return {
             "nodes": active_nodes,
             "total_count": len(active_nodes),
-            "timestamp": current_time
+            "timestamp": current_time,
+            "sources": {
+                "published": len([n for n in active_nodes if n.get("source") == "published"]),
+                "dht_contacts": len([n for n in active_nodes if n.get("source") == "dht_contact"])
+            }
         }
         
     except Exception as e:

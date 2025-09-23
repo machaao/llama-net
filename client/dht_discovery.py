@@ -68,13 +68,58 @@ class DHTDiscovery(DiscoveryInterface):
         
         return self.nodes_cache
     
+    async def _get_routing_table_contacts(self) -> List[NodeInfo]:
+        """Get contacts from DHT routing table and convert to NodeInfo"""
+        if not self.kademlia_node:
+            return []
+        
+        contacts = self.kademlia_node.routing_table.get_all_contacts()
+        node_infos = []
+        
+        for contact in contacts:
+            # Try to get detailed info from the contact
+            try:
+                # Create basic NodeInfo from contact
+                node_info = NodeInfo(
+                    node_id=contact.node_id,
+                    ip=contact.ip,
+                    port=8000,  # Default HTTP port assumption
+                    model="unknown",  # Will be updated when we get actual node info
+                    last_seen=int(contact.last_seen)
+                )
+                
+                # Try to get actual node info via HTTP
+                try:
+                    import aiohttp
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session:
+                        # Try common HTTP ports
+                        for http_port in [8000, 8002, 8004]:
+                            try:
+                                async with session.get(f"http://{contact.ip}:{http_port}/info") as resp:
+                                    if resp.status == 200:
+                                        info = await resp.json()
+                                        node_info.port = http_port
+                                        node_info.model = info.get('model', 'unknown')
+                                        break
+                            except:
+                                continue
+                except:
+                    pass
+                
+                node_infos.append(node_info)
+                
+            except Exception as e:
+                logger.debug(f"Failed to get info for contact {contact.node_id[:8]}: {e}")
+        
+        return node_infos
+
     async def _refresh_nodes(self, model: Optional[str] = None):
         """Refresh the nodes cache from DHT"""
         try:
             nodes = []
             
+            # Get nodes from DHT storage (published data)
             if model:
-                # Look for specific model
                 key = f"model:{model}"
                 node_data = await self.kademlia_node.find_value(key)
                 if node_data:
@@ -84,7 +129,6 @@ class DHTDiscovery(DiscoveryInterface):
                         nodes.append(node_data)
                 self._cache_is_model_specific = True
             else:
-                # Look for all nodes
                 key = "all_nodes"
                 node_data = await self.kademlia_node.find_value(key)
                 if node_data:
@@ -94,30 +138,44 @@ class DHTDiscovery(DiscoveryInterface):
                         nodes.append(node_data)
                 self._cache_is_model_specific = False
             
-            # Convert to NodeInfo objects and deduplicate
+            # ALSO get contacts from routing table
+            routing_contacts = await self._get_routing_table_contacts()
+            
+            # Convert published data to NodeInfo objects
             seen_nodes = set()
             self.nodes_cache = []
             
+            # Process published node data first (higher priority)
             for node_data in nodes:
                 if isinstance(node_data, dict):
                     node_id = node_data.get('node_id')
                     if node_id and node_id not in seen_nodes:
                         try:
                             node_info = NodeInfo(**node_data)
-                            # Filter out stale nodes (older than 60 seconds)
                             if time.time() - node_info.last_seen < 60:
                                 self.nodes_cache.append(node_info)
                                 seen_nodes.add(node_id)
                                 
-                                # Check if this is a new node
                                 if node_id not in self.known_node_ids:
-                                    logger.info(f"🆕 New node discovered: {node_id[:12]}... ({node_data.get('ip')}:{node_data.get('port')}) - Model: {node_data.get('model')}")
+                                    logger.info(f"🆕 New published node: {node_id[:12]}... ({node_data.get('ip')}:{node_data.get('port')}) - Model: {node_data.get('model')}")
                                     self.known_node_ids.add(node_id)
                         except Exception as e:
-                            logger.warning(f"Failed to parse node data: {e}")
+                            logger.warning(f"Failed to parse published node data: {e}")
+            
+            # Add routing table contacts that aren't already known
+            for contact_node in routing_contacts:
+                if contact_node.node_id not in seen_nodes:
+                    # Filter by model if specified
+                    if not model or contact_node.model == model or contact_node.model == "unknown":
+                        self.nodes_cache.append(contact_node)
+                        seen_nodes.add(contact_node.node_id)
+                        
+                        if contact_node.node_id not in self.known_node_ids:
+                            logger.info(f"🔗 New DHT contact node: {contact_node.node_id[:12]}... ({contact_node.ip}:{contact_node.port}) - Model: {contact_node.model}")
+                            self.known_node_ids.add(contact_node.node_id)
             
             self.cache_time = time.time()
-            logger.debug(f"Refreshed nodes cache, found {len(self.nodes_cache)} nodes")
+            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} total nodes ({len(nodes)} published + {len(routing_contacts)} DHT contacts)")
             
         except Exception as e:
             logger.error(f"Error refreshing nodes from DHT: {e}")

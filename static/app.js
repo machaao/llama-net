@@ -146,6 +146,10 @@ class LlamaNetUI {
             const nodeResponse = await fetch(`${this.baseUrl}/info`);
             const nodeInfo = await nodeResponse.json();
             
+            // Show source breakdown if available
+            const sourceInfo = nodesData.sources ? 
+                `<div class="small text-muted">Published: ${nodesData.sources.published} | DHT: ${nodesData.sources.dht_contacts}</div>` : '';
+            
             container.innerHTML = `
                 <div class="mb-3">
                     <h6><i class="fas fa-server"></i> Current Node</h6>
@@ -165,6 +169,7 @@ class LlamaNetUI {
                     <h6><i class="fas fa-network-wired"></i> DHT Network</h6>
                     <div class="small">
                         <div>Active Nodes: ${nodesData.total_count}</div>
+                        ${sourceInfo}
                         <div>DHT Contacts: ${dhtStatus.contacts_count}</div>
                         <div>DHT Port: ${dhtStatus.dht_port}</div>
                     </div>
@@ -239,12 +244,17 @@ class LlamaNetUI {
                         const statusClass = isRecent ? 'online' : 'warning';
                         const lastSeenText = this.formatLastSeen(node.last_seen);
                         
+                        // Show source badge
+                        const sourceBadge = node.source === 'dht_contact' 
+                            ? '<span class="badge bg-info ms-1">DHT</span>'
+                            : '<span class="badge bg-primary ms-1">Published</span>';
+                        
                         return `
                             <div class="node-item small ms-2" data-node-id="${node.node_id}">
                                 <div class="d-flex align-items-center">
                                     <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
                                     <div class="flex-grow-1">
-                                        <div class="fw-bold">${node.node_id.substring(0, 8)}...</div>
+                                        <div class="fw-bold">${node.node_id.substring(0, 8)}... ${sourceBadge}</div>
                                         <div class="text-muted">${node.ip}:${node.port}</div>
                                         <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
                                         <div class="text-muted small">${lastSeenText}</div>

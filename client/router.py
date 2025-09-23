@@ -20,18 +20,21 @@ class NodeSelector:
                          strategy: str = "round_robin",  # "load_balanced", "round_robin", "random"
                          randomize: bool = True) -> Optional[NodeInfo]:
         """Select the best node based on criteria and strategy"""
-        # Get nodes from DHT
+        # Get nodes from DHT (now includes routing table contacts)
         nodes = await self.dht_discovery.get_nodes(model)
         
         if not nodes:
             logger.warning(f"No nodes available for model {model}")
             return None
             
-        # Filter by criteria
-        eligible_nodes = [
-            node for node in nodes
-            if node.tps >= min_tps and node.load <= max_load
-        ]
+        # Filter by criteria (be more lenient for DHT contacts with unknown metrics)
+        eligible_nodes = []
+        for node in nodes:
+            # For nodes with unknown metrics (DHT contacts), be more permissive
+            if node.model == "unknown" or node.tps == 0.0:
+                eligible_nodes.append(node)  # Include DHT contacts regardless of metrics
+            elif node.tps >= min_tps and node.load <= max_load:
+                eligible_nodes.append(node)
         
         if not eligible_nodes:
             logger.warning(f"No nodes meet criteria (min_tps={min_tps}, max_load={max_load})")
