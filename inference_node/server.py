@@ -3,6 +3,7 @@ import time
 import uuid
 import uvicorn
 import os
+import aiohttp
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
@@ -38,6 +39,9 @@ heartbeat_manager = None
 dht_discovery = None
 node_selector = None
 round_robin_state = {"index": 0}  # Global round robin state
+
+# Request concurrency limiting
+REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -91,6 +95,25 @@ static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+def _should_forward_request(request, target_node) -> bool:
+    """Check if request should be forwarded to avoid loops"""
+    # Don't forward if target is ourselves
+    if target_node.node_id == config.node_id:
+        return False
+    
+    # Don't forward if strategy is 'local'
+    strategy = getattr(request, 'strategy', None)
+    if strategy == 'local':
+        return False
+    
+    # Add forwarding hop count to prevent infinite loops
+    forwarded_count = getattr(request, '_forwarded_count', 0)
+    if forwarded_count >= 2:  # Max 2 hops
+        logger.warning(f"Request already forwarded {forwarded_count} times, processing locally")
+        return False
+    
+    return True
+
 # Web UI endpoint
 @app.get("/")
 async def web_ui():
@@ -127,32 +150,35 @@ async def list_models():
 @app.post("/v1/completions")
 async def create_completion(request: OpenAICompletionRequest):
     """Create a completion (OpenAI-compatible)"""
-    if not llm:
-        raise HTTPException(status_code=503, detail="LLM not initialized")
-    
-    # Check if request has strategy parameter for routing
-    strategy = getattr(request, 'strategy', None)
-    
-    # If strategy is specified and we have node selector, try to route request
-    if strategy and node_selector and strategy != "local":
-        try:
-            # Get available nodes
-            nodes = await dht_discovery.get_nodes()
-            if len(nodes) > 1:  # Only route if there are other nodes
-                selected_node = await node_selector.select_node(
-                    model=request.model,
-                    strategy=strategy
-                )
-                
-                # If selected node is not us, forward the request
-                if selected_node and selected_node.node_id != config.node_id:
-                    logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... via {strategy}")
-                    return await _forward_completion(request, selected_node)
-        except Exception as e:
-            logger.warning(f"Failed to route request, handling locally: {e}")
-    
-    # Handle locally (original logic)
-    return await _handle_completion_locally(request)
+    async with REQUEST_SEMAPHORE:
+        if not llm:
+            raise HTTPException(status_code=503, detail="LLM not initialized")
+        
+        # Check if request has strategy parameter for routing
+        strategy = getattr(request, 'strategy', None)
+        
+        # If strategy is specified and we have node selector, try to route request
+        if strategy and node_selector and strategy != "local":
+            try:
+                # Get available nodes
+                nodes = await dht_discovery.get_nodes()
+                if len(nodes) > 1:  # Only route if there are other nodes
+                    selected_node = await node_selector.select_node(
+                        model=request.model,
+                        strategy=strategy
+                    )
+                    
+                    # Check if we should forward this request
+                    if selected_node and _should_forward_request(request, selected_node):
+                        # Increment forwarding count
+                        request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
+                        logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... via {strategy}")
+                        return await _forward_completion(request, selected_node)
+            except Exception as e:
+                logger.warning(f"Failed to route request, handling locally: {e}")
+        
+        # Handle locally (original logic)
+        return await _handle_completion_locally(request)
 
 async def _handle_completion_locally(request: OpenAICompletionRequest):
     """Handle completion on this node"""
@@ -245,63 +271,65 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_completion(request: OpenAICompletionRequest, target_node):
-    """Forward completion request to another node using requests library"""
-    import requests
-    
+    """Forward completion request to another node using async HTTP client"""
     try:
-        url = f"http://{target_node.ip}:{target_node.port}/v1/completions"
-        
         # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
         request_dict.pop('strategy', None)
         
-        # Handle streaming vs non-streaming
-        if request.stream:
-            # For streaming requests
-            response = requests.post(
-                url,
-                json=request_dict,
-                headers={"Content-Type": "application/json"},
-                timeout=60,
-                stream=True
-            )
-            
-            if response.status_code == 200:
-                def stream_generator():
-                    for chunk in response.iter_content(chunk_size=None):
-                        if chunk:
-                            yield chunk
-                
-                return StreamingResponse(
-                    stream_generator(),
-                    media_type="text/plain",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "Content-Type": "text/plain; charset=utf-8"
-                    }
-                )
+        url = f"http://{target_node.ip}:{target_node.port}/v1/completions"
+        
+        # Use async HTTP client with proper timeout
+        timeout = aiohttp.ClientTimeout(total=30, connect=5)
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            if request.stream:
+                # Handle streaming requests
+                async with session.post(
+                    url,
+                    json=request_dict,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    
+                    if response.status == 200:
+                        async def stream_generator():
+                            async for chunk in response.content.iter_any():
+                                if chunk:
+                                    yield chunk
+                        
+                        return StreamingResponse(
+                            stream_generator(),
+                            media_type="text/plain",
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "Content-Type": "text/plain; charset=utf-8"
+                            }
+                        )
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Forwarded streaming completion failed: {response.status} {error_text}")
+                        raise HTTPException(status_code=response.status, detail=error_text)
             else:
-                error_text = response.text
-                logger.error(f"Forwarded streaming completion failed: {response.status_code} {error_text}")
-                raise HTTPException(status_code=response.status_code, detail=error_text)
-        else:
-            # Non-streaming request
-            response = requests.post(
-                url,
-                json=request_dict,
-                headers={"Content-Type": "application/json"},
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                return OpenAICompletionResponse(**response_data)
-            else:
-                error_text = response.text
-                logger.error(f"Forwarded completion failed: {response.status_code} {error_text}")
-                raise HTTPException(status_code=response.status_code, detail=error_text)
-                
+                # Non-streaming request
+                async with session.post(
+                    url,
+                    json=request_dict,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    
+                    if response.status == 200:
+                        response_data = await response.json()
+                        return OpenAICompletionResponse(**response_data)
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Forwarded completion failed: {response.status} {error_text}")
+                        raise HTTPException(status_code=response.status, detail=error_text)
+                        
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout forwarding request to {target_node.node_id[:8]}")
+        # Fall back to local processing
+        return await _handle_completion_locally(request)
     except Exception as e:
         logger.error(f"Error forwarding request to {target_node.node_id[:8]}: {e}")
         # Fall back to local processing
@@ -310,33 +338,35 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: OpenAIChatCompletionRequest):
     """Create a chat completion (OpenAI-compatible)"""
-    if not llm:
-        raise HTTPException(status_code=503, detail="LLM not initialized")
-    
-    # Check if request has strategy parameter for routing
-    strategy = getattr(request, 'strategy', None)
-    
-    # If strategy is specified and we have node selector, try to route request
-    if strategy and node_selector and strategy != "local":
-        try:
-            # Get available nodes
-            nodes = await dht_discovery.get_nodes()
-            print(f"Found {len(nodes)} nodes")
-            if len(nodes) > 1:  # Only route if there are other nodes
-                selected_node = await node_selector.select_node(
-                    model=request.model,
-                    strategy=strategy
-                )
-                
-                # If selected node is not us, forward the request
-                if selected_node and selected_node.node_id != config.node_id:
-                    logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... via {strategy}")
-                    return await _forward_chat_completion(request, selected_node)
-        except Exception as e:
-            logger.warning(f"Failed to route request, handling locally: {e}")
-    
-    # Handle locally (original logic)
-    return await _handle_chat_completion_locally(request)
+    async with REQUEST_SEMAPHORE:
+        if not llm:
+            raise HTTPException(status_code=503, detail="LLM not initialized")
+        
+        # Check if request has strategy parameter for routing
+        strategy = getattr(request, 'strategy', None)
+        
+        # If strategy is specified and we have node selector, try to route request
+        if strategy and node_selector and strategy != "local":
+            try:
+                # Get available nodes
+                nodes = await dht_discovery.get_nodes()
+                if len(nodes) > 1:  # Only route if there are other nodes
+                    selected_node = await node_selector.select_node(
+                        model=request.model,
+                        strategy=strategy
+                    )
+                    
+                    # Check if we should forward this request
+                    if selected_node and _should_forward_request(request, selected_node):
+                        # Increment forwarding count
+                        request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
+                        logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... via {strategy}")
+                        return await _forward_chat_completion(request, selected_node)
+            except Exception as e:
+                logger.warning(f"Failed to route request, handling locally: {e}")
+        
+        # Handle locally (original logic)
+        return await _handle_chat_completion_locally(request)
 
 async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
     """Handle chat completion on this node"""
@@ -440,64 +470,65 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_node):
-    """Forward chat completion request to another node using requests library"""
-    import requests
-    
+    """Forward chat completion request to another node using async HTTP client"""
     try:
-        url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
-        
         # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
-        request_dict.pop('strategy', 'local')
+        request_dict.pop('strategy', None)
         
-        # Handle streaming vs non-streaming
-        if request.stream:
-            # For streaming, we need to handle it differently
-            response = requests.post(
-                url,
-                json=request_dict,
-                headers={"Content-Type": "application/json"},
-                timeout=60,
-                stream=True
-            )
-            
-            if response.status_code == 200:
-                # Return the streaming response directly
-                def stream_generator():
-                    for chunk in response.iter_content(chunk_size=None):
-                        if chunk:
-                            yield chunk
-                
-                return StreamingResponse(
-                    stream_generator(),
-                    media_type="text/plain",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "Content-Type": "text/plain; charset=utf-8"
-                    }
-                )
+        url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
+        
+        # Use async HTTP client with proper timeout
+        timeout = aiohttp.ClientTimeout(total=30, connect=5)
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            if request.stream:
+                # Handle streaming requests
+                async with session.post(
+                    url,
+                    json=request_dict,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    
+                    if response.status == 200:
+                        async def stream_generator():
+                            async for chunk in response.content.iter_any():
+                                if chunk:
+                                    yield chunk
+                        
+                        return StreamingResponse(
+                            stream_generator(),
+                            media_type="text/plain",
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "Content-Type": "text/plain; charset=utf-8"
+                            }
+                        )
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Forwarded streaming chat completion failed: {response.status} {error_text}")
+                        raise HTTPException(status_code=response.status, detail=error_text)
             else:
-                error_text = response.text
-                logger.error(f"Forwarded streaming chat completion failed: {response.status_code} {error_text}")
-                raise HTTPException(status_code=response.status_code, detail=error_text)
-        else:
-            # Non-streaming request
-            response = requests.post(
-                url,
-                json=request_dict,
-                headers={"Content-Type": "application/json"},
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                return OpenAIChatCompletionResponse(**response_data)
-            else:
-                error_text = response.text
-                logger.error(f"Forwarded chat completion failed: {response.status_code} {error_text}")
-                raise HTTPException(status_code=response.status_code, detail=error_text)
-                
+                # Non-streaming request
+                async with session.post(
+                    url,
+                    json=request_dict,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    
+                    if response.status == 200:
+                        response_data = await response.json()
+                        return OpenAIChatCompletionResponse(**response_data)
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Forwarded chat completion failed: {response.status} {error_text}")
+                        raise HTTPException(status_code=response.status, detail=error_text)
+                        
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout forwarding chat completion to {target_node.node_id[:8]}")
+        # Fall back to local processing
+        return await _handle_chat_completion_locally(request)
     except Exception as e:
         logger.error(f"Error forwarding chat completion to {target_node.node_id[:8]}: {e}")
         # Fall back to local processing
