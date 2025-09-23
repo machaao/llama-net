@@ -1,9 +1,96 @@
+class MarkdownRenderer {
+    constructor() {
+        this.initializeMarked();
+        this.initializeHighlight();
+    }
+    
+    initializeMarked() {
+        // Configure marked with safe defaults
+        marked.setOptions({
+            highlight: (code, lang) => {
+                if (lang && hljs.getLanguage(lang)) {
+                    try {
+                        return hljs.highlight(code, { language: lang }).value;
+                    } catch (err) {
+                        console.warn('Highlight.js error:', err);
+                    }
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            langPrefix: 'hljs language-',
+            breaks: true,
+            gfm: true,
+            sanitize: false, // We'll handle sanitization separately
+            smartLists: true,
+            smartypants: true
+        });
+    }
+    
+    initializeHighlight() {
+        // Initialize highlight.js
+        if (typeof hljs !== 'undefined') {
+            hljs.configure({
+                languages: ['javascript', 'python', 'bash', 'json', 'html', 'css', 'markdown', 'sql', 'yaml']
+            });
+        }
+    }
+    
+    render(text) {
+        if (!text || typeof text !== 'string') {
+            return '';
+        }
+        
+        try {
+            // Basic sanitization - remove script tags and dangerous attributes
+            const sanitized = this.sanitizeHtml(text);
+            
+            // Render markdown
+            const rendered = marked.parse(sanitized);
+            
+            return rendered;
+        } catch (error) {
+            console.error('Markdown rendering error:', error);
+            return this.escapeHtml(text);
+        }
+    }
+    
+    sanitizeHtml(html) {
+        // Basic HTML sanitization - remove dangerous elements and attributes
+        return html
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+            .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+            .replace(/javascript:/gi, '');
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    renderInline(text) {
+        // For streaming - render inline markdown elements
+        if (!text || typeof text !== 'string') {
+            return '';
+        }
+        
+        try {
+            // Handle inline elements only for streaming
+            return marked.parseInline(this.sanitizeHtml(text));
+        } catch (error) {
+            return this.escapeHtml(text);
+        }
+    }
+}
+
 class LlamaNetUI {
     constructor() {
         this.baseUrl = window.location.origin;
         this.nodes = [];
         this.selectedNode = null;
         this.chatHistory = [];
+        this.markdownRenderer = new MarkdownRenderer();
         
         this.init();
     }
@@ -386,7 +473,7 @@ class LlamaNetUI {
         
         streamState.bubbleDiv = document.createElement('div');
         streamState.bubbleDiv.className = 'message-bubble';
-        streamState.bubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><span class="streaming-text"></span><span class="streaming-cursor">▋</span>';
+        streamState.bubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><div class="streaming-text"></div><span class="streaming-cursor">▋</span>';
         
         streamState.messageDiv.appendChild(streamState.bubbleDiv);
         chatContainer.appendChild(streamState.messageDiv);
@@ -402,9 +489,14 @@ class LlamaNetUI {
     handleOpenAIToken(data, streamState) {
         if (data.content) {
             streamState.accumulatedText += data.content;
-            const textSpan = streamState.bubbleDiv.querySelector('.streaming-text');
-            if (textSpan) {
-                textSpan.textContent = streamState.accumulatedText;
+            const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
+            if (textContainer) {
+                // Render accumulated markdown content
+                const renderedContent = this.markdownRenderer.render(streamState.accumulatedText);
+                textContainer.innerHTML = `<div class="markdown-content streaming-markdown">${renderedContent}</div>`;
+                
+                // Highlight any new code blocks
+                this.highlightCodeBlocks(textContainer);
             }
             document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
         }
@@ -589,14 +681,37 @@ class LlamaNetUI {
         const roleIcon = role === 'user' ? 'fas fa-user' : 
                         role === 'assistant' ? 'fas fa-robot' : 'fas fa-info-circle';
         
-        messageDiv.innerHTML = `
-            <div class="message-bubble">
-                <i class="${roleIcon} me-2"></i>${this.escapeHtml(content)}
-            </div>
-            ${metadataHtml}
-        `;
+        // Render content based on role
+        let renderedContent;
+        if (role === 'assistant') {
+            // Render markdown for assistant responses
+            renderedContent = this.markdownRenderer.render(content);
+            messageDiv.innerHTML = `
+                <div class="message-bubble">
+                    <i class="${roleIcon} me-2"></i>
+                    <div class="markdown-content">${renderedContent}</div>
+                </div>
+                ${metadataHtml}
+            `;
+        } else {
+            // Keep user messages as plain text
+            renderedContent = this.escapeHtml(content);
+            messageDiv.innerHTML = `
+                <div class="message-bubble">
+                    <i class="${roleIcon} me-2"></i>${renderedContent}
+                </div>
+                ${metadataHtml}
+            `;
+        }
         
         chatContainer.appendChild(messageDiv);
+        
+        // Highlight code blocks
+        this.highlightCodeBlocks(messageDiv);
+        
+        // Add copy buttons to code blocks
+        this.addCopyButtons(messageDiv);
+        
         chatContainer.scrollTop = chatContainer.scrollHeight;
         
         // Remove welcome message if it exists
@@ -731,6 +846,51 @@ class LlamaNetUI {
             .replace(/\n\n(Human:|User:).*$/s, '')
             .replace(/\n(Human:|User:).*$/s, '')
             .trim();
+    }
+    
+    highlightCodeBlocks(element) {
+        if (typeof hljs !== 'undefined') {
+            const codeBlocks = element.querySelectorAll('pre code');
+            codeBlocks.forEach(block => {
+                hljs.highlightElement(block);
+            });
+        }
+    }
+
+    addCopyButtons(element) {
+        const codeBlocks = element.querySelectorAll('pre');
+        codeBlocks.forEach(pre => {
+            // Wrap in container for positioning
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+            
+            // Add copy button
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'copy-code-btn';
+            copyBtn.innerHTML = '<i class="fas fa-copy"></i>';
+            copyBtn.title = 'Copy code';
+            
+            copyBtn.addEventListener('click', () => {
+                const code = pre.querySelector('code');
+                const text = code ? code.textContent : pre.textContent;
+                
+                navigator.clipboard.writeText(text).then(() => {
+                    copyBtn.innerHTML = '<i class="fas fa-check"></i>';
+                    copyBtn.style.backgroundColor = '#28a745';
+                    
+                    setTimeout(() => {
+                        copyBtn.innerHTML = '<i class="fas fa-copy"></i>';
+                        copyBtn.style.backgroundColor = '#6c757d';
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy code:', err);
+                });
+            });
+            
+            wrapper.appendChild(copyBtn);
+        });
     }
     
     escapeHtml(text) {
