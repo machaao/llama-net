@@ -240,8 +240,8 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_completion(request: OpenAICompletionRequest, target_node):
-    """Forward completion request to another node"""
-    import aiohttp
+    """Forward completion request to another node using requests library"""
+    import requests
     
     try:
         url = f"http://{target_node.ip}:{target_node.port}/v1/completions"
@@ -250,33 +250,53 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
         request_dict = request.dict()
         request_dict.pop('strategy', None)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        # Handle streaming vs non-streaming
+        if request.stream:
+            # For streaming requests
+            response = requests.post(
                 url,
                 json=request_dict,
                 headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=60)
-            ) as response:
-                if response.status == 200:
-                    # Check content type to handle streaming vs non-streaming
-                    content_type = response.headers.get('content-type', '')
-                    
-                    if 'text/plain' in content_type:
-                        # This is a streaming response, return it as-is
-                        return StreamingResponse(
-                            response.content.iter_any(),
-                            media_type=content_type,
-                            headers=dict(response.headers)
-                        )
-                    else:
-                        # This is a JSON response
-                        response_data = await response.json()
-                        return OpenAICompletionResponse(**response_data)
-                else:
-                    error_text = await response.text()
-                    logger.error(f"Forwarded request failed: {response.status} {error_text}")
-                    raise HTTPException(status_code=response.status, detail=error_text)
-                    
+                timeout=60,
+                stream=True
+            )
+            
+            if response.status_code == 200:
+                def stream_generator():
+                    for chunk in response.iter_content(chunk_size=None):
+                        if chunk:
+                            yield chunk
+                
+                return StreamingResponse(
+                    stream_generator(),
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Content-Type": "text/plain; charset=utf-8"
+                    }
+                )
+            else:
+                error_text = response.text
+                logger.error(f"Forwarded streaming completion failed: {response.status_code} {error_text}")
+                raise HTTPException(status_code=response.status_code, detail=error_text)
+        else:
+            # Non-streaming request
+            response = requests.post(
+                url,
+                json=request_dict,
+                headers={"Content-Type": "application/json"},
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                return OpenAICompletionResponse(**response_data)
+            else:
+                error_text = response.text
+                logger.error(f"Forwarded completion failed: {response.status_code} {error_text}")
+                raise HTTPException(status_code=response.status_code, detail=error_text)
+                
     except Exception as e:
         logger.error(f"Error forwarding request to {target_node.node_id[:8]}: {e}")
         # Fall back to local processing
@@ -414,8 +434,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_node):
-    """Forward chat completion request to another node"""
-    import aiohttp
+    """Forward chat completion request to another node using requests library"""
+    import requests
     
     try:
         url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
@@ -424,35 +444,54 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
         request_dict = request.dict()
         request_dict.pop('strategy', None)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        # Handle streaming vs non-streaming
+        if request.stream:
+            # For streaming, we need to handle it differently
+            response = requests.post(
                 url,
                 json=request_dict,
                 headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=60)
-            ) as response:
-                if response.status == 200:
-                    # Check if this is a streaming response
-                    if request.stream:
-                        # Return streaming response with proper headers
-                        return StreamingResponse(
-                            response.content.iter_any(),
-                            media_type="text/plain",
-                            headers={
-                                "Cache-Control": "no-cache",
-                                "Connection": "keep-alive",
-                                "Content-Type": "text/plain; charset=utf-8"
-                            }
-                        )
-                    else:
-                        # Handle non-streaming JSON response
-                        response_data = await response.json()
-                        return OpenAIChatCompletionResponse(**response_data)
-                else:
-                    error_text = await response.text()
-                    logger.error(f"Forwarded chat completion failed: {response.status} {error_text}")
-                    raise HTTPException(status_code=response.status, detail=error_text)
-                    
+                timeout=60,
+                stream=True
+            )
+            
+            if response.status_code == 200:
+                # Return the streaming response directly
+                def stream_generator():
+                    for chunk in response.iter_content(chunk_size=None):
+                        if chunk:
+                            yield chunk
+                
+                return StreamingResponse(
+                    stream_generator(),
+                    media_type="text/plain",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Content-Type": "text/plain; charset=utf-8"
+                    }
+                )
+            else:
+                error_text = response.text
+                logger.error(f"Forwarded streaming chat completion failed: {response.status_code} {error_text}")
+                raise HTTPException(status_code=response.status_code, detail=error_text)
+        else:
+            # Non-streaming request
+            response = requests.post(
+                url,
+                json=request_dict,
+                headers={"Content-Type": "application/json"},
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                return OpenAIChatCompletionResponse(**response_data)
+            else:
+                error_text = response.text
+                logger.error(f"Forwarded chat completion failed: {response.status_code} {error_text}")
+                raise HTTPException(status_code=response.status_code, detail=error_text)
+                
     except Exception as e:
         logger.error(f"Error forwarding chat completion to {target_node.node_id[:8]}: {e}")
         # Fall back to local processing
