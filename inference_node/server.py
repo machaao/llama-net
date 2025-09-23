@@ -278,19 +278,20 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not initialized")
     
-    # Convert messages to a single prompt
+    # Convert messages to a single prompt - IMPROVED FORMAT
     prompt_parts = []
     for message in request.messages:
         if message.role == "system":
             prompt_parts.append(f"System: {message.content}")
         elif message.role == "user":
-            prompt_parts.append(f"User: {message.content}")
+            prompt_parts.append(f"Human: {message.content}")
         elif message.role == "assistant":
             prompt_parts.append(f"Assistant: {message.content}")
     
-    prompt = "\n".join(prompt_parts) + "\nAssistant:"
+    # Use a more standard chat format
+    prompt = "\n\n".join(prompt_parts) + "\n\nAssistant:"
     
-    # Normalize stop tokens for consistent handling
+    # IMPROVED: Add proper stop tokens for chat format
     stop_tokens = None
     if request.stop:
         if isinstance(request.stop, str):
@@ -298,8 +299,9 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         elif isinstance(request.stop, list):
             stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
             stop_tokens = stop_tokens if stop_tokens else None
-        else:
-            stop_tokens = None
+    else:
+        # Default stop tokens for chat format to prevent bleeding
+        stop_tokens = ["\n\nHuman:", "\n\nUser:", "\nHuman:", "\nUser:", "Human:", "User:"]
     
     try:
         # Handle streaming
