@@ -23,6 +23,8 @@ from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo
 from inference_node.dht_publisher import DHTPublisher
 from inference_node.heartbeat import HeartbeatManager
+from client.dht_discovery import DHTDiscovery
+from client.router import NodeSelector
 from common.utils import get_logger
 
 logger = get_logger(__name__)
@@ -33,11 +35,14 @@ llm = None
 dht_publisher = None
 system_info = None
 heartbeat_manager = None
+dht_discovery = None
+node_selector = None
+round_robin_state = {"index": 0}  # Global round robin state
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector
     
     # Load configuration
     config = InferenceConfig()
@@ -57,6 +62,13 @@ async def lifespan(app: FastAPI):
     dht_publisher = DHTPublisher(config, llm.get_metrics)
     await dht_publisher.start()
     
+    # Initialize DHT discovery for routing (use different port to avoid conflicts)
+    dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port + 100)
+    await dht_discovery.start()
+    
+    # Initialize node selector for request routing
+    node_selector = NodeSelector(dht_discovery)
+    
     yield
     
     # Shutdown
@@ -64,6 +76,8 @@ async def lifespan(app: FastAPI):
         await heartbeat_manager.stop()
     if dht_publisher:
         await dht_publisher.stop()
+    if dht_discovery:
+        await dht_discovery.stop()
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
@@ -111,6 +125,32 @@ async def create_completion(request: OpenAICompletionRequest):
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not initialized")
     
+    # Check if request has strategy parameter for routing
+    strategy = getattr(request, 'strategy', None)
+    
+    # If strategy is specified and we have node selector, try to route request
+    if strategy and node_selector and strategy != "local":
+        try:
+            # Get available nodes
+            nodes = await dht_discovery.get_nodes()
+            if len(nodes) > 1:  # Only route if there are other nodes
+                selected_node = await node_selector.select_node(
+                    model=request.model,
+                    strategy=strategy
+                )
+                
+                # If selected node is not us, forward the request
+                if selected_node and selected_node.node_id != config.node_id:
+                    logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... via {strategy}")
+                    return await _forward_completion(request, selected_node)
+        except Exception as e:
+            logger.warning(f"Failed to route request, handling locally: {e}")
+    
+    # Handle locally (original logic)
+    return await _handle_completion_locally(request)
+
+async def _handle_completion_locally(request: OpenAICompletionRequest):
+    """Handle completion on this node"""
     # Handle prompt (can be string or list)
     if isinstance(request.prompt, list):
         if len(request.prompt) == 0:
@@ -199,12 +239,69 @@ async def create_completion(request: OpenAICompletionRequest):
         logger.error(f"Completion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def _forward_completion(request: OpenAICompletionRequest, target_node):
+    """Forward completion request to another node"""
+    import aiohttp
+    
+    try:
+        url = f"http://{target_node.ip}:{target_node.port}/v1/completions"
+        
+        # Remove strategy to prevent infinite forwarding
+        request_dict = request.dict()
+        request_dict.pop('strategy', None)
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=request_dict,
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 200:
+                    response_data = await response.json()
+                    return OpenAICompletionResponse(**response_data)
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Forwarded request failed: {response.status} {error_text}")
+                    raise HTTPException(status_code=response.status, detail=error_text)
+                    
+    except Exception as e:
+        logger.error(f"Error forwarding request to {target_node.node_id[:8]}: {e}")
+        # Fall back to local processing
+        return await _handle_completion_locally(request)
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: OpenAIChatCompletionRequest):
     """Create a chat completion (OpenAI-compatible)"""
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not initialized")
     
+    # Check if request has strategy parameter for routing
+    strategy = getattr(request, 'strategy', None)
+    
+    # If strategy is specified and we have node selector, try to route request
+    if strategy and node_selector and strategy != "local":
+        try:
+            # Get available nodes
+            nodes = await dht_discovery.get_nodes()
+            if len(nodes) > 1:  # Only route if there are other nodes
+                selected_node = await node_selector.select_node(
+                    model=request.model,
+                    strategy=strategy
+                )
+                
+                # If selected node is not us, forward the request
+                if selected_node and selected_node.node_id != config.node_id:
+                    logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... via {strategy}")
+                    return await _forward_chat_completion(request, selected_node)
+        except Exception as e:
+            logger.warning(f"Failed to route request, handling locally: {e}")
+    
+    # Handle locally (original logic)
+    return await _handle_chat_completion_locally(request)
+
+async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
+    """Handle chat completion on this node"""
     # Convert messages to a single prompt - IMPROVED FORMAT
     prompt_parts = []
     for message in request.messages:
@@ -303,6 +400,37 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
     except Exception as e:
         logger.error(f"Chat completion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_node):
+    """Forward chat completion request to another node"""
+    import aiohttp
+    
+    try:
+        url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
+        
+        # Remove strategy to prevent infinite forwarding
+        request_dict = request.dict()
+        request_dict.pop('strategy', None)
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=request_dict,
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as response:
+                if response.status == 200:
+                    response_data = await response.json()
+                    return OpenAIChatCompletionResponse(**response_data)
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Forwarded request failed: {response.status} {error_text}")
+                    raise HTTPException(status_code=response.status, detail=error_text)
+                    
+    except Exception as e:
+        logger.error(f"Error forwarding request to {target_node.node_id[:8]}: {e}")
+        # Fall back to local processing
+        return await _handle_chat_completion_locally(request)
 
 # Status and utility endpoints
 @app.get("/status")
