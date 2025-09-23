@@ -389,6 +389,7 @@ class LlamaNetUI {
         const maxTokens = parseInt(document.getElementById('max-tokens').value) || 150;
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
         const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
+        const strategy = document.getElementById('load-strategy')?.value || 'round_robin';
         
         // Build chat history for context - OPTIMIZED
         const messages = [
@@ -410,7 +411,8 @@ class LlamaNetUI {
             max_tokens: maxTokens,
             temperature: temperature,
             stream: streamingEnabled,
-            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"] // Comprehensive stop tokens
+            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"], // Comprehensive stop tokens
+            strategy: strategy // Add strategy for load balancing
         };
 
         if (streamingEnabled) {

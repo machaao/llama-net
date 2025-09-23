@@ -52,16 +52,18 @@ class OpenAIClient:
                               top_p: float = 0.9,
                               stream: bool = False,
                               stop: Optional[List[str]] = None,
+                              strategy: str = "round_robin",  # Add strategy parameter
                               max_retries: int = 3) -> Optional[OpenAIChatCompletionResponse]:
         """Create chat completion using OpenAI format"""
         retries = 0
         
         while retries < max_retries:
-            # Select a node
+            # Select a node with strategy
             node = await self.node_selector.select_node(
                 model=self.model,
                 min_tps=self.min_tps,
-                max_load=self.max_load
+                max_load=self.max_load,
+                strategy=strategy  # Pass strategy
             )
             
             if not node:
@@ -115,16 +117,18 @@ class OpenAIClient:
                          top_p: float = 0.9,
                          stream: bool = False,
                          stop: Optional[List[str]] = None,
+                         strategy: str = "round_robin",  # Add strategy parameter
                          max_retries: int = 3) -> Optional[OpenAICompletionResponse]:
         """Create completion using OpenAI format"""
         retries = 0
         
         while retries < max_retries:
-            # Select a node
+            # Select a node with strategy
             node = await self.node_selector.select_node(
                 model=self.model,
                 min_tps=self.min_tps,
-                max_load=self.max_load
+                max_load=self.max_load,
+                strategy=strategy  # Pass strategy
             )
             
             if not node:
