@@ -168,12 +168,12 @@ class DHTDiscovery(DiscoveryInterface):
         return nodes
 
     async def _refresh_nodes(self, model: Optional[str] = None):
-        """Refresh the nodes cache from DHT with enhanced discovery - only published nodes"""
+        """Refresh the nodes cache from DHT with enhanced discovery and fallback"""
         try:
             # Use a dict to ensure uniqueness by node_id (not ip:port)
             unique_nodes = {}
             
-            # Get published nodes from multiple DHT sources ONLY
+            # 1. First try to get published nodes from DHT storage
             published_nodes = await self._get_published_nodes(model)
             
             # Also try to get from model-specific keys if no model filter
@@ -186,7 +186,7 @@ class DHTDiscovery(DiscoveryInterface):
                 except Exception as e:
                     logger.debug(f"Error getting model-specific nodes: {e}")
             
-            # Process published nodes only (no DHT contacts in main cache)
+            # Process published nodes
             for node_data in published_nodes:
                 if isinstance(node_data, dict) and node_data.get('node_id'):
                     node_id = node_data['node_id']
@@ -203,7 +203,21 @@ class DHTDiscovery(DiscoveryInterface):
                         except Exception as e:
                             logger.warning(f"Failed to parse published node: {e}")
             
-            # Convert to list and update cache (published nodes only)
+            # 2. If no published nodes found, fall back to DHT routing table contacts
+            if not unique_nodes:
+                logger.warning("No published nodes found, falling back to DHT routing table contacts")
+                routing_contacts = await self._get_routing_table_contacts()
+                
+                for node_info in routing_contacts:
+                    if node_info.node_id not in unique_nodes:
+                        unique_nodes[node_info.node_id] = {
+                            'node': node_info,
+                            'source': 'dht_contact',
+                            'priority': 2
+                        }
+                        logger.debug(f"Added DHT contact: {node_info.node_id[:8]}... at {node_info.ip}:{node_info.port}")
+            
+            # Convert to list and update cache
             self.nodes_cache = [entry['node'] for entry in unique_nodes.values()]
             
             # Track new nodes
@@ -216,14 +230,24 @@ class DHTDiscovery(DiscoveryInterface):
             
             self.cache_time = time.time()
             
-            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} published nodes")
+            # Enhanced logging with source breakdown
+            published_count = len([e for e in unique_nodes.values() if e['source'] == 'published'])
+            dht_contact_count = len([e for e in unique_nodes.values() if e['source'] == 'dht_contact'])
+            
+            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} total nodes ({published_count} published, {dht_contact_count} DHT contacts)")
             
             # Log all discovered nodes for debugging
             for node in self.nodes_cache:
-                logger.debug(f"Available published node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
+                source = next((e['source'] for e in unique_nodes.values() if e['node'].node_id == node.node_id), 'unknown')
+                logger.debug(f"Available {source} node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
             
-            if len(published_nodes) > 0 and len(self.nodes_cache) == 0:
+            if len(published_nodes) > 0 and published_count == 0:
                 logger.warning("Published nodes found but none were valid - possible data corruption")
+            
+            # Log DHT storage keys for debugging
+            if self.kademlia_node and hasattr(self.kademlia_node, 'storage'):
+                storage_keys = list(self.kademlia_node.storage.keys())
+                logger.debug(f"DHT storage keys available: {storage_keys}")
             
         except Exception as e:
             logger.error(f"Error refreshing nodes from DHT: {e}")
