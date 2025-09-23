@@ -22,7 +22,6 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 - **Functional programming approach** - event-driven architecture with no blocking loops
 
 ### Streaming Endpoints
-- **Native LlamaNet**: `/generate/stream` - Server-Sent Events format
 - **OpenAI Compatible**: `/v1/chat/completions` and `/v1/completions` with `stream: true`
 - **Web Interface**: Toggle streaming on/off in the browser UI
 
@@ -85,44 +84,6 @@ Open http://localhost:8000 in your browser for an interactive chat interface wit
 - **Streaming toggle** for instant vs. complete responses
 
 ## API Usage
-
-### Native LlamaNet API
-
-#### Non-streaming Generation
-```python
-import requests
-
-response = requests.post("http://localhost:8000/generate", json={
-    "prompt": "What is artificial intelligence?",
-    "max_tokens": 150,
-    "temperature": 0.7
-})
-print(response.json()["text"])
-```
-
-#### Streaming Generation
-```python
-import requests
-import json
-
-response = requests.post("http://localhost:8000/generate/stream", 
-    json={
-        "prompt": "Explain quantum computing",
-        "max_tokens": 200,
-        "temperature": 0.7
-    }, 
-    stream=True
-)
-
-for line in response.iter_lines():
-    if line.startswith(b'data: '):
-        data = json.loads(line[6:])
-        if not data.get("finished"):
-            print(data["text"], end="", flush=True)
-        else:
-            print(f"\n[Generated {data['tokens_generated']} tokens in {data['generation_time']:.2f}s]")
-            break
-```
 
 ### OpenAI-Compatible API
 
@@ -290,8 +251,6 @@ Visit http://localhost:8000 for:
 ## API Endpoints
 
 ### LlamaNet Native
-- `POST /generate` - Text generation
-- `POST /generate/stream` - **Streaming text generation**
 - `GET /status` - Node metrics
 - `GET /info` - Node information
 - `GET /health` - Health check
@@ -658,7 +617,7 @@ Client Discovery Sequence:
    Client selects Node3 (lowest load)
 
 5. Inference Request:
-   Client ──► Node3: /generate ──► Generated Text Response
+   Client ──► Node3: /v1/chat/completions ──► Generated Text Response
 ```
 
 ### 3. DHT Key Distribution
@@ -702,8 +661,8 @@ DHT Storage Structure:
            ▼
     ┌─────────────┐
     │ Select API  │
-    │    Mode     │ ──► LlamaNet API (/generate)
-    └──────┬──────┘ ──► OpenAI API (/v1/chat/completions)
+    │    Mode     │ ──► OpenAI API (/v1/chat/completions)
+    └──────┬──────┘ 
            │
            ▼
     ┌─────────────┐
@@ -720,7 +679,7 @@ DHT Storage Structure:
            ▼
     ┌─────────────┐
     │ HTTP        │
-    │ Request     │ ──► POST /generate or /v1/chat/completions
+    │ Request     │ ──► POST /v1/chat/completions
     └──────┬──────┘
            │
            ▼
@@ -834,8 +793,8 @@ Legend:
     ┌─────────────────┐
     │ Backend API     │
     │ Endpoints       │ ──► /dht/status (Network Info)
-    └─────────┬───────┘ ──► /generate (LlamaNet)
-              │         ──► /v1/chat/completions (OpenAI)
+    └─────────┬───────┘ ──► /v1/chat/completions (OpenAI)
+              │         
               ▼
     ┌─────────────────┐
     │ Response        │
@@ -972,15 +931,6 @@ This architecture ensures **high availability**, **automatic scaling**, and **fa
 ## Troubleshooting
 
 ### Common Issues
-
-**Streaming not working:**
-```bash
-# Check if streaming is enabled
-curl -X POST http://localhost:8000/generate/stream \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"test","max_tokens":10}' \
-  --no-buffer
-```
 
 **No nodes discovered:**
 ```bash
