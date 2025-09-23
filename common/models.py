@@ -44,7 +44,8 @@ class OpenAICompletionRequest(BaseModel):
     user: Optional[str] = None
     suffix: Optional[str] = None
     echo: Optional[bool] = False
-    strategy: Optional[str] = "round_robin"  # Add strategy parameter
+    strategy: Optional[str] = "round_robin"
+    target_model: Optional[str] = None  # Add target model parameter
 
 class OpenAIChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request"""
@@ -60,7 +61,8 @@ class OpenAIChatCompletionRequest(BaseModel):
     frequency_penalty: Optional[float] = 0.0
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
-    strategy: Optional[str] = "round_robin"  # Add strategy parameter
+    strategy: Optional[str] = "round_robin"
+    target_model: Optional[str] = None  # Add target model parameter
 
 class OpenAIChoice(BaseModel):
     """OpenAI choice object"""

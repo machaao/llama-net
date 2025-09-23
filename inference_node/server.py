@@ -271,26 +271,41 @@ async def create_completion(request: OpenAICompletionRequest):
         
         # Check if request has strategy parameter for routing
         strategy = getattr(request, 'strategy', None)
+        target_model = getattr(request, 'target_model', None)
         
         # If strategy is specified and we have node selector, try to route request
         if strategy and node_selector and strategy != "local":
             try:
                 # Get available nodes
-                nodes = await dht_discovery.get_nodes()
+                nodes = await dht_discovery.get_nodes(model=target_model)
                 if len(nodes) > 1:  # Only route if there are other nodes
                     selected_node = await node_selector.select_node(
                         model=request.model,
-                        strategy=strategy
+                        strategy=strategy,
+                        target_model=target_model  # Pass target model
                     )
                     
                     # Check if we should forward this request
                     if selected_node and _should_forward_request(request, selected_node):
                         # Increment forwarding count
                         request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
-                        logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... via {strategy}")
+                        logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... (model: {selected_node.model}) via {strategy}")
                         return await _forward_completion(request, selected_node)
             except Exception as e:
                 logger.warning(f"Failed to route request, handling locally: {e}")
+        
+        # Check if we should handle locally based on target model
+        if target_model and target_model != config.model_name:
+            logger.warning(f"Target model {target_model} requested but this node runs {config.model_name}")
+            # Try to find a node with the target model
+            try:
+                nodes = await dht_discovery.get_nodes(model=target_model)
+                if nodes:
+                    selected_node = nodes[0]  # Use first available node with target model
+                    logger.info(f"🔄 Forwarding to node with target model {target_model}")
+                    return await _forward_completion(request, selected_node)
+            except Exception as e:
+                logger.warning(f"Failed to find node with target model {target_model}: {e}")
         
         # Handle locally (original logic)
         return await _handle_completion_locally(request)
@@ -498,26 +513,41 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         
         # Check if request has strategy parameter for routing
         strategy = getattr(request, 'strategy', None)
+        target_model = getattr(request, 'target_model', None)
         
         # If strategy is specified and we have node selector, try to route request
         if strategy and node_selector and strategy != "local":
             try:
                 # Get available nodes
-                nodes = await dht_discovery.get_nodes()
+                nodes = await dht_discovery.get_nodes(model=target_model)
                 if len(nodes) > 1:  # Only route if there are other nodes
                     selected_node = await node_selector.select_node(
                         model=request.model,
-                        strategy=strategy
+                        strategy=strategy,
+                        target_model=target_model  # Pass target model
                     )
                     
                     # Check if we should forward this request
                     if selected_node and _should_forward_request(request, selected_node):
                         # Increment forwarding count
                         request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
-                        logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... via {strategy}")
+                        logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... (model: {selected_node.model}) via {strategy}")
                         return await _forward_chat_completion(request, selected_node)
             except Exception as e:
                 logger.warning(f"Failed to route request, handling locally: {e}")
+        
+        # Check if we should handle locally based on target model
+        if target_model and target_model != config.model_name:
+            logger.warning(f"Target model {target_model} requested but this node runs {config.model_name}")
+            # Try to find a node with the target model
+            try:
+                nodes = await dht_discovery.get_nodes(model=target_model)
+                if nodes:
+                    selected_node = nodes[0]  # Use first available node with target model
+                    logger.info(f"🔄 Forwarding to node with target model {target_model}")
+                    return await _forward_chat_completion(request, selected_node)
+            except Exception as e:
+                logger.warning(f"Failed to find node with target model {target_model}: {e}")
         
         # Handle locally (original logic)
         return await _handle_chat_completion_locally(request)

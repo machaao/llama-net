@@ -103,6 +103,9 @@ class LlamaNetUI {
         this.currentNodeStates = null;
         this.errorCount = 0;
         
+        // Restore selected model from localStorage
+        this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
+        
         this.init();
     }
     
@@ -112,6 +115,17 @@ class LlamaNetUI {
         
         // Start real-time updates
         this.startRealTimeUpdates();
+        
+        // Restore selected model UI if available
+        if (this.selectedModel) {
+            setTimeout(() => {
+                this.updateChatInterface(this.selectedModel);
+                const selectedGroup = document.querySelector(`[data-model="${this.selectedModel}"]`);
+                if (selectedGroup) {
+                    selectedGroup.classList.add('selected-model');
+                }
+            }, 1000); // Wait for network status to load
+        }
         
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
@@ -507,6 +521,9 @@ class LlamaNetUI {
             // Update chat interface to show selected model
             this.updateChatInterface(modelId);
             
+            // Store selection in localStorage for persistence
+            localStorage.setItem('llamanet_selected_model', modelId);
+            
         } catch (error) {
             console.error('Error selecting model:', error);
             this.showToast('error', 'Failed to select model');
@@ -852,14 +869,18 @@ class LlamaNetUI {
         // Add current message
         messages.push({ role: 'user', content: message });
         
+        // Use selected model if available, otherwise default
+        const modelToUse = this.selectedModel || 'llamanet';
+        
         const requestBody = {
-            model: 'llamanet',
+            model: modelToUse,  // Use selected model
             messages: messages,
             max_tokens: maxTokens,
             temperature: temperature,
             stream: streamingEnabled,
-            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"], // Comprehensive stop tokens
-            strategy: strategy // Add strategy for load balancing
+            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"],
+            strategy: strategy,
+            target_model: this.selectedModel  // Add explicit target model parameter
         };
 
         if (streamingEnabled) {
@@ -884,7 +905,8 @@ class LlamaNetUI {
                     id: data.id,
                     tokens: data.usage.total_tokens,
                     api: 'OpenAI Compatible',
-                    node_info: data.node_info
+                    node_info: data.node_info,
+                    model_used: modelToUse
                 }
             };
         }

@@ -18,17 +18,29 @@ class NodeSelector:
                          min_tps: float = 0.0,
                          max_load: float = 1.0,
                          strategy: str = "round_robin",  # "load_balanced", "round_robin", "random"
-                         randomize: bool = True) -> Optional[NodeInfo]:
+                         randomize: bool = True,
+                         target_model: Optional[str] = None) -> Optional[NodeInfo]:
         """Select the best node based on criteria and strategy"""
-        # Get unique nodes from DHT
-        nodes = await self.dht_discovery.get_nodes(model)
+        
+        # Use target_model if specified, otherwise fall back to model parameter
+        model_filter = target_model or model
+        
+        # Get nodes from DHT, filtered by specific model if requested
+        nodes = await self.dht_discovery.get_nodes(model=model_filter)
         
         if not nodes:
-            logger.warning(f"No nodes available for model {model}")
+            logger.warning(f"No nodes available for model {model_filter}")
             return None
         
+        # If target_model is specified, ensure we only get nodes with that exact model
+        if target_model:
+            nodes = [node for node in nodes if node.model == target_model]
+            if not nodes:
+                logger.warning(f"No nodes found running the specific model: {target_model}")
+                return None
+        
         # Log available nodes for debugging
-        logger.debug(f"Available nodes for selection:")
+        logger.debug(f"Available nodes for selection (model: {model_filter}):")
         for node in nodes:
             logger.debug(f"  - {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model}, load: {node.load})")
             
@@ -42,8 +54,8 @@ class NodeSelector:
                 eligible_nodes.append(node)
         
         if not eligible_nodes:
-            logger.warning(f"No nodes meet criteria (min_tps={min_tps}, max_load={max_load})")
-            # Fall back to any available node
+            logger.warning(f"No nodes meet criteria (min_tps={min_tps}, max_load={max_load}) for model {model_filter}")
+            # Fall back to any available node with the target model
             eligible_nodes = nodes
         
         # Apply selection strategy with logging
@@ -59,7 +71,7 @@ class NodeSelector:
             selected = self._round_robin_select(eligible_nodes)
         
         if selected:
-            logger.info(f"🎯 Selected node {selected.node_id[:8]}... at {selected.ip}:{selected.port} via {strategy} strategy")
+            logger.info(f"🎯 Selected node {selected.node_id[:8]}... at {selected.ip}:{selected.port} (model: {selected.model}) via {strategy} strategy")
         
         return selected
     
