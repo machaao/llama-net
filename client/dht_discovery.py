@@ -168,12 +168,12 @@ class DHTDiscovery(DiscoveryInterface):
         return nodes
 
     async def _refresh_nodes(self, model: Optional[str] = None):
-        """Refresh the nodes cache from DHT with enhanced discovery"""
+        """Refresh the nodes cache from DHT with enhanced discovery - only published nodes"""
         try:
             # Use a dict to ensure uniqueness by node_id (not ip:port)
             unique_nodes = {}
             
-            # Get published nodes from multiple DHT sources
+            # Get published nodes from multiple DHT sources ONLY
             published_nodes = await self._get_published_nodes(model)
             
             # Also try to get from model-specific keys if no model filter
@@ -186,7 +186,7 @@ class DHTDiscovery(DiscoveryInterface):
                 except Exception as e:
                     logger.debug(f"Error getting model-specific nodes: {e}")
             
-            # Process published nodes (higher priority)
+            # Process published nodes only (no DHT contacts in main cache)
             for node_data in published_nodes:
                 if isinstance(node_data, dict) and node_data.get('node_id'):
                     node_id = node_data['node_id']
@@ -203,27 +203,7 @@ class DHTDiscovery(DiscoveryInterface):
                         except Exception as e:
                             logger.warning(f"Failed to parse published node: {e}")
             
-            # Get routing table contacts (lower priority)
-            routing_contacts = await self._get_routing_table_contacts()
-            for contact_node in routing_contacts:
-                node_id = contact_node.node_id
-                # Only add if not already present from published data
-                if node_id not in unique_nodes:
-                    if not model or contact_node.model == model or contact_node.model == "unknown":
-                        unique_nodes[node_id] = {
-                            'node': contact_node,
-                            'source': 'dht_contact',
-                            'priority': 2
-                        }
-                        logger.debug(f"Added DHT contact: {node_id[:8]}... at {contact_node.ip}:{contact_node.port}")
-                else:
-                    # Update port info if we have better data from routing table
-                    existing = unique_nodes[node_id]['node']
-                    if existing.model == "unknown" and contact_node.model != "unknown":
-                        existing.model = contact_node.model
-                        logger.debug(f"Updated model for {node_id[:8]}...: {contact_node.model}")
-            
-            # Convert to list and update cache
+            # Convert to list and update cache (published nodes only)
             self.nodes_cache = [entry['node'] for entry in unique_nodes.values()]
             
             # Track new nodes
@@ -236,18 +216,13 @@ class DHTDiscovery(DiscoveryInterface):
             
             self.cache_time = time.time()
             
-            # Enhanced logging with source breakdown
-            published_count = len([n for n in unique_nodes.values() if n['source'] == 'published'])
-            contact_count = len([n for n in unique_nodes.values() if n['source'] == 'dht_contact'])
-            
-            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} unique nodes")
-            logger.info(f"Sources: {published_count} published, {contact_count} DHT contacts")
+            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} published nodes")
             
             # Log all discovered nodes for debugging
             for node in self.nodes_cache:
-                logger.debug(f"Available node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
+                logger.debug(f"Available published node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
             
-            if published_count == 0 and len(published_nodes) > 0:
+            if len(published_nodes) > 0 and len(self.nodes_cache) == 0:
                 logger.warning("Published nodes found but none were valid - possible data corruption")
             
         except Exception as e:

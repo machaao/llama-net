@@ -504,32 +504,34 @@ async def get_all_nodes():
         except Exception as e:
             logger.debug(f"No model-specific data found: {e}")
         
-        # 3. Get routing table contacts
-        routing_contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
-        
-        # Deduplicate and process
+        # Process published nodes only
         current_time = time.time()
-        unique_nodes = {}
+        published_nodes = []
         
-        # Process published nodes first (higher priority)
+        # Deduplicate published nodes by node_id
+        seen_node_ids = set()
         for node_data in all_published_nodes:
             if isinstance(node_data, dict) and node_data.get('node_id'):
                 node_id = node_data['node_id']
                 last_seen = node_data.get('last_seen', 0)
                 
-                if current_time - last_seen < 120:  # 2 minute window for published data
-                    unique_nodes[node_id] = {
+                if node_id not in seen_node_ids and current_time - last_seen < 120:  # 2 minute window
+                    published_nodes.append({
                         **node_data,
                         "source": "published"
-                    }
+                    })
+                    seen_node_ids.add(node_id)
         
-        # Add routing contacts that aren't already present
+        # Get routing table contacts separately (for debugging/admin purposes)
+        routing_contacts = dht_publisher.kademlia_node.routing_table.get_all_contacts()
+        dht_contacts = []
+        
         for contact in routing_contacts:
-            if contact.node_id not in unique_nodes and current_time - contact.last_seen < 60:
+            if contact.node_id not in seen_node_ids and current_time - contact.last_seen < 60:
                 # Try to get HTTP info
                 http_port, model = await _probe_node_info(contact.ip, contact.node_id)
                 
-                unique_nodes[contact.node_id] = {
+                dht_contacts.append({
                     "node_id": contact.node_id,
                     "ip": contact.ip,
                     "port": http_port,
@@ -539,16 +541,16 @@ async def get_all_nodes():
                     "uptime": 0,
                     "last_seen": int(contact.last_seen),
                     "source": "dht_contact"
-                }
-        
-        active_nodes = list(unique_nodes.values())
+                })
         
         return {
-            "nodes": active_nodes,
-            "total_count": len(active_nodes),
+            "published_nodes": published_nodes,
+            "dht_contacts": dht_contacts,
+            "total_published": len(published_nodes),
+            "total_dht_contacts": len(dht_contacts),
             "sources": {
-                "published": len([n for n in active_nodes if n.get("source") == "published"]),
-                "dht_contacts": len([n for n in active_nodes if n.get("source") == "dht_contact"])
+                "published": len(published_nodes),
+                "dht_contacts": len(dht_contacts)
             },
             "discovery_methods": {
                 "all_nodes_key": len([n for n in all_published_nodes if isinstance(n, dict)]),

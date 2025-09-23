@@ -138,17 +138,13 @@ class LlamaNetUI {
         }
         
         try {
-            // Get nodes with model information
+            // Get nodes with separation between published and DHT contacts
             const nodesResponse = await fetch(`${this.baseUrl}/nodes`);
             const nodesData = await nodesResponse.json();
             
             // Get current node info
             const nodeResponse = await fetch(`${this.baseUrl}/info`);
             const nodeInfo = await nodeResponse.json();
-            
-            // Show source breakdown if available
-            const sourceInfo = nodesData.sources ? 
-                `<div class="small text-muted">Published: ${nodesData.sources.published} | DHT: ${nodesData.sources.dht_contacts}</div>` : '';
             
             container.innerHTML = `
                 <div class="mb-3">
@@ -168,8 +164,7 @@ class LlamaNetUI {
                 <div class="mb-3">
                     <h6><i class="fas fa-network-wired"></i> DHT Network</h6>
                     <div class="small">
-                        <div>Active Nodes: ${nodesData.total_count}</div>
-                        ${sourceInfo}
+                        <div>Published Nodes: ${nodesData.total_published}</div>
                         <div>DHT Contacts: ${dhtStatus.contacts_count}</div>
                         <div>DHT Port: ${dhtStatus.dht_port}</div>
                     </div>
@@ -177,12 +172,12 @@ class LlamaNetUI {
                 
                 <div data-section="nodes">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6><i class="fas fa-users"></i> Available Nodes & Models</h6>
+                        <h6><i class="fas fa-users"></i> Published Nodes</h6>
                         <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.refreshNodesOnly()">
                             <i class="fas fa-sync-alt"></i>
                         </button>
                     </div>
-                    ${this.renderNodesWithModels(nodesData.nodes)}
+                    ${this.renderPublishedNodes(nodesData.published_nodes)}
                 </div>
             `;
             
@@ -215,9 +210,9 @@ class LlamaNetUI {
         }).join('');
     }
     
-    renderNodesWithModels(nodes) {
+    renderPublishedNodes(nodes) {
         if (!nodes || nodes.length === 0) {
-            return '<div class="text-muted small">No nodes discovered</div>';
+            return '<div class="text-muted small">No published nodes discovered</div>';
         }
         
         // Group nodes by model
@@ -244,17 +239,12 @@ class LlamaNetUI {
                         const statusClass = isRecent ? 'online' : 'warning';
                         const lastSeenText = this.formatLastSeen(node.last_seen);
                         
-                        // Show source badge
-                        const sourceBadge = node.source === 'dht_contact' 
-                            ? '<span class="badge bg-info ms-1">DHT</span>'
-                            : '<span class="badge bg-primary ms-1">Published</span>';
-                        
                         return `
                             <div class="node-item small ms-2" data-node-id="${node.node_id}">
                                 <div class="d-flex align-items-center">
                                     <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
                                     <div class="flex-grow-1">
-                                        <div class="fw-bold">${node.node_id.substring(0, 8)}... ${sourceBadge}</div>
+                                        <div class="fw-bold">${node.node_id.substring(0, 8)}...</div>
                                         <div class="text-muted">${node.ip}:${node.port}</div>
                                         <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
                                         <div class="text-muted small">${lastSeenText}</div>
@@ -306,12 +296,12 @@ class LlamaNetUI {
             // Update just the nodes section content
             if (nodesSection) {
                 const header = nodesSection.querySelector('.d-flex');
-                const newContent = this.renderNodesWithModels(nodesData.nodes);
+                const newContent = this.renderPublishedNodes(nodesData.published_nodes);
                 nodesSection.innerHTML = header.outerHTML + newContent;
             }
             
             // Show success feedback
-            this.showToast('success', `Found ${nodesData.total_count} active nodes`);
+            this.showToast('success', `Found ${nodesData.total_published} published nodes`);
             
         } catch (error) {
             console.error('Error refreshing nodes:', error);
@@ -322,7 +312,7 @@ class LlamaNetUI {
             if (nodesSection) {
                 const header = `
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6><i class="fas fa-users"></i> Available Nodes & Models</h6>
+                        <h6><i class="fas fa-users"></i> Published Nodes</h6>
                         <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.refreshNodesOnly()">
                             <i class="fas fa-sync-alt"></i>
                         </button>
