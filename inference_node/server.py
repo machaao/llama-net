@@ -448,7 +448,7 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
         
         # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
-        request_dict.pop('strategy', None)
+        request_dict.pop('strategy', 'local')
         
         # Handle streaming vs non-streaming
         if request.stream:
