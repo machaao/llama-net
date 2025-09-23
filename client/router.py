@@ -20,12 +20,15 @@ class NodeSelector:
                          strategy: str = "round_robin",  # "load_balanced", "round_robin", "random"
                          randomize: bool = True) -> Optional[NodeInfo]:
         """Select the best node based on criteria and strategy"""
-        # Get nodes from DHT (now includes routing table contacts)
+        # Get unique nodes from DHT
         nodes = await self.dht_discovery.get_nodes(model)
         
         if not nodes:
             logger.warning(f"No nodes available for model {model}")
             return None
+        
+        # Log available nodes for debugging
+        logger.debug(f"Available nodes for selection: {[n.node_id[:8] + '...' for n in nodes]}")
             
         # Filter by criteria (be more lenient for DHT contacts with unknown metrics)
         eligible_nodes = []
@@ -41,16 +44,22 @@ class NodeSelector:
             # Fall back to any available node
             eligible_nodes = nodes
         
-        # Apply selection strategy
+        # Apply selection strategy with logging
+        selected = None
         if strategy == "round_robin":
-            return self._round_robin_select(eligible_nodes)
+            selected = self._round_robin_select(eligible_nodes)
         elif strategy == "random":
-            return random.choice(eligible_nodes)
+            selected = random.choice(eligible_nodes)
         elif strategy == "load_balanced":
-            return self._load_balanced_select(eligible_nodes, randomize)
+            selected = self._load_balanced_select(eligible_nodes, randomize)
         else:
             logger.warning(f"Unknown strategy {strategy}, using round_robin")
-            return self._round_robin_select(eligible_nodes)
+            selected = self._round_robin_select(eligible_nodes)
+        
+        if selected:
+            logger.info(f"🎯 Selected node {selected.node_id[:8]}... via {strategy} strategy")
+        
+        return selected
     
     def _round_robin_select(self, nodes: List[NodeInfo]) -> NodeInfo:
         """Select node using round robin with global state"""

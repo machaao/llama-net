@@ -156,6 +156,19 @@ class RoutingTable:
             all_contacts.extend(bucket.get_contacts())
         return all_contacts
     
+    def get_unique_contacts(self) -> List['Contact']:
+        """Get all unique contacts (deduplicated by node_id)"""
+        seen_ids = set()
+        unique_contacts = []
+        
+        for bucket in self.buckets.values():
+            for contact in bucket.get_contacts():
+                if contact.node_id not in seen_ids:
+                    seen_ids.add(contact.node_id)
+                    unique_contacts.append(contact)
+        
+        return unique_contacts
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get routing table statistics"""
         current_time = time.time()
