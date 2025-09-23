@@ -26,9 +26,17 @@ class Contact:
     def distance(self, other_id: str) -> int:
         """Calculate XOR distance between this contact and another node ID"""
         try:
-            return int(self.node_id, 16) ^ int(other_id, 16)
-        except ValueError:
-            logger.error(f"Invalid node ID format for distance calculation: {self.node_id} or {other_id}")
+            # Ensure both values are strings
+            self_id_str = str(self.node_id) if self.node_id is not None else ""
+            other_id_str = str(other_id) if other_id is not None else ""
+            
+            # Validate hex format
+            if not self_id_str or not other_id_str:
+                return float('inf')
+                
+            return int(self_id_str, 16) ^ int(other_id_str, 16)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid node ID format for distance calculation: {self.node_id} or {other_id}: {e}")
             return float('inf')  # Return max distance for invalid IDs
 
 class KademliaNode:
@@ -151,10 +159,16 @@ class KademliaNode:
             try:
                 # Ping bootstrap node to get its ID
                 contact = await self._ping_node(ip, port)
-                if contact:
-                    self.routing_table.add_contact(contact)
-                    # Find nodes close to ourselves
-                    await self.find_node(self.node_id)
+                if contact and contact.node_id:
+                    # Validate the node ID before adding
+                    if self._validate_node_id(str(contact.node_id)):
+                        self.routing_table.add_contact(contact)
+                        # Find nodes close to ourselves
+                        await self.find_node(self.node_id)
+                    else:
+                        logger.warning(f"Bootstrap node {ip}:{port} returned invalid node ID: {contact.node_id}")
+                else:
+                    logger.warning(f"Failed to get valid contact from bootstrap node {ip}:{port}")
             except Exception as e:
                 logger.warning(f"Failed to bootstrap from {ip}:{port}: {e}")
     
@@ -263,10 +277,18 @@ class KademliaNode:
             'sender_id': self.node_id
         }
         
-        response = await self.protocol.send_request(message, (ip, port))
-        if response and response.get('pong'):
-            return Contact(response.get('sender_id'), ip, port)
-        return None
+        try:
+            response = await self.protocol.send_request(message, (ip, port))
+            if response and response.get('pong'):
+                sender_id = response.get('sender_id')
+                if sender_id and self._validate_node_id(str(sender_id)):
+                    return Contact(str(sender_id), ip, port)
+                else:
+                    logger.warning(f"Invalid sender_id received from {ip}:{port}: {sender_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error pinging node {ip}:{port}: {e}")
+            return None
     
     async def _store_on_node(self, contact: Contact, key: str, value: Any) -> bool:
         """Store key-value on a specific node"""

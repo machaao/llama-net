@@ -89,12 +89,16 @@ class RoutingTable:
     def _get_bucket_index(self, node_id: str) -> int:
         """Get the bucket index for a node ID"""
         try:
-            distance = int(self.node_id, 16) ^ int(node_id, 16)
+            # Ensure both are strings
+            self_id_str = str(self.node_id)
+            node_id_str = str(node_id)
+            
+            distance = int(self_id_str, 16) ^ int(node_id_str, 16)
             if distance == 0:
                 return 0
             return distance.bit_length() - 1
-        except ValueError:
-            logger.error(f"Invalid node ID format: {node_id}")
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid node ID format for bucket calculation: {self.node_id} or {node_id}: {e}")
             return 0  # Default bucket
     
     def get_all_contacts(self) -> List['Contact']:
