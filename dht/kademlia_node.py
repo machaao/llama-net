@@ -280,7 +280,8 @@ class KademliaNode:
         try:
             response = await self.protocol.send_request(message, (ip, port))
             if response and response.get('pong'):
-                sender_id = response.get('sender_id')
+                # Try to get sender_id from response root or data
+                sender_id = response.get('sender_id') or response.get('data', {}).get('sender_id')
                 if sender_id and self._validate_node_id(str(sender_id)):
                     return Contact(str(sender_id), ip, port)
                 else:

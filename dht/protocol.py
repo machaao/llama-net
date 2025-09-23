@@ -58,7 +58,10 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             'type': 'response',
             'id': message.get('id'),
             'sender_id': self.node.node_id,
-            'data': {'pong': True}
+            'data': {
+                'pong': True,
+                'sender_id': self.node.node_id
+            }
         }
         await self._send_message(response, addr)
     
