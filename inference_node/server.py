@@ -474,7 +474,7 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
     try:
         # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
-        request_dict.pop('strategy', None)
+        request_dict.pop('strategy', 'local')
         
         url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
         
