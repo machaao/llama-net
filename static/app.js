@@ -18,18 +18,7 @@ class LlamaNetUI {
     }
     
     setupEventListeners() {
-        // API mode change
-        document.querySelectorAll('input[name="apiMode"]').forEach(radio => {
-            radio.addEventListener('change', () => {
-                this.updateUIForAPIMode();
-            });
-        });
-    }
-    
-    updateUIForAPIMode() {
-        const mode = document.querySelector('input[name="apiMode"]:checked').value;
-        // Could add mode-specific UI changes here
-        console.log(`Switched to ${mode} mode`);
+        // No API mode selector needed - OpenAI only
     }
     
     async refreshNetworkStatus() {
@@ -80,6 +69,7 @@ class LlamaNetUI {
                             <div class="flex-grow-1">
                                 <div class="fw-bold">${nodeInfo.node_id.substring(0, 12)}...</div>
                                 <small class="text-muted">${nodeInfo.model}</small>
+                                <div class="badge bg-primary">OpenAI Compatible</div>
                             </div>
                         </div>
                     </div>
@@ -156,6 +146,7 @@ class LlamaNetUI {
                 <div class="model-group mb-2">
                     <div class="fw-bold small text-primary">
                         <i class="fas fa-brain"></i> ${model} (${modelNodes.length})
+                        <span class="badge bg-success ms-1">OpenAI</span>
                     </div>
                     ${modelNodes.map(node => {
                         const isRecent = (Date.now() / 1000) - node.last_seen < 60;
@@ -289,20 +280,10 @@ class LlamaNetUI {
         // Add user message to chat
         this.addMessageToChat('user', message);
         
-        // Get API mode - this determines which endpoint to use
-        const apiMode = document.querySelector('input[name="apiMode"]:checked').value;
-        
         try {
-            let response;
-            // Only call the endpoint that matches the selected API mode
-            if (apiMode === 'openai') {
-                response = await this.sendOpenAIMessage(message);
-            } else {
-                response = await this.sendLlamaNetMessage(message);
-            }
+            const response = await this.sendOpenAIMessage(message);
             
             // Only add to chat if response exists and it's not from streaming
-            // (streaming methods handle their own UI updates)
             const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
             if (response && !streamingEnabled) {
                 this.addMessageToChat('assistant', response.text, response.metadata);
@@ -318,150 +299,6 @@ class LlamaNetUI {
         }
     }
     
-    async sendLlamaNetMessage(message) {
-        const maxTokens = parseInt(document.getElementById('max-tokens').value) || 150;
-        const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
-        const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
-        
-        // Build a proper chat prompt for LlamaNet
-        let prompt = "";
-        
-        // Add recent context (last 3 exchanges)
-        const recentHistory = this.chatHistory.slice(-6); // 3 exchanges
-        if (recentHistory.length > 0) {
-            recentHistory.forEach(msg => {
-                if (msg.role === 'user') {
-                    prompt += `Human: ${msg.content}\n\n`;
-                } else if (msg.role === 'assistant') {
-                    prompt += `Assistant: ${msg.content}\n\n`;
-                }
-            });
-        }
-        
-        // Add current message
-        prompt += `Human: ${message}\n\nAssistant:`;
-        
-        const request = {
-            prompt: prompt,
-            max_tokens: maxTokens,
-            temperature: temperature,
-            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"] // Comprehensive stop tokens
-        };
-
-        if (streamingEnabled) {
-            return await this.sendStreamingMessage(request);
-        } else {
-            const response = await fetch(`${this.baseUrl}/generate`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(request)
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            
-            const data = await response.json();
-            return {
-                text: this.cleanResponse(data.text),
-                metadata: {
-                    node_id: data.node_id,
-                    tokens: data.tokens_generated,
-                    time: data.generation_time,
-                    api: 'LlamaNet'
-                }
-            };
-        }
-    }
-
-    async sendStreamingMessage(request) {
-        return new Promise((resolve, reject) => {
-            let currentMessageDiv = null;
-            let currentBubbleDiv = null;
-            let accumulatedText = '';
-            
-            // Create initial message bubble
-            const chatContainer = document.getElementById('chat-messages');
-            currentMessageDiv = document.createElement('div');
-            currentMessageDiv.className = 'message assistant';
-            
-            currentBubbleDiv = document.createElement('div');
-            currentBubbleDiv.className = 'message-bubble';
-            currentBubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><span class="streaming-text"></span><span class="streaming-cursor">▋</span>';
-            
-            currentMessageDiv.appendChild(currentBubbleDiv);
-            chatContainer.appendChild(currentMessageDiv);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-            
-            // Remove welcome message if it exists
-            const welcomeMsg = chatContainer.querySelector('.text-center.text-muted');
-            if (welcomeMsg) {
-                welcomeMsg.remove();
-            }
-            
-            this.streamUI.startStream(
-                request,
-                // onToken callback
-                (data) => {
-                    accumulatedText = data.accumulatedText;
-                    const textSpan = currentBubbleDiv.querySelector('.streaming-text');
-                    if (textSpan) {
-                        textSpan.textContent = accumulatedText;
-                    }
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                },
-                // onComplete callback
-                (data) => {
-                    // Remove streaming cursor
-                    const cursor = currentBubbleDiv.querySelector('.streaming-cursor');
-                    if (cursor) {
-                        cursor.remove();
-                    }
-                    
-                    // Add metadata
-                    const metadataHtml = `<div class="message-meta">Node: ${data.nodeId.substring(0, 8)}... • Tokens: ${data.tokensGenerated} • Time: ${data.generationTime.toFixed(2)}s • API: LlamaNet (Streaming)</div>`;
-                    currentMessageDiv.insertAdjacentHTML('beforeend', metadataHtml);
-                    
-                    // Store in chat history
-                    this.chatHistory.push({ 
-                        role: 'assistant', 
-                        content: accumulatedText, 
-                        timestamp: Date.now() 
-                    });
-                    
-                    resolve({
-                        text: accumulatedText,
-                        metadata: {
-                            node_id: data.nodeId,
-                            tokens: data.tokensGenerated,
-                            time: data.generationTime,
-                            api: 'LlamaNet (Streaming)'
-                        },
-                        isStreaming: true // Flag to indicate this was handled by streaming
-                    });
-                },
-                // onError callback
-                (error) => {
-                    // Remove streaming cursor and show error
-                    const cursor = currentBubbleDiv.querySelector('.streaming-cursor');
-                    if (cursor) {
-                        cursor.remove();
-                    }
-                    
-                    const textSpan = currentBubbleDiv.querySelector('.streaming-text');
-                    if (textSpan) {
-                        textSpan.textContent = accumulatedText + ' [Error: ' + error.message + ']';
-                        textSpan.style.color = 'red';
-                    }
-                    
-                    reject(error);
-                }
-            );
-        });
-    }
-    
     async sendOpenAIMessage(message) {
         const maxTokens = parseInt(document.getElementById('max-tokens').value) || 150;
         const temperature = parseFloat(document.getElementById('temperature').value) || 0.7;
@@ -469,7 +306,7 @@ class LlamaNetUI {
         
         // Build chat history for context - OPTIMIZED
         const messages = [
-            { role: 'system', content: 'You are a helpful AI assistant. Provide clear, concise responses without repeating the conversation format.' }
+            { role: 'system', content: 'You are a helpful AI assistant. Provide clear, concise responses.' }
         ];
         
         // Add recent chat history (last 6 exchanges to keep context manageable)
@@ -741,9 +578,7 @@ class LlamaNetUI {
         let metadataHtml = '';
         if (metadata) {
             const parts = [];
-            if (metadata.node_id) parts.push(`Node: ${metadata.node_id.substring(0, 8)}...`);
             if (metadata.tokens) parts.push(`Tokens: ${metadata.tokens}`);
-            if (metadata.time) parts.push(`Time: ${metadata.time.toFixed(2)}s`);
             if (metadata.api) parts.push(`API: ${metadata.api}`);
             if (metadata.id) parts.push(`ID: ${metadata.id.substring(0, 8)}...`);
             
@@ -826,7 +661,8 @@ class LlamaNetUI {
                         <strong>Node ID:</strong> ${info.node_id}<br>
                         <strong>Model:</strong> ${info.model}<br>
                         <strong>Model Path:</strong> ${info.model_path}<br>
-                        <strong>DHT Port:</strong> ${info.dht_port}
+                        <strong>DHT Port:</strong> ${info.dht_port}<br>
+                        <strong>API:</strong> <span class="badge bg-success">OpenAI Compatible</span>
                     </div>
                     
                     <h6 class="mt-3"><i class="fas fa-chart-line"></i> Performance</h6>
@@ -860,16 +696,10 @@ class LlamaNetUI {
             <div class="mt-3">
                 <h6><i class="fas fa-list"></i> Available Endpoints</h6>
                 <div class="row">
-                    <div class="col-md-6">
-                        <strong>LlamaNet:</strong>
-                        <ul class="list-unstyled small">
-                            ${info.endpoints.llamanet.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
-                        </ul>
-                    </div>
-                    <div class="col-md-6">
+                    <div class="col-12">
                         <strong>OpenAI Compatible:</strong>
                         <ul class="list-unstyled small">
-                            ${info.endpoints.openai.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
+                            ${info.endpoints.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
                         </ul>
                     </div>
                 </div>

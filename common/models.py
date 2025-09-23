@@ -20,45 +20,7 @@ class NodeInfo(BaseModel):
     gpu_info: Optional[str] = None
     context_size: Optional[int] = None
 
-class GenerationRequest(BaseModel):
-    """Request for text generation"""
-    prompt: str
-    max_tokens: int = 100
-    temperature: float = 0.7
-    top_p: float = 0.9
-    top_k: int = 40
-    stop: Optional[List[str]] = None
-    repeat_penalty: float = 1.1
-    
-class GenerationResponse(BaseModel):
-    """Response from text generation"""
-    text: str
-    tokens_generated: int
-    generation_time: float
-    node_id: str
-
-# Streaming models
-class StreamingGenerationRequest(BaseModel):
-    """Request for streaming text generation"""
-    prompt: str
-    max_tokens: int = 100
-    temperature: float = 0.7
-    top_p: float = 0.9
-    top_k: int = 40
-    stop: Optional[List[str]] = None
-    repeat_penalty: float = 1.1
-    stream: bool = True
-
-class StreamingChunk(BaseModel):
-    """Individual chunk in a streaming response"""
-    text: str
-    accumulated_text: str
-    tokens_generated: int
-    generation_time: float
-    finished: bool
-    node_id: str
-
-# OpenAI-compatible models
+# OpenAI-compatible models only
 class OpenAIMessage(BaseModel):
     """OpenAI chat message format"""
     role: str  # "system", "user", "assistant"
@@ -152,10 +114,25 @@ class OpenAIStreamingChoice(BaseModel):
     index: int
     finish_reason: Optional[str] = None
 
-class OpenAIStreamingResponse(BaseModel):
-    """OpenAI-compatible streaming response"""
+class OpenAIStreamingChatResponse(BaseModel):
+    """OpenAI-compatible streaming chat response"""
     id: str
     object: str = "chat.completion.chunk"
     created: int
     model: str
     choices: List[OpenAIStreamingChoice]
+
+class OpenAIStreamingCompletionChoice(BaseModel):
+    """OpenAI streaming completion choice"""
+    text: str
+    index: int
+    finish_reason: Optional[str] = None
+    logprobs: Optional[Dict] = None
+
+class OpenAIStreamingCompletionResponse(BaseModel):
+    """OpenAI-compatible streaming completion response"""
+    id: str
+    object: str = "text_completion"
+    created: int
+    model: str
+    choices: List[OpenAIStreamingCompletionChoice]

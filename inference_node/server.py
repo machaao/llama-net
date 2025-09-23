@@ -11,8 +11,10 @@ from contextlib import asynccontextmanager
 import json
 
 from common.models import (
-    GenerationRequest, GenerationResponse,
-    OpenAIModel, OpenAIModelList
+    OpenAIModel, OpenAIModelList,
+    OpenAICompletionRequest, OpenAIChatCompletionRequest,
+    OpenAICompletionResponse, OpenAIChatCompletionResponse,
+    OpenAIChoice, OpenAIUsage, OpenAIMessage
 )
 from common.openai_models import (
     OpenAICompletionRequest, OpenAIChatCompletionRequest,
@@ -43,7 +45,7 @@ async def lifespan(app: FastAPI):
     
     # Load configuration
     config = InferenceConfig()
-    logger.info(f"Starting inference node with config: {config}")
+    logger.info(f"Starting OpenAI-compatible inference node: {config}")
     
     # Initialize LLM
     llm = LlamaWrapper(config)
@@ -67,7 +69,7 @@ async def lifespan(app: FastAPI):
     if dht_publisher:
         await dht_publisher.stop()
 
-app = FastAPI(title="LlamaNet Inference Node", lifespan=lifespan)
+app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -84,84 +86,13 @@ async def web_ui():
     if os.path.exists(index_path):
         return FileResponse(index_path)
     else:
-        return {"message": "LlamaNet Inference Node", "web_ui": "Not available", "endpoints": {
-            "llamanet": ["/generate", "/status", "/info", "/health"],
-            "openai": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
-        }}
-
-# Original LlamaNet endpoints
-@app.post("/generate", response_model=GenerationResponse)
-async def generate(request: GenerationRequest):
-    """Generate text from a prompt"""
-    if not llm:
-        raise HTTPException(status_code=503, detail="LLM not initialized")
-        
-    try:
-        result = llm.generate(
-            prompt=request.prompt,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            stop=request.stop,
-            repeat_penalty=request.repeat_penalty
-        )
-        
-        return GenerationResponse(
-            text=result["text"],
-            tokens_generated=result["tokens_generated"],
-            generation_time=result["generation_time"],
-            node_id=config.node_id
-        )
-    except Exception as e:
-        logger.error(f"Generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/generate/stream")
-async def generate_stream(request: GenerationRequest):
-    """Generate text with streaming support"""
-    if not llm:
-        raise HTTPException(status_code=503, detail="LLM not initialized")
-    
-    async def stream_generator():
-        try:
-            async for chunk in llm.generate_stream_async(
-                prompt=request.prompt,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                top_k=request.top_k,
-                stop=request.stop,
-                repeat_penalty=request.repeat_penalty
-            ):
-                # Format as Server-Sent Events
-                data = {
-                    "text": chunk["text"],
-                    "accumulated_text": chunk["accumulated_text"],
-                    "tokens_generated": chunk["tokens_generated"],
-                    "generation_time": chunk["generation_time"],
-                    "finished": chunk["finished"],
-                    "node_id": config.node_id
-                }
-                yield f"data: {json.dumps(data)}\n\n"
-                
-                if chunk["finished"]:
-                    break
-        except Exception as e:
-            error_data = {"error": str(e), "finished": True}
-            yield f"data: {json.dumps(error_data)}\n\n"
-    
-    return StreamingResponse(
-        stream_generator(),
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Content-Type": "text/plain; charset=utf-8"
+        return {
+            "message": "LlamaNet OpenAI-Compatible Inference Node", 
+            "web_ui": "Not available", 
+            "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
         }
-    )
 
-# OpenAI-compatible endpoints
+# OpenAI-compatible endpoints only
 @app.get("/v1/models")
 async def list_models():
     """List available models (OpenAI-compatible)"""
@@ -304,7 +235,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         stop_tokens = ["\n\nHuman:", "\n\nUser:", "\nHuman:", "\nUser:", "Human:", "User:"]
     
     try:
-        # Handle streaming
+        # Handle streaming with FIXED response format
         if request.stream:
             request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
             
@@ -377,8 +308,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         logger.error(f"Chat completion error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Original LlamaNet status endpoints
-
+# Status and utility endpoints
 @app.get("/status")
 async def status():
     """Get node status"""
@@ -400,10 +330,7 @@ async def info():
         "system": system_info,
         "dht_port": config.dht_port,
         "openai_compatible": True,
-        "endpoints": {
-            "llamanet": ["/generate", "/status", "/info", "/health"],
-            "openai": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
-        }
+        "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
     }
 
 @app.get("/health")
@@ -518,7 +445,7 @@ def start_server():
 def show_help():
     """Show help information"""
     print("""
-LlamaNet Inference Node
+LlamaNet OpenAI-Compatible Inference Node
 
 Usage:
   python -m inference_node.server [OPTIONS]
@@ -549,10 +476,9 @@ Environment Variables:
 OpenAI-Compatible Endpoints:
   GET  /v1/models                - List available models
   POST /v1/completions          - Text completion
-  POST /v1/chat/completions     - Chat completion
+  POST /v1/chat/completions     - Chat completion (with streaming support)
 
-LlamaNet Endpoints:
-  POST /generate                - Native LlamaNet generation
+Status Endpoints:
   GET  /status                  - Node status and metrics
   GET  /info                    - Node information
   GET  /health                  - Health check
