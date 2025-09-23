@@ -109,12 +109,19 @@ class LlamaNetUI {
     
     async refreshNetworkStatus() {
         try {
-            // Try to discover nodes through the current node
-            const response = await fetch(`${this.baseUrl}/dht/status`);
+            // Get network models and statistics
+            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
+                fetch(`${this.baseUrl}/dht/status`),
+                fetch(`${this.baseUrl}/v1/models/network`),
+                fetch(`${this.baseUrl}/models/statistics`)
+            ]);
             
-            if (response.ok) {
-                const dhtStatus = await response.json();
-                await this.updateNetworkDisplay(dhtStatus);
+            if (dhtResponse.ok && modelsResponse.ok && statsResponse.ok) {
+                const dhtStatus = await dhtResponse.json();
+                const modelsData = await modelsResponse.json();
+                const statsData = await statsResponse.json();
+                
+                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
             } else {
                 this.showNetworkError('Unable to connect to LlamaNet node');
             }
@@ -124,7 +131,7 @@ class LlamaNetUI {
         }
     }
     
-    async updateNetworkDisplay(dhtStatus) {
+    async updateNetworkDisplay(dhtStatus, modelsData, statsData) {
         const container = document.getElementById('network-status');
         
         if (!dhtStatus.running) {
@@ -138,10 +145,6 @@ class LlamaNetUI {
         }
         
         try {
-            // Get nodes with separation between published and DHT contacts
-            const nodesResponse = await fetch(`${this.baseUrl}/nodes`);
-            const nodesData = await nodesResponse.json();
-            
             // Get current node info
             const nodeResponse = await fetch(`${this.baseUrl}/info`);
             const nodeInfo = await nodeResponse.json();
@@ -162,28 +165,27 @@ class LlamaNetUI {
                 </div>
                 
                 <div class="mb-3">
+                    <h6><i class="fas fa-brain"></i> Available Models</h6>
+                    <div class="small mb-2">
+                        <div>Total Models: ${modelsData.total_models}</div>
+                        <div>Total Nodes: ${modelsData.total_nodes}</div>
+                        <div>Network Health: ${this.getHealthBadge(statsData.network_summary)}</div>
+                    </div>
+                    ${this.renderAvailableModels(modelsData.data, statsData.models)}
+                </div>
+                
+                <div class="mb-3">
                     <h6><i class="fas fa-network-wired"></i> DHT Network</h6>
                     <div class="small">
-                        <div>Published Nodes: ${nodesData.total_published}</div>
                         <div>DHT Contacts: ${dhtStatus.contacts_count}</div>
                         <div>DHT Port: ${dhtStatus.dht_port}</div>
                     </div>
                 </div>
-                
-                <div data-section="nodes">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6><i class="fas fa-users"></i> Published Nodes</h6>
-                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.refreshNodesOnly()">
-                            <i class="fas fa-sync-alt"></i>
-                        </button>
-                    </div>
-                    ${this.renderPublishedNodes(nodesData.published_nodes)}
-                </div>
             `;
             
         } catch (error) {
-            console.error('Error getting nodes with models:', error);
-            this.showNetworkError('Failed to get node information');
+            console.error('Error updating network display:', error);
+            this.showNetworkError('Failed to get network information');
         }
     }
     
@@ -210,54 +212,92 @@ class LlamaNetUI {
         }).join('');
     }
     
-    renderPublishedNodes(nodes) {
-        if (!nodes || nodes.length === 0) {
-            return '<div class="text-muted small">No published nodes discovered</div>';
+    renderAvailableModels(models, modelStats) {
+        if (!models || models.length === 0) {
+            return '<div class="text-muted small">No models discovered on network</div>';
         }
         
-        // Group nodes by model
-        const nodesByModel = {};
-        nodes.forEach(node => {
-            const model = node.model || 'Unknown';
-            if (!nodesByModel[model]) {
-                nodesByModel[model] = [];
-            }
-            nodesByModel[model].push(node);
-        });
-        
-        let html = '';
-        Object.keys(nodesByModel).forEach(model => {
-            const modelNodes = nodesByModel[model];
-            html += `
-                <div class="model-group mb-2">
-                    <div class="fw-bold small text-primary">
-                        <i class="fas fa-brain"></i> ${model} (${modelNodes.length})
-                        <span class="badge bg-success ms-1">OpenAI</span>
+        return models.map(model => {
+            const stats = modelStats[model.id] || {};
+            const availability = stats.availability || 'unknown';
+            const avgLoad = stats.avg_load || 0;
+            const totalTps = stats.total_tps || 0;
+            
+            const availabilityClass = {
+                'high': 'success',
+                'medium': 'warning', 
+                'low': 'danger',
+                'unknown': 'secondary'
+            }[availability] || 'secondary';
+            
+            return `
+                <div class="model-group mb-2" data-model="${model.id}">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <div class="fw-bold small text-primary">
+                            <i class="fas fa-brain"></i> ${model.id}
+                            <span class="badge bg-${availabilityClass} ms-1">${availability}</span>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel('${model.id}')" title="Select this model">
+                            <i class="fas fa-check"></i>
+                        </button>
                     </div>
-                    ${modelNodes.map(node => {
-                        const isRecent = (Date.now() / 1000) - node.last_seen < 60;
-                        const statusClass = isRecent ? 'online' : 'warning';
-                        const lastSeenText = this.formatLastSeen(node.last_seen);
-                        
-                        return `
-                            <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
-                                <div class="d-flex align-items-center">
-                                    <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
-                                    <div class="flex-grow-1">
-                                        <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
-                                        <div class="text-muted">${node.ip}:${node.port}</div>
-                                        <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
-                                        <div class="text-muted small">${lastSeenText}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
+                    <div class="small text-muted mb-1">
+                        <div>Nodes: ${model.node_count} | Avg Load: ${avgLoad.toFixed(2)} | Total TPS: ${totalTps.toFixed(1)}</div>
+                    </div>
+                    <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
+                        ${this.renderModelNodes(model.nodes)}
+                    </div>
+                    <div class="mt-1">
+                        <button class="btn btn-sm btn-outline-info" onclick="llamaNetUI.showModelDetails('${model.id}')" title="View model details">
+                            <i class="fas fa-info-circle"></i> Details
+                        </button>
+                    </div>
                 </div>
             `;
-        });
+        }).join('');
+    }
+    
+    renderModelNodes(nodes) {
+        if (!nodes || nodes.length === 0) {
+            return '<div class="text-muted small">No nodes available</div>';
+        }
         
-        return html;
+        return nodes.map(node => {
+            const isRecent = (Date.now() / 1000) - node.last_seen < 60;
+            const statusClass = isRecent ? 'online' : 'warning';
+            const lastSeenText = this.formatLastSeen(node.last_seen);
+            
+            return `
+                <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
+                    <div class="d-flex align-items-center">
+                        <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
+                        <div class="flex-grow-1">
+                            <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
+                            <div class="text-muted">${node.ip}:${node.port}</div>
+                            <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
+                            <div class="text-muted small">${lastSeenText}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    getHealthBadge(networkSummary) {
+        if (!networkSummary) return '<span class="badge bg-secondary">Unknown</span>';
+        
+        const avgLoad = networkSummary.avg_network_load || 0;
+        const totalNodes = networkSummary.total_nodes || 0;
+        
+        if (totalNodes === 0) {
+            return '<span class="badge bg-danger">No Nodes</span>';
+        } else if (avgLoad < 0.3 && totalNodes >= 2) {
+            return '<span class="badge bg-success">Excellent</span>';
+        } else if (avgLoad < 0.7) {
+            return '<span class="badge bg-warning">Good</span>';
+        } else {
+            return '<span class="badge bg-danger">High Load</span>';
+        }
     }
     
     formatLastSeen(lastSeen) {
@@ -275,52 +315,173 @@ class LlamaNetUI {
         }
     }
     
-    async refreshNodesOnly() {
+    async selectModel(modelId) {
         try {
-            const container = document.getElementById('network-status');
+            // Update the current model selection
+            this.selectedModel = modelId;
             
-            // Show loading state for nodes section only
-            const nodesSection = container.querySelector('[data-section="nodes"]');
-            if (nodesSection) {
-                const header = nodesSection.querySelector('.d-flex');
-                const content = nodesSection.querySelector('.d-flex').nextElementSibling;
-                if (content) {
-                    content.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Refreshing nodes...</div>';
-                }
+            // Update UI to show selection
+            document.querySelectorAll('.model-group').forEach(group => {
+                group.classList.remove('selected-model');
+            });
+            
+            const selectedGroup = document.querySelector(`[data-model="${modelId}"]`);
+            if (selectedGroup) {
+                selectedGroup.classList.add('selected-model');
             }
             
-            // Get fresh node data
-            const nodesResponse = await fetch(`${this.baseUrl}/nodes`);
-            const nodesData = await nodesResponse.json();
+            // Show success message
+            this.showToast('success', `Selected model: ${modelId}`);
             
-            // Update just the nodes section content
-            if (nodesSection) {
-                const header = nodesSection.querySelector('.d-flex');
-                const newContent = this.renderPublishedNodes(nodesData.published_nodes);
-                nodesSection.innerHTML = header.outerHTML + newContent;
-            }
-            
-            // Show success feedback
-            this.showToast('success', `Found ${nodesData.total_published} published nodes`);
+            // Update chat interface to show selected model
+            this.updateChatInterface(modelId);
             
         } catch (error) {
-            console.error('Error refreshing nodes:', error);
-            this.showToast('error', 'Failed to refresh nodes');
-            
-            // Restore the refresh button on error
-            const nodesSection = document.querySelector('[data-section="nodes"]');
-            if (nodesSection) {
-                const header = `
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6><i class="fas fa-users"></i> Published Nodes</h6>
-                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.refreshNodesOnly()">
-                            <i class="fas fa-sync-alt"></i>
-                        </button>
-                    </div>
-                `;
-                nodesSection.innerHTML = header + '<div class="text-muted small">Error loading nodes</div>';
-            }
+            console.error('Error selecting model:', error);
+            this.showToast('error', 'Failed to select model');
         }
+    }
+    
+    updateChatInterface(modelId) {
+        // Update the chat header to show selected model
+        const chatHeader = document.querySelector('.card-header h5');
+        if (chatHeader) {
+            chatHeader.innerHTML = `<i class="fas fa-comments"></i> Chat Interface - Model: ${modelId}`;
+        }
+        
+        // Add model info to the welcome message
+        const chatContainer = document.getElementById('chat-messages');
+        const welcomeMsg = chatContainer.querySelector('.text-center.text-muted');
+        if (welcomeMsg) {
+            welcomeMsg.innerHTML = `
+                <i class="fas fa-robot fa-2x mb-2"></i>
+                <p>Welcome to LlamaNet! Using model: <strong>${modelId}</strong></p>
+                <p class="small">Start a conversation below.</p>
+            `;
+        }
+    }
+    
+    async showModelDetails(modelId) {
+        // Show detailed model information modal
+        const modal = new bootstrap.Modal(document.getElementById('nodeInfoModal'));
+        
+        // Update modal title
+        document.querySelector('#nodeInfoModal .modal-title').innerHTML = `<i class="fas fa-brain"></i> Model Information: ${modelId}`;
+        
+        // Show loading state
+        document.getElementById('node-info-details').innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2">Loading model information...</p>
+            </div>
+        `;
+        
+        modal.show();
+        
+        try {
+            // Get detailed model statistics
+            const response = await fetch(`${this.baseUrl}/models/statistics`);
+            
+            if (response.ok) {
+                const statsData = await response.json();
+                const modelStats = statsData.models[modelId];
+                
+                if (modelStats) {
+                    document.getElementById('node-info-details').innerHTML = this.renderModelDetailsView(modelId, modelStats, statsData.network_summary);
+                } else {
+                    throw new Error('Model not found in statistics');
+                }
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('Error loading model details:', error);
+            document.getElementById('node-info-details').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Failed to load model information: ${error.message}
+                </div>
+            `;
+        }
+    }
+    
+    renderModelDetailsView(modelId, modelStats, networkSummary) {
+        const availability = modelStats.availability || 'unknown';
+        const availabilityClass = {
+            'high': 'success',
+            'medium': 'warning',
+            'low': 'danger',
+            'unknown': 'secondary'
+        }[availability] || 'secondary';
+        
+        return `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-brain"></i> Model Overview</h6>
+                    <div class="network-detail-item">
+                        <strong>Model ID:</strong> ${modelId}<br>
+                        <strong>Availability:</strong> <span class="badge bg-${availabilityClass}">${availability}</span><br>
+                        <strong>Node Count:</strong> ${modelStats.node_count}<br>
+                        <strong>Average Load:</strong> ${modelStats.avg_load.toFixed(3)}<br>
+                        <strong>Total Capacity:</strong> ${modelStats.total_tps.toFixed(1)} TPS<br>
+                        <strong>API:</strong> <span class="badge bg-success">OpenAI Compatible</span>
+                    </div>
+                    
+                    ${modelStats.best_node ? `
+                    <h6 class="mt-3"><i class="fas fa-star"></i> Best Performing Node</h6>
+                    <div class="network-detail-item">
+                        <strong>Node ID:</strong> ${modelStats.best_node.node_id.substring(0, 12)}...<br>
+                        <strong>Address:</strong> ${modelStats.best_node.ip}:${modelStats.best_node.port}<br>
+                        <strong>Load:</strong> ${modelStats.best_node.load.toFixed(3)}<br>
+                        <strong>TPS:</strong> ${modelStats.best_node.tps.toFixed(1)}<br>
+                        <strong>Uptime:</strong> ${Math.floor(modelStats.best_node.uptime / 60)} minutes
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <div class="col-md-6">
+                    <h6><i class="fas fa-chart-bar"></i> Network Context</h6>
+                    <div class="network-detail-item">
+                        <strong>Total Network Models:</strong> ${networkSummary.total_models}<br>
+                        <strong>Total Network Nodes:</strong> ${networkSummary.total_nodes}<br>
+                        <strong>Network Average Load:</strong> ${networkSummary.avg_network_load.toFixed(3)}<br>
+                        <strong>Total Network Capacity:</strong> ${networkSummary.total_network_tps.toFixed(1)} TPS
+                    </div>
+                    
+                    <h6 class="mt-3"><i class="fas fa-users"></i> All Nodes for ${modelId}</h6>
+                    <div class="network-detail-item" style="max-height: 200px; overflow-y: auto;">
+                        ${modelStats.nodes.map(node => `
+                            <div class="d-flex justify-content-between align-items-center mb-1 p-1 border-bottom">
+                                <div>
+                                    <small class="fw-bold">${node.node_id.substring(0, 8)}...</small><br>
+                                    <small class="text-muted">${node.ip}:${node.port}</small>
+                                </div>
+                                <div class="text-end">
+                                    <small>Load: ${node.load.toFixed(2)}</small><br>
+                                    <small>TPS: ${node.tps.toFixed(1)}</small>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary" onclick="llamaNetUI.selectModel('${modelId}'); bootstrap.Modal.getInstance(document.getElementById('nodeInfoModal')).hide();">
+                        <i class="fas fa-check"></i> Select This Model
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="llamaNetUI.refreshModelDetails('${modelId}')">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    async refreshModelDetails(modelId) {
+        // Refresh the model details view
+        await this.showModelDetails(modelId);
     }
     
     async showNodeInfo(nodeId) {

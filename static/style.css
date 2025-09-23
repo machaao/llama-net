@@ -211,10 +211,26 @@ pre {
     100% { opacity: 1; transform: scale(1); }
 }
 
+.selected-model {
+    border: 2px solid var(--primary-color) !important;
+    background-color: rgba(13, 110, 253, 0.05) !important;
+}
+
 .model-group {
     border-left: 3px solid var(--primary-color);
     padding-left: 0.5rem;
     margin-bottom: 1rem;
+    transition: all 0.2s ease;
+}
+
+.model-group:hover {
+    background-color: rgba(13, 110, 253, 0.02);
+}
+
+.model-nodes {
+    border-left: 2px solid #e9ecef;
+    margin-left: 0.5rem;
+    padding-left: 0.5rem;
 }
 
 .model-group .node-item {
@@ -226,6 +242,43 @@ pre {
 .model-group .node-item:hover {
     background-color: #f8f9fa;
     cursor: pointer;
+}
+
+.availability-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.25rem;
+}
+
+.availability-high {
+    background-color: var(--success-color);
+}
+
+.availability-medium {
+    background-color: var(--warning-color);
+}
+
+.availability-low {
+    background-color: var(--danger-color);
+}
+
+.model-selector {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.model-stats {
+    font-size: 0.75rem;
+    color: var(--secondary-color);
+}
+
+.network-health-indicator {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 500;
 }
 
 .node-item .text-muted {
