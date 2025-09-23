@@ -174,7 +174,7 @@ class InferenceConfig:
         # LLM configuration
         self.n_ctx = int(load_env_var("N_CTX", 2048))
         self.n_batch = int(load_env_var("N_BATCH", 8))
-        self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", 0))
+        self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
         
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path).split('.')[0]
