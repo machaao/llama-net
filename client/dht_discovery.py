@@ -113,69 +113,86 @@ class DHTDiscovery(DiscoveryInterface):
         
         return node_infos
 
+    async def _get_published_nodes(self, model: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get published nodes from DHT storage"""
+        nodes = []
+        
+        if model:
+            key = f"model:{model}"
+            node_data = await self.kademlia_node.find_value(key)
+            if node_data:
+                if isinstance(node_data, list):
+                    nodes.extend(node_data)
+                else:
+                    nodes.append(node_data)
+            self._cache_is_model_specific = True
+        else:
+            key = "all_nodes"
+            node_data = await self.kademlia_node.find_value(key)
+            if node_data:
+                if isinstance(node_data, list):
+                    nodes.extend(node_data)
+                else:
+                    nodes.append(node_data)
+            self._cache_is_model_specific = False
+        
+        return nodes
+
     async def _refresh_nodes(self, model: Optional[str] = None):
-        """Refresh the nodes cache from DHT"""
+        """Refresh the nodes cache from DHT with proper deduplication"""
         try:
-            nodes = []
+            # Use a dict to ensure uniqueness by node_id
+            unique_nodes = {}
             
-            # Get nodes from DHT storage (published data)
-            if model:
-                key = f"model:{model}"
-                node_data = await self.kademlia_node.find_value(key)
-                if node_data:
-                    if isinstance(node_data, list):
-                        nodes.extend(node_data)
-                    else:
-                        nodes.append(node_data)
-                self._cache_is_model_specific = True
-            else:
-                key = "all_nodes"
-                node_data = await self.kademlia_node.find_value(key)
-                if node_data:
-                    if isinstance(node_data, list):
-                        nodes.extend(node_data)
-                    else:
-                        nodes.append(node_data)
-                self._cache_is_model_specific = False
-            
-            # ALSO get contacts from routing table
-            routing_contacts = await self._get_routing_table_contacts()
-            
-            # Convert published data to NodeInfo objects
-            seen_nodes = set()
-            self.nodes_cache = []
-            
-            # Process published node data first (higher priority)
-            for node_data in nodes:
-                if isinstance(node_data, dict):
-                    node_id = node_data.get('node_id')
-                    if node_id and node_id not in seen_nodes:
+            # Get published nodes from DHT storage first (higher priority)
+            published_nodes = await self._get_published_nodes(model)
+            for node_data in published_nodes:
+                if isinstance(node_data, dict) and node_data.get('node_id'):
+                    node_id = node_data['node_id']
+                    if time.time() - node_data.get('last_seen', 0) < 60:
                         try:
                             node_info = NodeInfo(**node_data)
-                            if time.time() - node_info.last_seen < 60:
-                                self.nodes_cache.append(node_info)
-                                seen_nodes.add(node_id)
-                                
-                                if node_id not in self.known_node_ids:
-                                    logger.info(f"🆕 New published node: {node_id[:12]}... ({node_data.get('ip')}:{node_data.get('port')}) - Model: {node_data.get('model')}")
-                                    self.known_node_ids.add(node_id)
+                            unique_nodes[node_id] = {
+                                'node': node_info,
+                                'source': 'published',
+                                'priority': 1
+                            }
                         except Exception as e:
-                            logger.warning(f"Failed to parse published node data: {e}")
+                            logger.warning(f"Failed to parse published node: {e}")
             
-            # Add routing table contacts that aren't already known
+            # Get routing table contacts (lower priority)
+            routing_contacts = await self._get_routing_table_contacts()
             for contact_node in routing_contacts:
-                if contact_node.node_id not in seen_nodes:
-                    # Filter by model if specified
+                node_id = contact_node.node_id
+                # Only add if not already present from published data
+                if node_id not in unique_nodes:
                     if not model or contact_node.model == model or contact_node.model == "unknown":
-                        self.nodes_cache.append(contact_node)
-                        seen_nodes.add(contact_node.node_id)
-                        
-                        if contact_node.node_id not in self.known_node_ids:
-                            logger.info(f"🔗 New DHT contact node: {contact_node.node_id[:12]}... ({contact_node.ip}:{contact_node.port}) - Model: {contact_node.model}")
-                            self.known_node_ids.add(contact_node.node_id)
+                        unique_nodes[node_id] = {
+                            'node': contact_node,
+                            'source': 'dht_contact',
+                            'priority': 2
+                        }
+            
+            # Convert to list and update cache
+            self.nodes_cache = [entry['node'] for entry in unique_nodes.values()]
+            
+            # Track new nodes
+            for node_id, entry in unique_nodes.items():
+                if node_id not in self.known_node_ids:
+                    node = entry['node']
+                    source = entry['source']
+                    logger.info(f"🆕 New {source} node: {node_id[:12]}... ({node.ip}:{node.port}) - Model: {node.model}")
+                    self.known_node_ids.add(node_id)
             
             self.cache_time = time.time()
-            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} total nodes ({len(nodes)} published + {len(routing_contacts)} DHT contacts)")
+            
+            # Log deduplication stats
+            total_before = len(published_nodes) + len(routing_contacts)
+            total_after = len(self.nodes_cache)
+            duplicates_removed = total_before - total_after
+            
+            logger.info(f"Refreshed nodes cache: {total_after} unique nodes (removed {duplicates_removed} duplicates)")
+            logger.debug(f"Sources: {len(published_nodes)} published + {len(routing_contacts)} DHT contacts = {total_before} total")
             
         except Exception as e:
             logger.error(f"Error refreshing nodes from DHT: {e}")
