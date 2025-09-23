@@ -64,25 +64,20 @@ class NodeSelector:
         return selected
     
     def _round_robin_select(self, nodes: List[NodeInfo]) -> NodeInfo:
-        """Select node using round robin with global state"""
+        """Select node using true round robin with persistent state"""
         if not nodes:
             return None
             
         # Sort nodes by node_id for consistent ordering across all clients
         sorted_nodes = sorted(nodes, key=lambda n: n.node_id)
         
-        # Use a hash-based approach for better distribution
-        import hashlib
-        import time
+        # Use modulo arithmetic for true round-robin
+        selected_node = sorted_nodes[self.round_robin_index % len(sorted_nodes)]
         
-        # Create a deterministic but rotating selection
-        time_slot = int(time.time() // 10)  # Change every 10 seconds
-        node_hash = hashlib.md5(f"{time_slot}".encode()).hexdigest()
-        index = int(node_hash, 16) % len(sorted_nodes)
+        # Increment counter for next selection
+        self.round_robin_index = (self.round_robin_index + 1) % len(sorted_nodes)
         
-        selected_node = sorted_nodes[index]
-        
-        logger.debug(f"Round robin selected node {selected_node.node_id[:8]}... (time-based index: {index})")
+        logger.debug(f"Round robin selected node {selected_node.node_id[:8]}... (index: {self.round_robin_index - 1})")
         return selected_node
     
     def _load_balanced_select(self, nodes: List[NodeInfo], randomize: bool) -> NodeInfo:
