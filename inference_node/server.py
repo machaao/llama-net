@@ -14,14 +14,10 @@ from common.models import (
     OpenAIModel, OpenAIModelList,
     OpenAICompletionRequest, OpenAIChatCompletionRequest,
     OpenAICompletionResponse, OpenAIChatCompletionResponse,
-    OpenAIChoice, OpenAIUsage, OpenAIMessage
-)
-from common.openai_models import (
-    OpenAICompletionRequest, OpenAIChatCompletionRequest,
-    OpenAICompletionResponse, OpenAIChatCompletionResponse,
     OpenAIChoice, OpenAIUsage, OpenAIMessage,
     create_streaming_chat_response, create_streaming_completion_response
 )
+
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo

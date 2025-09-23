@@ -1,5 +1,7 @@
+import json
+
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, AsyncGenerator
 import time
 import uuid
 
@@ -136,3 +138,98 @@ class OpenAIStreamingCompletionResponse(BaseModel):
     created: int
     model: str
     choices: List[OpenAIStreamingCompletionChoice]
+
+
+# Streaming utilities
+def create_sse_data(data: Dict[str, Any]) -> str:
+    """Create Server-Sent Events formatted data"""
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def create_sse_done() -> str:
+    """Create SSE done signal"""
+    return "data: [DONE]\n\n"
+
+
+async def create_streaming_chat_response(
+        request_id: str,
+        model: str,
+        stream_generator: AsyncGenerator[Dict[str, Any], None]
+) -> AsyncGenerator[str, None]:
+    """Create OpenAI-compatible streaming chat completion response"""
+    created = int(time.time())
+
+    # Send initial chunk with role
+    initial_chunk = OpenAIStreamingChatResponse(
+        id=request_id,
+        created=created,
+        model=model,
+        choices=[OpenAIStreamingChoice(
+            delta=OpenAIStreamingDelta(role="assistant"),
+            index=0
+        )]
+    )
+    yield create_sse_data(initial_chunk.dict())
+
+    # Stream content chunks
+    async for chunk in stream_generator:
+        if chunk.get("text"):
+            streaming_chunk = OpenAIStreamingChatResponse(
+                id=request_id,
+                created=created,
+                model=model,
+                choices=[OpenAIStreamingChoice(
+                    delta=OpenAIStreamingDelta(content=chunk["text"]),
+                    index=0,
+                    finish_reason=None if not chunk.get("finished") else "stop"
+                )]
+            )
+            yield create_sse_data(streaming_chunk.dict())
+
+        if chunk.get("finished"):
+            # Send final chunk with finish_reason
+            final_chunk = OpenAIStreamingChatResponse(
+                id=request_id,
+                created=created,
+                model=model,
+                choices=[OpenAIStreamingChoice(
+                    delta=OpenAIStreamingDelta(),
+                    index=0,
+                    finish_reason="stop"
+                )]
+            )
+            yield create_sse_data(final_chunk.dict())
+            break
+
+    # Send done signal
+    yield create_sse_done()
+
+
+async def create_streaming_completion_response(
+        request_id: str,
+        model: str,
+        stream_generator: AsyncGenerator[Dict[str, Any], None]
+) -> AsyncGenerator[str, None]:
+    """Create OpenAI-compatible streaming completion response"""
+    created = int(time.time())
+
+    # Stream content chunks
+    async for chunk in stream_generator:
+        if chunk.get("text"):
+            streaming_chunk = OpenAIStreamingCompletionResponse(
+                id=request_id,
+                created=created,
+                model=model,
+                choices=[OpenAIStreamingCompletionChoice(
+                    text=chunk["text"],
+                    index=0,
+                    finish_reason=None if not chunk.get("finished") else "stop"
+                )]
+            )
+            yield create_sse_data(streaming_chunk.dict())
+
+        if chunk.get("finished"):
+            break
+
+    # Send done signal
+    yield create_sse_done()
