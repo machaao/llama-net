@@ -25,7 +25,7 @@ from inference_node.dht_publisher import DHTPublisher
 from inference_node.heartbeat import HeartbeatManager
 from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
-from common.utils import get_logger
+from common.utils import get_logger, get_host_ip
 
 logger = get_logger(__name__)
 
