@@ -48,6 +48,197 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
    pip install --editable . --use-pep517
    ```
 
+## Model Setup
+
+### Model Requirements
+
+LlamaNet requires models in **GGUF format** (GGML Universal Format). GGUF is the modern format used by llama.cpp for efficient inference.
+
+### Download Sources
+
+#### 1. Hugging Face Hub
+The largest collection of GGUF models is available on Hugging Face:
+
+**Popular Model Collections:**
+- [TheBloke](https://huggingface.co/TheBloke) - Extensive collection of quantized GGUF models
+- [Microsoft](https://huggingface.co/microsoft) - Official Microsoft models
+- [Meta](https://huggingface.co/meta-llama) - Official Meta Llama models
+- [Mistral AI](https://huggingface.co/mistralai) - Official Mistral models
+
+#### 2. Direct Downloads
+Some models are available for direct download from official sources.
+
+### Download Methods
+
+#### Method 1: Using Hugging Face CLI (Recommended)
+
+```bash
+# Install Hugging Face CLI
+pip install huggingface_hub
+
+# Download a specific model
+huggingface-cli download TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf --local-dir ./models --local-dir-use-symlinks False
+
+# Download multiple quantizations
+huggingface-cli download TheBloke/Llama-2-13B-Chat-GGUF --include="*.gguf" --local-dir ./models/llama-2-13b-chat
+```
+
+#### Method 2: Using wget/curl
+
+```bash
+# Create models directory
+mkdir -p models
+
+# Download directly (example URLs)
+wget -O models/llama-2-7b-chat.Q4_K_M.gguf \
+  "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
+
+# Or using curl
+curl -L -o models/mistral-7b-instruct.Q4_K_M.gguf \
+  "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+```
+
+#### Method 3: Using Git LFS
+
+```bash
+# Clone entire model repository
+git clone https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF models/llama-2-7b-chat
+
+# Clone specific files only
+GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF models/llama-2-7b-chat
+cd models/llama-2-7b-chat
+git lfs pull --include="*.Q4_K_M.gguf"
+```
+
+### Recommended Models by Use Case
+
+#### 🚀 Getting Started (Small & Fast)
+```bash
+# Phi-3 Mini (3.8B parameters) - Great for testing
+huggingface-cli download microsoft/Phi-3-mini-4k-instruct-gguf Phi-3-mini-4k-instruct-q4.gguf --local-dir ./models
+
+# TinyLlama (1.1B parameters) - Very fast, basic capabilities
+huggingface-cli download TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf --local-dir ./models
+```
+
+#### 💼 Production Use (Balanced Performance)
+```bash
+# Llama 2 7B Chat - Excellent general purpose model
+huggingface-cli download TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf --local-dir ./models
+
+# Mistral 7B Instruct - High quality, efficient
+huggingface-cli download TheBloke/Mistral-7B-Instruct-v0.1-GGUF mistral-7b-instruct-v0.1.Q4_K_M.gguf --local-dir ./models
+
+# Code Llama 7B - Specialized for coding
+huggingface-cli download TheBloke/CodeLlama-7B-Instruct-GGUF codellama-7b-instruct.Q4_K_M.gguf --local-dir ./models
+```
+
+#### 🎯 High Performance (Larger Models)
+```bash
+# Llama 2 13B Chat - Better reasoning and knowledge
+huggingface-cli download TheBloke/Llama-2-13B-Chat-GGUF llama-2-13b-chat.Q4_K_M.gguf --local-dir ./models
+
+# Mixtral 8x7B - Mixture of experts, very capable
+huggingface-cli download TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf --local-dir ./models
+```
+
+#### 🧠 Maximum Capability (Large Models)
+```bash
+# Llama 2 70B Chat - Highest quality responses (requires significant RAM/VRAM)
+huggingface-cli download TheBloke/Llama-2-70B-Chat-GGUF llama-2-70b-chat.Q4_K_M.gguf --local-dir ./models
+
+# Code Llama 34B - Best for complex coding tasks
+huggingface-cli download TheBloke/CodeLlama-34B-Instruct-GGUF codellama-34b-instruct.Q4_K_M.gguf --local-dir ./models
+```
+
+### Understanding Quantization Levels
+
+GGUF models come in different quantization levels that trade off quality vs. size/speed:
+
+| Quantization | Quality | Size | Speed | Use Case |
+|--------------|---------|------|-------|----------|
+| **Q2_K** | Lower | Smallest | Fastest | Testing, very limited resources |
+| **Q3_K_M** | Good | Small | Fast | Mobile, edge devices |
+| **Q4_K_M** | **Recommended** | Medium | Balanced | **Most use cases** |
+| **Q5_K_M** | High | Large | Slower | Quality-focused applications |
+| **Q6_K** | Very High | Larger | Slower | Maximum quality needs |
+| **Q8_0** | Highest | Largest | Slowest | Research, benchmarking |
+
+**Recommendation**: Start with **Q4_K_M** quantization for the best balance of quality, size, and speed.
+
+### Model Directory Structure
+
+Organize your models for easy management:
+
+```
+models/
+├── llama-2-7b-chat/
+│   ├── llama-2-7b-chat.Q4_K_M.gguf
+│   ├── llama-2-7b-chat.Q5_K_M.gguf
+│   └── README.md
+├── mistral-7b-instruct/
+│   ├── mistral-7b-instruct-v0.1.Q4_K_M.gguf
+│   └── README.md
+├── code-llama-7b/
+│   ├── codellama-7b-instruct.Q4_K_M.gguf
+│   └── README.md
+└── tiny-llama/
+    ├── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+    └── README.md
+```
+
+### Hardware Requirements by Model Size
+
+| Model Size | RAM Required | VRAM (GPU) | CPU Cores | Use Case |
+|------------|--------------|------------|-----------|----------|
+| **1B-3B** | 4-8 GB | 2-4 GB | 2+ | Testing, development |
+| **7B** | 8-16 GB | 6-8 GB | 4+ | General purpose |
+| **13B** | 16-32 GB | 12-16 GB | 8+ | High quality responses |
+| **34B** | 32-64 GB | 24-32 GB | 16+ | Professional use |
+| **70B** | 64-128 GB | 48-80 GB | 32+ | Maximum capability |
+
+### Quick Start with Downloaded Model
+
+Once you have a model downloaded:
+
+```bash
+# Start LlamaNet with your model
+python -m inference_node.server --model-path ./models/llama-2-7b-chat.Q4_K_M.gguf
+
+# Or with environment variable
+export MODEL_PATH=./models/mistral-7b-instruct-v0.1.Q4_K_M.gguf
+python -m inference_node.server
+```
+
+### Troubleshooting Model Issues
+
+**Model not loading:**
+```bash
+# Check if file exists and is readable
+ls -la ./models/your-model.gguf
+
+# Verify it's a valid GGUF file
+file ./models/your-model.gguf
+```
+
+**Out of memory errors:**
+```bash
+# Try a smaller quantization
+# Q4_K_M → Q3_K_M → Q2_K
+
+# Or reduce context size
+python -m inference_node.server --model-path ./model.gguf --n-ctx 1024
+```
+
+**Slow inference:**
+```bash
+# Enable GPU acceleration (if available)
+python -m inference_node.server --model-path ./model.gguf --n-gpu-layers 35
+
+# Increase batch size for throughput
+python -m inference_node.server --model-path ./model.gguf --n-batch 512
+```
+
 ## Quick Start
 
 ### 1. Start a Bootstrap Node
