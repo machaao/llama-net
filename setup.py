@@ -19,7 +19,7 @@ setup(
     description="Decentralized Inference Swarm for llama.cpp",
     keywords="llm, inference, decentralized",
     url="https://github.com/yourusername/llamanet",
-    license="MIT",
+    license="Apache-2.0",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

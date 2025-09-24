@@ -1186,7 +1186,7 @@ LlamaNet's decentralized architecture with streaming support makes it ideal for:
 
 ## License
 
-Apache License 2.0 - see LICENSE file for details.
+Apache License 2.0 - see [LICENSE](./LICENSE) file for details.
 
 ---
 
@@ -1200,7 +1200,3 @@ This project was built with love using [MACH-AI](https://machai.live)
 - 💻 **Interactive web UI** with live streaming responses
 - 🔄 **Event-driven architecture** using functional programming
 - 📊 **Real-time performance monitoring** and health checks
-
-## License
-
-Apache License 2.0
