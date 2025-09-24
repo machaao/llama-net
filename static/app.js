@@ -225,7 +225,6 @@ class LlamaNetUI {
                             <div class="flex-grow-1">
                                 <div class="fw-bold">${nodeInfo.node_id.substring(0, 12)}...</div>
                                 <small class="text-muted">${nodeInfo.model}</small>
-                                <div class="badge bg-primary">OpenAI Compatible</div>
                             </div>
                         </div>
                     </div>
@@ -612,7 +611,6 @@ class LlamaNetUI {
                         <strong>Node Count:</strong> ${modelStats.node_count}<br>
                         <strong>Average Load:</strong> ${modelStats.avg_load.toFixed(3)}<br>
                         <strong>Total Capacity:</strong> ${modelStats.total_tps.toFixed(1)} TPS<br>
-                        <strong>API:</strong> <span class="badge bg-success">OpenAI Compatible</span>
                     </div>
                     
                     ${modelStats.best_node ? `
@@ -737,7 +735,6 @@ class LlamaNetUI {
                 <div class="mt-3">
                     <h6><i class="fas fa-link"></i> Available Endpoints</h6>
                     <div class="network-detail-item">
-                        <strong>OpenAI Compatible:</strong>
                         <ul class="list-unstyled small mt-2">
                             ${nodeInfo.endpoints.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
                         </ul>
@@ -766,7 +763,6 @@ class LlamaNetUI {
                         <strong>TPS:</strong> ${nodeInfo.tps ? nodeInfo.tps.toFixed(1) : '0.0'}<br>
                         <strong>Uptime:</strong> ${nodeInfo.uptime ? `${Math.floor(nodeInfo.uptime / 60)} minutes` : 'Unknown'}<br>
                         ${nodeInfo.total_tokens ? `<strong>Total Tokens:</strong> ${nodeInfo.total_tokens.toLocaleString()}<br>` : ''}
-                        <strong>API:</strong> <span class="badge bg-success">OpenAI Compatible</span>
                     </div>
                 </div>
                 
@@ -996,8 +992,7 @@ class LlamaNetUI {
         // Build metadata parts
         const metadataParts = [
             `ID: ${streamState.responseId.substring(0, 8)}...`,
-            `Tokens: ~${streamState.totalTokens}`,
-            `API: OpenAI Compatible (Streaming)`
+            `Tokens: ~${streamState.totalTokens}`
         ];
 
         // Add node info if available with proper styling
@@ -1023,7 +1018,7 @@ class LlamaNetUI {
             metadata: {
                 id: streamState.responseId,
                 tokens: streamState.totalTokens,
-                api: 'OpenAI Compatible (Streaming)',
+                api: 'Streaming',
                 node_info: streamState.nodeInfo
             },
             isStreaming: true // Flag to indicate this was handled by streaming
@@ -1281,7 +1276,6 @@ class LlamaNetUI {
                         <strong>Model:</strong> ${info.model}<br>
                         <strong>Model Path:</strong> ${info.model_path}<br>
                         <strong>DHT Port:</strong> ${info.dht_port}<br>
-                        <strong>API:</strong> <span class="badge bg-success">OpenAI Compatible</span>
                     </div>
                     
                     <h6 class="mt-3"><i class="fas fa-chart-line"></i> Performance</h6>
@@ -1350,7 +1344,6 @@ class LlamaNetUI {
                 <h6><i class="fas fa-list"></i> Available Endpoints</h6>
                 <div class="row">
                     <div class="col-12">
-                        <strong>OpenAI Compatible:</strong>
                         <ul class="list-unstyled small">
                             ${info.endpoints.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
                         </ul>

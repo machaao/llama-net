@@ -79,7 +79,6 @@ python -m inference_node.server \
 
 Open http://localhost:8000 in your browser for an interactive chat interface with:
 - **Real-time streaming responses**
-- **API mode switching** (LlamaNet ↔ OpenAI Compatible)
 - **Network status monitoring**
 - **Streaming toggle** for instant vs. complete responses
 
@@ -171,7 +170,6 @@ The built-in web interface (http://localhost:8000) provides:
 
 ### Chat Interface
 - **Real-time streaming** - watch responses appear live
-- **API mode toggle** - switch between LlamaNet and OpenAI compatible modes
 - **Parameter controls** - adjust max tokens, temperature
 - **Streaming toggle** - enable/disable real-time responses
 
