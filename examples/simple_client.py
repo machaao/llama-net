@@ -26,7 +26,8 @@ async def main():
         response = await client.chat_completions(
             messages=messages,
             max_tokens=150,
-            temperature=0.7
+            temperature=0.7,
+            strategy="round_robin"
         )
         
         if response:
@@ -43,7 +44,8 @@ async def main():
         completion_response = await client.completions(
             prompt="LlamaNet is a decentralized inference network that",
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
+            strategy="round_robin"
         )
         
         if completion_response:
@@ -53,6 +55,18 @@ async def main():
             print(f"   Tokens used: {completion_response.usage.total_tokens}")
         else:
             print("❌ No completion response received")
+            
+        # Test round robin distribution
+        print("\n🔄 Testing round robin distribution...")
+        for i in range(6):
+            print(f"\n--- Request {i+1} ---")
+            response = await client.chat_completions(
+                messages=[{"role": "user", "content": f"Hello {i+1}"}],
+                max_tokens=50,
+                strategy="round_robin"
+            )
+            if response:
+                print(f"Response from: {response.id}")
             
     finally:
         await client.close()

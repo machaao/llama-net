@@ -3,6 +3,7 @@ import uuid
 import argparse
 import sys
 import socket
+import hashlib
 from typing import Optional
 from common.utils import load_env_var, get_logger
 
@@ -120,7 +121,8 @@ class InferenceConfig:
                 self.dht_port = self._find_available_udp_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
                 
-            self.node_id = args.node_id or load_env_var("NODE_ID", uuid.uuid4().hex[:16])
+            # Generate node_id after port is determined
+            self.node_id = args.node_id or load_env_var("NODE_ID", self._generate_node_id())
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
         else:
             # Direct initialization (for programmatic use)
@@ -156,7 +158,8 @@ class InferenceConfig:
                 self.dht_port = self._find_available_udp_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
                 
-            self.node_id = load_env_var("NODE_ID", uuid.uuid4().hex[:16])
+            # Generate node_id after port is determined
+            self.node_id = load_env_var("NODE_ID", self._generate_node_id())
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
         
         # Validate model path
@@ -174,10 +177,26 @@ class InferenceConfig:
         # LLM configuration
         self.n_ctx = int(load_env_var("N_CTX", 2048))
         self.n_batch = int(load_env_var("N_BATCH", 8))
-        self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", 0))
+        self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
         
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path).split('.')[0]
+    
+    def _generate_node_id(self) -> str:
+        """Generate a unique node ID as a hex string for Kademlia compatibility"""
+        from common.utils import get_host_ip
+        
+        # Get host information for uniqueness
+        host_ip = get_host_ip()
+        
+        # Create a unique string combining host info, port, and random component
+        unique_string = f"{host_ip}:{self.port}:{uuid.uuid4().hex[:8]}"
+        
+        # Generate SHA-1 hash (160-bit) for Kademlia compatibility
+        node_hash = hashlib.sha1(unique_string.encode()).hexdigest()
+        
+        logger.info(f"Generated unique hex node_id: {node_hash[:16]}... for {host_ip}:{self.port}")
+        return node_hash
         
     def __str__(self) -> str:
         return (

@@ -211,10 +211,26 @@ pre {
     100% { opacity: 1; transform: scale(1); }
 }
 
+.selected-model {
+    border: 2px solid var(--primary-color) !important;
+    background-color: rgba(13, 110, 253, 0.05) !important;
+}
+
 .model-group {
     border-left: 3px solid var(--primary-color);
     padding-left: 0.5rem;
     margin-bottom: 1rem;
+    transition: all 0.2s ease;
+}
+
+.model-group:hover {
+    background-color: rgba(13, 110, 253, 0.02);
+}
+
+.model-nodes {
+    border-left: 2px solid #e9ecef;
+    margin-left: 0.5rem;
+    padding-left: 0.5rem;
 }
 
 .model-group .node-item {
@@ -228,9 +244,70 @@ pre {
     cursor: pointer;
 }
 
+.availability-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.25rem;
+}
+
+.availability-high {
+    background-color: var(--success-color);
+}
+
+.availability-medium {
+    background-color: var(--warning-color);
+}
+
+.availability-low {
+    background-color: var(--danger-color);
+}
+
+.model-selector {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.model-stats {
+    font-size: 0.75rem;
+    color: var(--secondary-color);
+}
+
+.network-health-indicator {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
 .node-item .text-muted {
     font-size: 0.7rem;
     line-height: 1.2;
+}
+
+.clickable-node {
+    transition: all 0.2s ease;
+}
+
+.clickable-node:hover {
+    background-color: #f8f9fa !important;
+    border-color: var(--primary-color) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.clickable-node:active {
+    transform: translateY(0);
+}
+
+.node-info-icon {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.clickable-node:hover .node-info-icon {
+    opacity: 1;
 }
 
 .btn-sm .fas {
@@ -259,6 +336,31 @@ pre {
 .spinner-border-sm {
     width: 1rem;
     height: 1rem;
+}
+
+/* Node info display styles */
+.node-info {
+    color: var(--info-color);
+    font-weight: 500;
+    background-color: rgba(13, 202, 240, 0.1);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    border: 1px solid rgba(13, 202, 240, 0.3);
+}
+
+.message-meta .node-info {
+    display: inline-block;
+    margin: 0 0.125rem;
+}
+
+.node-info-badge {
+    background-color: var(--info-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
 }
 
 /* Markdown Content Styles */
@@ -492,4 +594,93 @@ pre {
 
 .copy-code-btn:hover {
     background-color: #5a6268;
+}
+
+/* Real-time update animations */
+.model-updated {
+    animation: modelUpdatePulse 0.5s ease-in-out;
+}
+
+.node-updated {
+    animation: nodeUpdateGlow 0.3s ease-in-out;
+}
+
+@keyframes modelUpdatePulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); box-shadow: 0 0 10px rgba(13, 110, 253, 0.3); }
+    100% { transform: scale(1); }
+}
+
+@keyframes nodeUpdateGlow {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(13, 202, 240, 0.1); }
+    100% { background-color: transparent; }
+}
+
+.live-indicator {
+    display: inline-block;
+    animation: livePulse 2s infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.metric-value {
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.connection-status {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+}
+
+.update-timestamp {
+    opacity: 0.7;
+    font-size: 0.65rem;
+}
+
+/* Smooth transitions for network display updates */
+#network-status {
+    transition: opacity 0.2s ease;
+}
+
+.model-group {
+    transition: all 0.3s ease;
+}
+
+.node-item {
+    transition: all 0.2s ease;
+}
+
+/* Status indicators */
+.node-status.online {
+    animation: onlinePulse 2s infinite;
+}
+
+@keyframes onlinePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.node-status.warning {
+    animation: warningBlink 1s infinite;
+}
+
+@keyframes warningBlink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.5; }
+}
+
+/* Update indicators */
+.fas.fa-circle[title*="Recently"] {
+    animation: recentIndicator 1s ease-in-out;
+}
+
+@keyframes recentIndicator {
+    0% { opacity: 0; transform: scale(0); }
+    50% { opacity: 1; transform: scale(1.2); }
+    100% { opacity: 1; transform: scale(1); }
 }

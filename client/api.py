@@ -52,16 +52,18 @@ class OpenAIClient:
                               top_p: float = 0.9,
                               stream: bool = False,
                               stop: Optional[List[str]] = None,
+                              strategy: str = "round_robin",  # Add strategy parameter
                               max_retries: int = 3) -> Optional[OpenAIChatCompletionResponse]:
         """Create chat completion using OpenAI format"""
         retries = 0
         
         while retries < max_retries:
-            # Select a node
+            # Select a node with strategy
             node = await self.node_selector.select_node(
                 model=self.model,
                 min_tps=self.min_tps,
-                max_load=self.max_load
+                max_load=self.max_load,
+                strategy=strategy  # Pass strategy
             )
             
             if not node:
@@ -115,16 +117,18 @@ class OpenAIClient:
                          top_p: float = 0.9,
                          stream: bool = False,
                          stop: Optional[List[str]] = None,
+                         strategy: str = "round_robin",  # Add strategy parameter
                          max_retries: int = 3) -> Optional[OpenAICompletionResponse]:
         """Create completion using OpenAI format"""
         retries = 0
         
         while retries < max_retries:
-            # Select a node
+            # Select a node with strategy
             node = await self.node_selector.select_node(
                 model=self.model,
                 min_tps=self.min_tps,
-                max_load=self.max_load
+                max_load=self.max_load,
+                strategy=strategy  # Pass strategy
             )
             
             if not node:
@@ -177,6 +181,67 @@ class OpenAIClient:
         logger.info("Streaming request initiated")
         return None
     
+    async def get_available_models(self, force_refresh: bool = False) -> Dict[str, List[NodeInfo]]:
+        """Get all available models from the network grouped by model name"""
+        try:
+            # Get all nodes from the network
+            all_nodes = await self.dht_discovery.get_nodes(force_refresh=force_refresh)
+            
+            # Group nodes by model
+            models_dict = {}
+            for node in all_nodes:
+                model_name = node.model
+                if model_name not in models_dict:
+                    models_dict[model_name] = []
+                models_dict[model_name].append(node)
+            
+            # Sort nodes within each model by load (ascending)
+            for model_name in models_dict:
+                models_dict[model_name].sort(key=lambda n: n.load)
+            
+            logger.info(f"Discovered {len(models_dict)} unique models across {len(all_nodes)} nodes")
+            return models_dict
+            
+        except Exception as e:
+            logger.error(f"Error getting available models: {e}")
+            return {}
+
+    async def get_model_statistics(self) -> Dict[str, Any]:
+        """Get statistics about available models on the network"""
+        try:
+            models_dict = await self.get_available_models()
+            
+            stats = {
+                "total_models": len(models_dict),
+                "total_nodes": sum(len(nodes) for nodes in models_dict.values()),
+                "models": {}
+            }
+            
+            for model_name, nodes in models_dict.items():
+                model_stats = {
+                    "node_count": len(nodes),
+                    "avg_load": sum(n.load for n in nodes) / len(nodes) if nodes else 0,
+                    "avg_tps": sum(n.tps for n in nodes) / len(nodes) if nodes else 0,
+                    "best_node": min(nodes, key=lambda n: n.load) if nodes else None,
+                    "nodes": [
+                        {
+                            "node_id": n.node_id,
+                            "ip": n.ip,
+                            "port": n.port,
+                            "load": n.load,
+                            "tps": n.tps,
+                            "last_seen": n.last_seen
+                        } for n in nodes
+                    ]
+                }
+                stats["models"][model_name] = model_stats
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting model statistics: {e}")
+            return {"total_models": 0, "total_nodes": 0, "models": {}}
+
     async def close(self):
         """Close the client and cleanup resources"""
         await self.dht_discovery.stop()

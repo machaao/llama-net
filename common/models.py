@@ -7,7 +7,7 @@ import uuid
 
 class NodeInfo(BaseModel):
     """Information about an inference node"""
-    node_id: str = Field(default_factory=lambda: f"node-{uuid.uuid4().hex[:8]}")
+    node_id: str
     ip: str
     port: int
     model: str
@@ -44,6 +44,8 @@ class OpenAICompletionRequest(BaseModel):
     user: Optional[str] = None
     suffix: Optional[str] = None
     echo: Optional[bool] = False
+    strategy: Optional[str] = "round_robin"
+    target_model: Optional[str] = None  # Add target model parameter
 
 class OpenAIChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request"""
@@ -59,6 +61,8 @@ class OpenAIChatCompletionRequest(BaseModel):
     frequency_penalty: Optional[float] = 0.0
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
+    strategy: Optional[str] = "round_robin"
+    target_model: Optional[str] = None  # Add target model parameter
 
 class OpenAIChoice(BaseModel):
     """OpenAI choice object"""
@@ -82,6 +86,7 @@ class OpenAICompletionResponse(BaseModel):
     model: str
     choices: List[OpenAIChoice]
     usage: OpenAIUsage
+    node_info: Optional[Dict[str, Any]] = None
 
 class OpenAIChatCompletionResponse(BaseModel):
     """OpenAI-compatible chat completion response"""
@@ -91,6 +96,7 @@ class OpenAIChatCompletionResponse(BaseModel):
     model: str
     choices: List[OpenAIChoice]
     usage: OpenAIUsage
+    node_info: Optional[Dict[str, Any]] = None
 
 class OpenAIModel(BaseModel):
     """OpenAI model object"""
@@ -123,6 +129,7 @@ class OpenAIStreamingChatResponse(BaseModel):
     created: int
     model: str
     choices: List[OpenAIStreamingChoice]
+    node_info: Optional[Dict[str, Any]] = None
 
 class OpenAIStreamingCompletionChoice(BaseModel):
     """OpenAI streaming completion choice"""
@@ -138,6 +145,7 @@ class OpenAIStreamingCompletionResponse(BaseModel):
     created: int
     model: str
     choices: List[OpenAIStreamingCompletionChoice]
+    node_info: Optional[Dict[str, Any]] = None
 
 
 # Streaming utilities
@@ -154,12 +162,13 @@ def create_sse_done() -> str:
 async def create_streaming_chat_response(
         request_id: str,
         model: str,
-        stream_generator: AsyncGenerator[Dict[str, Any], None]
+        stream_generator: AsyncGenerator[Dict[str, Any], None],
+        node_info: Optional[Dict[str, Any]] = None
 ) -> AsyncGenerator[str, None]:
     """Create OpenAI-compatible streaming chat completion response"""
     created = int(time.time())
 
-    # Send initial chunk with role
+    # Send initial chunk with role and node info
     initial_chunk = OpenAIStreamingChatResponse(
         id=request_id,
         created=created,
@@ -167,7 +176,8 @@ async def create_streaming_chat_response(
         choices=[OpenAIStreamingChoice(
             delta=OpenAIStreamingDelta(role="assistant"),
             index=0
-        )]
+        )],
+        node_info=node_info
     )
     yield create_sse_data(initial_chunk.dict())
 
@@ -208,7 +218,8 @@ async def create_streaming_chat_response(
 async def create_streaming_completion_response(
         request_id: str,
         model: str,
-        stream_generator: AsyncGenerator[Dict[str, Any], None]
+        stream_generator: AsyncGenerator[Dict[str, Any], None],
+        node_info: Optional[Dict[str, Any]] = None
 ) -> AsyncGenerator[str, None]:
     """Create OpenAI-compatible streaming completion response"""
     created = int(time.time())
@@ -224,7 +235,8 @@ async def create_streaming_completion_response(
                     text=chunk["text"],
                     index=0,
                     finish_reason=None if not chunk.get("finished") else "stop"
-                )]
+                )],
+                node_info=node_info if chunk.get("text") else None  # Include node_info in first content chunk
             )
             yield create_sse_data(streaming_chunk.dict())
 

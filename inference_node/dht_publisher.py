@@ -37,20 +37,22 @@ class DHTPublisher:
         return nodes
     
     async def start(self):
-        """Start the DHT publisher"""
+        """Start the DHT publisher using shared DHT service"""
         if self.running:
             return
         
         self.running = True
         
-        # Create and start Kademlia node
-        self.kademlia_node = KademliaNode(
-            node_id=self.config.node_id,
-            port=self.config.dht_port
-        )
+        # Use shared DHT service instead of creating new instance
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
         
         try:
-            await self.kademlia_node.start(self.bootstrap_nodes)
+            self.kademlia_node = await dht_service.initialize(
+                node_id=self.config.node_id,
+                port=self.config.dht_port,
+                bootstrap_nodes=self.bootstrap_nodes
+            )
             
             # Update config with actual port used (in case it changed)
             if self.kademlia_node.port != self.config.dht_port:
@@ -65,7 +67,7 @@ class DHTPublisher:
         # Start publishing loop
         self.publish_task = asyncio.create_task(self._publish_loop())
         
-        logger.info(f"DHT publisher started on port {self.config.dht_port}")
+        logger.info(f"DHT publisher started using shared service")
         
         if self.bootstrap_nodes:
             logger.info(f"🌐 Joining DHT network via bootstrap nodes: {self.bootstrap_nodes}")
@@ -83,8 +85,8 @@ class DHTPublisher:
             except asyncio.CancelledError:
                 pass
         
-        if self.kademlia_node:
-            await self.kademlia_node.stop()
+        # Don't stop the shared DHT service here - let the main service handle it
+        self.kademlia_node = None
     
     async def _publish_loop(self):
         """Periodically publish node info to DHT"""
@@ -99,31 +101,41 @@ class DHTPublisher:
                 await asyncio.sleep(5)  # Wait before retrying
     
     async def _publish_node_info(self):
-        """Publish current node info to DHT"""
+        """Publish current node info to DHT including P2P address"""
         # Get current metrics
         metrics = self.metrics_callback()
         
-        # Create node info
+        # Get host IP for node info
+        host_ip = get_host_ip()
+        
+        # Get P2P info if available
+        p2p_info = {}
+        if hasattr(self, 'p2p_handler') and self.p2p_handler:
+            p2p_info = self.p2p_handler.get_p2p_info()
+        
         node_info = {
-            'node_id': self.config.node_id,
-            'ip': get_host_ip(),
+            'node_id': self.config.node_id,  # Use the proper hex node_id from config
+            'ip': host_ip,
             'port': self.config.port,  # HTTP port for inference API
             'model': self.config.model_name,
             'load': metrics['load'],
             'tps': metrics['tps'],
             'uptime': metrics['uptime'],
             'last_seen': int(time.time()),
-            'dht_port': self.config.dht_port
+            'dht_port': self.config.dht_port,
+            'supports_p2p': bool(p2p_info),
+            'p2p_nickname': p2p_info.get('nickname'),
+            'supports_nat_traversal': p2p_info.get('supports_nat_traversal', False),
+            'address': f"{host_ip}:{self.config.port}"  # Add human-readable address for reference
         }
         
-        # Store under multiple keys for different discovery patterns
-        keys = [
-            f"model:{self.config.model_name}",  # Find by model
-            f"node:{self.config.node_id}",      # Find specific node
-            f"all_nodes"                        # Find any node
+        # Store individual node data
+        individual_keys = [
+            f"model:{self.config.model_name}",
+            f"node:{self.config.node_id}"
         ]
         
-        for key in keys:
+        for key in individual_keys:
             try:
                 success = await self.kademlia_node.store(key, node_info)
                 if success:
@@ -132,3 +144,34 @@ class DHTPublisher:
                     logger.warning(f"Failed to publish under key: {key}")
             except Exception as e:
                 logger.error(f"Error publishing to key {key}: {e}")
+        
+        # For all_nodes, we need to aggregate with existing data
+        await self._update_all_nodes_registry(node_info)
+
+    async def _update_all_nodes_registry(self, node_info):
+        """Update the all_nodes registry with proper aggregation"""
+        try:
+            # Get existing all_nodes data
+            existing_data = await self.kademlia_node.find_value("all_nodes")
+            
+            if existing_data is None:
+                existing_data = []
+            elif not isinstance(existing_data, list):
+                existing_data = [existing_data]
+            
+            # Remove our old entry if it exists (using proper node_id)
+            existing_data = [node for node in existing_data 
+                            if node.get('node_id') != self.config.node_id]
+            
+            # Add our current info
+            existing_data.append(node_info)
+            
+            # Store updated list
+            success = await self.kademlia_node.store("all_nodes", existing_data)
+            if success:
+                logger.debug(f"Updated all_nodes registry with {len(existing_data)} nodes")
+            else:
+                logger.warning("Failed to update all_nodes registry")
+            
+        except Exception as e:
+            logger.error(f"Error updating all_nodes registry: {e}")

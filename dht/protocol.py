@@ -31,7 +31,14 @@ class KademliaProtocol(asyncio.DatagramProtocol):
     async def _handle_message(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle a parsed message"""
         msg_type = message.get('type')
-        msg_id = message.get('id')
+        sender_id = message.get('sender_id')
+        
+        # Update contact activity for any message (except responses to avoid loops)
+        if sender_id and msg_type != 'response':
+            from dht.kademlia_node import Contact
+            contact = Contact(sender_id, addr[0], addr[1])
+            self.node.routing_table.add_contact(contact)
+            logger.debug(f"📡 Updated contact activity: {sender_id[:8]}... from {addr}")
         
         if msg_type == 'ping':
             await self._handle_ping(message, addr)
@@ -58,7 +65,10 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             'type': 'response',
             'id': message.get('id'),
             'sender_id': self.node.node_id,
-            'data': {'pong': True}
+            'data': {
+                'pong': True,
+                'sender_id': self.node.node_id
+            }
         }
         await self._send_message(response, addr)
     
@@ -136,6 +146,12 @@ class KademliaProtocol(asyncio.DatagramProtocol):
     async def _handle_response(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle response message"""
         msg_id = message.get('id')
+        sender_id = message.get('sender_id')
+        
+        # Update contact activity for responses too
+        if sender_id:
+            self.node.routing_table.update_contact_seen(sender_id)
+        
         if msg_id in self.pending_requests:
             future = self.pending_requests.pop(msg_id)
             if not future.done():
