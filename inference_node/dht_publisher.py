@@ -105,10 +105,13 @@ class DHTPublisher:
         # Get current metrics
         metrics = self.metrics_callback()
         
-        # Create node info
+        # Create node info with IP:port based node_id
+        host_ip = get_host_ip()
+        node_id = f"{host_ip}:{self.config.port}"
+        
         node_info = {
-            'node_id': self.config.node_id,
-            'ip': get_host_ip(),
+            'node_id': node_id,
+            'ip': host_ip,
             'port': self.config.port,  # HTTP port for inference API
             'model': self.config.model_name,
             'load': metrics['load'],
@@ -148,9 +151,11 @@ class DHTPublisher:
             elif not isinstance(existing_data, list):
                 existing_data = [existing_data]
             
-            # Remove our old entry if it exists
+            # Remove our old entry if it exists (using IP:port format)
+            host_ip = get_host_ip()
+            current_node_id = f"{host_ip}:{self.config.port}"
             existing_data = [node for node in existing_data 
-                            if node.get('node_id') != self.config.node_id]
+                            if node.get('node_id') != current_node_id]
             
             # Add our current info
             existing_data.append(node_info)

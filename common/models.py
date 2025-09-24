@@ -7,7 +7,7 @@ import uuid
 
 class NodeInfo(BaseModel):
     """Information about an inference node"""
-    node_id: str = Field(default_factory=lambda: f"node-{uuid.uuid4().hex[:8]}")
+    node_id: str
     ip: str
     port: int
     model: str

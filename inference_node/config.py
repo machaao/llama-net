@@ -120,7 +120,8 @@ class InferenceConfig:
                 self.dht_port = self._find_available_udp_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
                 
-            self.node_id = args.node_id or load_env_var("NODE_ID", uuid.uuid4().hex[:16])
+            # Generate node_id after port is determined
+            self.node_id = args.node_id or load_env_var("NODE_ID", self._generate_node_id())
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
         else:
             # Direct initialization (for programmatic use)
@@ -156,7 +157,8 @@ class InferenceConfig:
                 self.dht_port = self._find_available_udp_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
                 
-            self.node_id = load_env_var("NODE_ID", uuid.uuid4().hex[:16])
+            # Generate node_id after port is determined
+            self.node_id = load_env_var("NODE_ID", self._generate_node_id())
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
         
         # Validate model path
@@ -178,6 +180,12 @@ class InferenceConfig:
         
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path).split('.')[0]
+    
+    def _generate_node_id(self) -> str:
+        """Generate a unique node ID based on IP and port combination"""
+        from common.utils import get_host_ip
+        host_ip = get_host_ip()
+        return f"{host_ip}:{self.port}"
         
     def __str__(self) -> str:
         return (
