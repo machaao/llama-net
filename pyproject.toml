@@ -7,7 +7,7 @@ name = "llamanet"
 version = "0.1.0"
 description = "Decentralized Inference Swarm for llama.cpp"
 authors = [{name = "LlamaNet Team", email = "example@example.com"}]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 readme = "README.md"
 requires-python = ">=3.8"
 keywords = ["llm", "inference", "decentralized"]
@@ -15,7 +15,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
 ]
 
 dependencies = [
