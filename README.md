@@ -2,6 +2,8 @@
 
 LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It uses Kademlia DHT for truly distributed node discovery without any central registry and supports both real-time streaming and traditional inference modes.
 
+![LlamaNet](./static/images/screenshot.png)
+
 ## Features
 
 - **Decentralized DHT-based node discovery** using Kademlia protocol
