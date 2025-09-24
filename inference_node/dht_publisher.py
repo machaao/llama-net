@@ -101,13 +101,18 @@ class DHTPublisher:
                 await asyncio.sleep(5)  # Wait before retrying
     
     async def _publish_node_info(self):
-        """Publish current node info to DHT with proper aggregation"""
+        """Publish current node info to DHT including P2P address"""
         # Get current metrics
         metrics = self.metrics_callback()
         
         # Create node info with IP:port based node_id
         host_ip = get_host_ip()
         node_id = f"{host_ip}:{self.config.port}"
+        
+        # Get P2P info if available
+        p2p_info = {}
+        if hasattr(self, 'p2p_handler') and self.p2p_handler:
+            p2p_info = self.p2p_handler.get_p2p_info()
         
         node_info = {
             'node_id': node_id,
@@ -118,7 +123,10 @@ class DHTPublisher:
             'tps': metrics['tps'],
             'uptime': metrics['uptime'],
             'last_seen': int(time.time()),
-            'dht_port': self.config.dht_port
+            'dht_port': self.config.dht_port,
+            'supports_p2p': bool(p2p_info),
+            'p2p_nickname': p2p_info.get('nickname'),
+            'supports_nat_traversal': p2p_info.get('supports_nat_traversal', False)
         }
         
         # Store individual node data

@@ -7,3 +7,4 @@ psutil>=5.8.0
 gputil>=1.4.0
 kademlia>=2.2.2
 aiohttp>=3.8.0
+p2pd>=0.1.0

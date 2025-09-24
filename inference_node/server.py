@@ -25,6 +25,7 @@ from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo
 from inference_node.dht_publisher import DHTPublisher
 from inference_node.heartbeat import HeartbeatManager
+from inference_node.p2p_handler import P2PRequestHandler
 from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
 from common.utils import get_logger, get_host_ip
@@ -39,6 +40,7 @@ system_info = None
 heartbeat_manager = None
 dht_discovery = None
 node_selector = None
+p2p_handler = None
 round_robin_state = {"index": 0}  # Global round robin state
 
 # Request concurrency limiting
@@ -47,7 +49,7 @@ REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler
     
     # Load configuration
     config = InferenceConfig()
@@ -63,8 +65,20 @@ async def lifespan(app: FastAPI):
     heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
     await heartbeat_manager.start()
     
+    # Start P2P handler
+    try:
+        p2p_handler = P2PRequestHandler(config, llm)
+        await p2p_handler.start()
+        logger.info("P2P handler started successfully")
+    except Exception as e:
+        logger.warning(f"Failed to start P2P handler: {e}")
+        p2p_handler = None
+    
     # Start DHT publisher FIRST (this initializes the shared service)
     dht_publisher = DHTPublisher(config, llm.get_metrics)
+    # Pass P2P handler to DHT publisher for info sharing
+    if p2p_handler:
+        dht_publisher.p2p_handler = p2p_handler
     await dht_publisher.start()
     
     # THEN initialize DHT discovery (this will use the shared service)
@@ -79,6 +93,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if heartbeat_manager:
         await heartbeat_manager.stop()
+    if p2p_handler:
+        await p2p_handler.close()
     if dht_publisher:
         await dht_publisher.stop()
     if dht_discovery:
@@ -771,6 +787,11 @@ async def info():
     """Get static node information"""
     if not config or not system_info:
         raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    # Get P2P info if available
+    p2p_info = {}
+    if p2p_handler:
+        p2p_info = p2p_handler.get_p2p_info()
         
     return {
         "node_id": config.node_id,
@@ -779,7 +800,9 @@ async def info():
         "system": system_info,
         "dht_port": config.dht_port,
         "openai_compatible": True,
-        "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
+        "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"],
+        "p2p_enabled": bool(p2p_handler),
+        **p2p_info
     }
 
 @app.get("/health")
@@ -1113,6 +1136,21 @@ async def _get_remote_node_info(ip: str, port: int) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.debug(f"Failed to get remote node info from {ip}:{port}: {e}")
         return None
+
+@app.get("/p2p/status")
+async def p2p_status():
+    """Get P2P transport status"""
+    if not p2p_handler:
+        raise HTTPException(status_code=503, detail="P2P handler not initialized")
+    
+    p2p_info = p2p_handler.get_p2p_info()
+    
+    return {
+        "p2p_enabled": True,
+        "transport_running": p2p_handler.transport.running,
+        **p2p_info,
+        "timestamp": time.time()
+    }
 
 @app.get("/debug/routing")
 async def debug_routing():
