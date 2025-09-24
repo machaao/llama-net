@@ -1193,10 +1193,3 @@ Apache License 2.0 - see [LICENSE](./LICENSE) file for details.
 ## Made with ❤️ using MACH-AI
 
 This project was built with love using [MACH-AI](https://machai.live)
-
-**Key streaming features developed with MACH-AI:**
-- 🌊 **Real-time streaming inference** with Server-Sent Events
-- 🎯 **OpenAI-compatible streaming** for existing client support
-- 💻 **Interactive web UI** with live streaming responses
-- 🔄 **Event-driven architecture** using functional programming
-- 📊 **Real-time performance monitoring** and health checks
