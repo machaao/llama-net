@@ -1203,4 +1203,4 @@ This project was built with love using [MACH-AI](https://machai.live)
 
 ## License
 
-MIT
+Apache License 2.0
