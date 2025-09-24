@@ -105,9 +105,8 @@ class DHTPublisher:
         # Get current metrics
         metrics = self.metrics_callback()
         
-        # Create node info with IP:port based node_id
+        # Get host IP for node info
         host_ip = get_host_ip()
-        node_id = f"{host_ip}:{self.config.port}"
         
         # Get P2P info if available
         p2p_info = {}
@@ -115,7 +114,7 @@ class DHTPublisher:
             p2p_info = self.p2p_handler.get_p2p_info()
         
         node_info = {
-            'node_id': node_id,
+            'node_id': self.config.node_id,  # Use the proper hex node_id from config
             'ip': host_ip,
             'port': self.config.port,  # HTTP port for inference API
             'model': self.config.model_name,
@@ -126,7 +125,8 @@ class DHTPublisher:
             'dht_port': self.config.dht_port,
             'supports_p2p': bool(p2p_info),
             'p2p_nickname': p2p_info.get('nickname'),
-            'supports_nat_traversal': p2p_info.get('supports_nat_traversal', False)
+            'supports_nat_traversal': p2p_info.get('supports_nat_traversal', False),
+            'address': f"{host_ip}:{self.config.port}"  # Add human-readable address for reference
         }
         
         # Store individual node data
@@ -159,11 +159,9 @@ class DHTPublisher:
             elif not isinstance(existing_data, list):
                 existing_data = [existing_data]
             
-            # Remove our old entry if it exists (using IP:port format)
-            host_ip = get_host_ip()
-            current_node_id = f"{host_ip}:{self.config.port}"
+            # Remove our old entry if it exists (using proper node_id)
             existing_data = [node for node in existing_data 
-                            if node.get('node_id') != current_node_id]
+                            if node.get('node_id') != self.config.node_id]
             
             # Add our current info
             existing_data.append(node_info)

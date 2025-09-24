@@ -3,6 +3,7 @@ import uuid
 import argparse
 import sys
 import socket
+import hashlib
 from typing import Optional
 from common.utils import load_env_var, get_logger
 
@@ -182,10 +183,20 @@ class InferenceConfig:
         self.model_name = os.path.basename(self.model_path).split('.')[0]
     
     def _generate_node_id(self) -> str:
-        """Generate a unique node ID based on IP and port combination"""
+        """Generate a unique node ID as a hex string for Kademlia compatibility"""
         from common.utils import get_host_ip
+        
+        # Get host information for uniqueness
         host_ip = get_host_ip()
-        return f"{host_ip}:{self.port}"
+        
+        # Create a unique string combining host info, port, and random component
+        unique_string = f"{host_ip}:{self.port}:{uuid.uuid4().hex[:8]}"
+        
+        # Generate SHA-1 hash (160-bit) for Kademlia compatibility
+        node_hash = hashlib.sha1(unique_string.encode()).hexdigest()
+        
+        logger.info(f"Generated unique hex node_id: {node_hash[:16]}... for {host_ip}:{self.port}")
+        return node_hash
         
     def __str__(self) -> str:
         return (
