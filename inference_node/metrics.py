@@ -2,7 +2,6 @@ import time
 import psutil
 import platform
 from typing import Dict, Any, Optional
-import GPUtil
 from common.utils import get_logger
 
 logger = get_logger(__name__)
@@ -79,6 +78,8 @@ class SystemInfo:
     def get_gpu_info() -> Optional[str]:
         """Get GPU information with better error handling"""
         try:
+            # Import GPUtil only when needed
+            import GPUtil
             gpus = GPUtil.getGPUs()
             if not gpus:
                 return None
@@ -91,7 +92,7 @@ class SystemInfo:
             
             return ", ".join(gpu_info)
         except ImportError:
-            logger.debug("GPUtil not available")
+            logger.debug("GPUtil not available - GPU monitoring disabled")
             return None
         except Exception as e:
             logger.warning(f"Could not get GPU info: {e}")
