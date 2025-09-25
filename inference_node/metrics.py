@@ -76,9 +76,30 @@ class SystemInfo:
     
     @staticmethod
     def get_gpu_info() -> Optional[str]:
-        """Get GPU information with better error handling and Python 3.12 compatibility"""
+        """Get GPU information - NVIDIA GPUs only with improved error handling"""
         try:
-            # Try pynvml first (better Python 3.12 support)
+            # First check if we have NVIDIA GPUs using nvidia-smi (most reliable)
+            import subprocess
+            try:
+                # Try nvidia-smi first (most reliable way to detect NVIDIA GPUs)
+                result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and result.stdout.strip():
+                    # Parse nvidia-smi output
+                    gpu_info = []
+                    for line in result.stdout.strip().split('\n'):
+                        if line.strip():
+                            parts = line.split(',')
+                            if len(parts) >= 2:
+                                name = parts[0].strip()
+                                memory_mb = parts[1].strip()
+                                gpu_info.append(f"{name} ({memory_mb}MB)")
+                    return ", ".join(gpu_info) if gpu_info else None
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+                # nvidia-smi not available, continue to pynvml
+                pass
+            
+            # Try pynvml as fallback
             import pynvml
             pynvml.nvmlInit()
             device_count = pynvml.nvmlDeviceGetCount()
@@ -101,28 +122,17 @@ class SystemInfo:
                 gpu_info.append(f"{name} ({memory_mb}MB)")
             
             return ", ".join(gpu_info)
+            
         except ImportError:
-            # Fallback to GPUtil for older installations
-            try:
-                import GPUtil
-                gpus = GPUtil.getGPUs()
-                if not gpus:
-                    return None
-                
-                gpu_info = []
-                for gpu in gpus:
-                    memory_mb = int(gpu.memoryTotal)
-                    gpu_info.append(f"{gpu.name} ({memory_mb}MB)")
-                
-                return ", ".join(gpu_info)
-            except ImportError:
-                logger.debug("Neither pynvml nor GPUtil available - GPU monitoring disabled")
-                return None
-            except Exception as e:
-                logger.warning(f"Could not get GPU info with GPUtil: {e}")
-                return None
+            logger.debug("pynvml not available - install with: pip install pynvml")
+            return None
         except Exception as e:
-            logger.warning(f"Could not get GPU info with pynvml: {e}")
+            # Only log as debug for common "no NVIDIA GPU" scenarios
+            error_msg = str(e).lower()
+            if any(phrase in error_msg for phrase in ['nvml shared library not found', 'nvidia driver', 'no devices', 'nvml_error_uninitialized']):
+                logger.debug(f"No NVIDIA GPUs detected: {e}")
+            else:
+                logger.warning(f"Could not get GPU info: {e}")
             return None
     
     @staticmethod
