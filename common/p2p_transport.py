@@ -19,7 +19,7 @@ class P2PTransport:
         self.running = False
         
     async def start(self, port: int = None):
-        """Start P2P node with automatic nickname registration"""
+        """Start P2P node"""
         try:
             self.p2p_node = await P2PNode()
             self.p2p_node.add_msg_cb(self._handle_message)
@@ -30,13 +30,9 @@ class P2PTransport:
             else:
                 self.nickname = f"client-{self.node_id[:8]}"
             
-            # Register nickname for easy discovery
-            try:
-                await self.p2p_node.register_nickname(self.nickname)
-                logger.info(f"P2P node registered with nickname: {self.nickname}")
-            except Exception as e:
-                logger.warning(f"Failed to register nickname {self.nickname}: {e}")
-                # Continue without nickname registration
+            # Note: p2pd library doesn't support nickname registration
+            # Nickname is used for identification in connection attempts
+            logger.info(f"P2P node started with identifier: {self.nickname}")
                 
             self.running = True
             logger.info(f"P2P transport started for node: {self.node_id}")
@@ -52,6 +48,7 @@ class P2PTransport:
             
         try:
             # Try to connect with timeout
+            # Note: p2pd may require peer ID instead of nickname
             pipe = await asyncio.wait_for(
                 self.p2p_node.connect(peer_nickname),
                 timeout=timeout
@@ -60,6 +57,9 @@ class P2PTransport:
             return pipe
         except asyncio.TimeoutError:
             logger.warning(f"P2P connection timeout to peer: {peer_nickname}")
+            return None
+        except AttributeError as e:
+            logger.error(f"P2P method not available: {e}")
             return None
         except Exception as e:
             logger.error(f"Failed to connect to peer {peer_nickname}: {e}")
