@@ -43,10 +43,46 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
    cd llamanet
    ```
 
-2. Install the package:
+2. Install the requirements:
    ```bash
-   pip install --editable . --use-pep517
+   pip3 install -r requirements.txt
    ```
+   
+3. Install the package:
+   ```bash
+   pip3 install --editable . --use-pep517
+   ```
+   
+## Quick Start
+
+### 1. Start a Bootstrap Node
+
+```bash
+python -m inference_node.server --model-path ./models/your-model.gguf
+```
+
+This starts:
+- **HTTP API** on port 8000 (inference endpoints)
+- **DHT node** on port 8001 (peer discovery)
+- **Web UI** at http://localhost:8000
+
+### 2. Start Additional Nodes
+
+```bash
+python -m inference_node.server \
+  --model-path ./models/your-model.gguf \
+  --port 8002 \
+  --dht-port 8003 \
+  --bootstrap-nodes localhost:8001
+```
+
+### 3. Use the Web Interface
+
+Open http://localhost:8000 in your browser for an interactive chat interface with:
+- **Real-time streaming responses**
+- **Network status monitoring**
+- **Streaming toggle** for instant vs. complete responses
+
 
 ## Model Setup
 
@@ -238,36 +274,6 @@ python -m inference_node.server --model-path ./model.gguf --n-gpu-layers 35
 # Increase batch size for throughput
 python -m inference_node.server --model-path ./model.gguf --n-batch 512
 ```
-
-## Quick Start
-
-### 1. Start a Bootstrap Node
-
-```bash
-python -m inference_node.server --model-path ./models/your-model.gguf
-```
-
-This starts:
-- **HTTP API** on port 8000 (inference endpoints)
-- **DHT node** on port 8001 (peer discovery)
-- **Web UI** at http://localhost:8000
-
-### 2. Start Additional Nodes
-
-```bash
-python -m inference_node.server \
-  --model-path ./models/your-model.gguf \
-  --port 8002 \
-  --dht-port 8003 \
-  --bootstrap-nodes localhost:8001
-```
-
-### 3. Use the Web Interface
-
-Open http://localhost:8000 in your browser for an interactive chat interface with:
-- **Real-time streaming responses**
-- **Network status monitoring**
-- **Streaming toggle** for instant vs. complete responses
 
 ## API Usage
 
