@@ -76,26 +76,53 @@ class SystemInfo:
     
     @staticmethod
     def get_gpu_info() -> Optional[str]:
-        """Get GPU information with better error handling"""
+        """Get GPU information with better error handling and Python 3.12 compatibility"""
         try:
-            # Import GPUtil only when needed
-            import GPUtil
-            gpus = GPUtil.getGPUs()
-            if not gpus:
+            # Try pynvml first (better Python 3.12 support)
+            import pynvml
+            pynvml.nvmlInit()
+            device_count = pynvml.nvmlDeviceGetCount()
+            
+            if device_count == 0:
                 return None
             
             # Return info for all GPUs
             gpu_info = []
-            for gpu in gpus:
-                memory_mb = int(gpu.memoryTotal)
-                gpu_info.append(f"{gpu.name} ({memory_mb}MB)")
+            for i in range(device_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                name = pynvml.nvmlDeviceGetName(handle)
+                memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                memory_mb = int(memory_info.total / (1024 * 1024))
+                
+                # Handle both bytes and string returns from pynvml
+                if isinstance(name, bytes):
+                    name = name.decode('utf-8')
+                
+                gpu_info.append(f"{name} ({memory_mb}MB)")
             
             return ", ".join(gpu_info)
         except ImportError:
-            logger.debug("GPUtil not available - GPU monitoring disabled")
-            return None
+            # Fallback to GPUtil for older installations
+            try:
+                import GPUtil
+                gpus = GPUtil.getGPUs()
+                if not gpus:
+                    return None
+                
+                gpu_info = []
+                for gpu in gpus:
+                    memory_mb = int(gpu.memoryTotal)
+                    gpu_info.append(f"{gpu.name} ({memory_mb}MB)")
+                
+                return ", ".join(gpu_info)
+            except ImportError:
+                logger.debug("Neither pynvml nor GPUtil available - GPU monitoring disabled")
+                return None
+            except Exception as e:
+                logger.warning(f"Could not get GPU info with GPUtil: {e}")
+                return None
         except Exception as e:
-            logger.warning(f"Could not get GPU info: {e}")
+            logger.warning(f"Could not get GPU info with pynvml: {e}")
             return None
     
     @staticmethod
