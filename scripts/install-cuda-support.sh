@@ -27,7 +27,7 @@ fi
 
 # Install with CUDA support
 echo "Installing llama-cpp-python with CUDA support..."
-CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python>=0.2.11 --force-reinstall --no-cache-dir
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python>=0.2.11 --force-reinstall --no-cache-dir
 
 # Install NVIDIA monitoring
 echo "Installing NVIDIA GPU monitoring..."
@@ -47,4 +47,4 @@ except Exception as e:
     exit(1)
 "
 
-echo "✓ CUDA support installation completed successfully!"  
+echo "✓ CUDA support installation completed successfully!"
