@@ -4,7 +4,7 @@ import argparse
 import sys
 import socket
 import hashlib
-from typing import Optional
+from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
 
 logger = get_logger(__name__)
@@ -121,8 +121,8 @@ class InferenceConfig:
                 self.dht_port = self._find_available_udp_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
                 
-            # Generate node_id after port is determined
-            self.node_id = args.node_id or load_env_var("NODE_ID", self._generate_node_id())
+            # Generate hardware-based node_id after port is determined
+            self.node_id = self._load_or_generate_node_id(args.node_id, self.port)
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
         else:
             # Direct initialization (for programmatic use)
@@ -158,8 +158,8 @@ class InferenceConfig:
                 self.dht_port = self._find_available_udp_port(8001)
                 logger.info(f"Using available DHT port: {self.dht_port}")
                 
-            # Generate node_id after port is determined
-            self.node_id = load_env_var("NODE_ID", self._generate_node_id())
+            # Generate hardware-based node_id after port is determined
+            self.node_id = self._load_or_generate_node_id(None, self.port)
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
         
         # Validate model path
@@ -212,21 +212,111 @@ class InferenceConfig:
         except Exception as e:
             logger.warning(f"Could not configure networking: {e}")
     
-    def _generate_node_id(self) -> str:
-        """Generate a unique node ID as a hex string for Kademlia compatibility"""
+    def _generate_hardware_based_node_id(self, port: int) -> str:
+        """Generate a hardware-based node ID"""
+        try:
+            from common.hardware_fingerprint import HardwareFingerprint
+            fingerprint = HardwareFingerprint()
+            node_id = fingerprint.generate_node_id(port)
+            
+            # Log hardware fingerprint summary for debugging
+            summary = fingerprint.get_fingerprint_summary()
+            logger.info(f"Hardware fingerprint summary: {summary}")
+            
+            return node_id
+        except Exception as e:
+            logger.warning(f"Failed to generate hardware-based node ID: {e}")
+            # Fallback to legacy method
+            return self._generate_legacy_node_id(port)
+    
+    def _generate_legacy_node_id(self, port: int) -> str:
+        """Generate a legacy node ID as fallback"""
         from common.utils import get_host_ip
         
         # Get host information for uniqueness
         host_ip = get_host_ip()
         
         # Create a unique string combining host info, port, and random component
-        unique_string = f"{host_ip}:{self.port}:{uuid.uuid4().hex[:8]}"
+        unique_string = f"{host_ip}:{port}:{uuid.uuid4().hex[:8]}"
         
         # Generate SHA-1 hash (160-bit) for Kademlia compatibility
         node_hash = hashlib.sha1(unique_string.encode()).hexdigest()
         
-        logger.info(f"Generated unique hex node_id: {node_hash[:16]}... for {host_ip}:{self.port}")
+        logger.info(f"Generated legacy node_id: {node_hash[:16]}... for {host_ip}:{port}")
         return node_hash
+    
+    def _load_or_generate_node_id(self, specified_node_id: Optional[str], port: int) -> str:
+        """Load existing node ID or generate a new hardware-based one"""
+        # If explicitly specified, use it
+        if specified_node_id:
+            logger.info(f"Using specified node ID: {specified_node_id[:16]}...")
+            return specified_node_id
+        
+        # Check environment variable
+        env_node_id = load_env_var("NODE_ID", None)
+        if env_node_id:
+            logger.info(f"Using environment node ID: {env_node_id[:16]}...")
+            return env_node_id
+        
+        # Generate hardware-based node ID
+        try:
+            from common.hardware_fingerprint import HardwareFingerprint
+            fingerprint = HardwareFingerprint()
+            node_id = fingerprint.generate_node_id(port)
+            
+            # Validate consistency if we have a stored ID
+            stored_node_id = self._get_stored_node_id()
+            if stored_node_id:
+                if fingerprint.validate_consistency(stored_node_id, port):
+                    logger.info(f"Using consistent stored node ID: {stored_node_id[:16]}...")
+                    return stored_node_id
+                else:
+                    logger.warning("Hardware fingerprint changed, generating new node ID")
+                    # Store the new node ID
+                    self._store_node_id(node_id)
+            else:
+                # First time, store the generated ID
+                self._store_node_id(node_id)
+            
+            return node_id
+            
+        except Exception as e:
+            logger.error(f"Failed to generate hardware-based node ID: {e}")
+            # Fallback to legacy method
+            return self._generate_legacy_node_id(port)
+    
+    def _get_stored_node_id(self) -> Optional[str]:
+        """Get stored node ID from persistent storage"""
+        try:
+            node_id_file = os.path.expanduser("~/.llamanet_node_id")
+            if os.path.exists(node_id_file):
+                with open(node_id_file, 'r') as f:
+                    stored_id = f.read().strip()
+                    if stored_id and len(stored_id) == 40:  # SHA-1 hex length
+                        return stored_id
+        except Exception as e:
+            logger.debug(f"Could not read stored node ID: {e}")
+        return None
+    
+    def _store_node_id(self, node_id: str) -> None:
+        """Store node ID to persistent storage"""
+        try:
+            node_id_file = os.path.expanduser("~/.llamanet_node_id")
+            with open(node_id_file, 'w') as f:
+                f.write(node_id)
+            logger.debug(f"Stored node ID to {node_id_file}")
+        except Exception as e:
+            logger.warning(f"Could not store node ID: {e}")
+    
+    def get_hardware_info(self) -> Dict:
+        """Get hardware fingerprint information for debugging"""
+        try:
+            from common.hardware_fingerprint import HardwareFingerprint
+            fingerprint = HardwareFingerprint()
+            return fingerprint.get_fingerprint_summary()
+        except Exception as e:
+            logger.warning(f"Could not get hardware info: {e}")
+            return {"error": str(e)}
         
     def __str__(self) -> str:
         return (

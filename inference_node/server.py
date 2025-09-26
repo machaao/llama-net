@@ -853,6 +853,9 @@ async def info():
     p2p_info = {}
     if p2p_handler:
         p2p_info = p2p_handler.get_p2p_info()
+    
+    # Get hardware fingerprint info
+    hardware_info = config.get_hardware_info()
         
     return {
         "node_id": config.node_id,
@@ -863,6 +866,8 @@ async def info():
         "openai_compatible": True,
         "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"],
         "p2p_enabled": bool(p2p_handler),
+        "hardware_based_id": True,
+        "hardware_fingerprint": hardware_info,
         **p2p_info
     }
 
@@ -1357,6 +1362,29 @@ async def debug_routing():
         debug_info["discovery_test"] = {"error": str(e)}
     
     return debug_info
+
+@app.get("/hardware")
+async def hardware_info():
+    """Get detailed hardware fingerprint information"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    try:
+        from common.hardware_fingerprint import HardwareFingerprint
+        fingerprint = HardwareFingerprint()
+        
+        return {
+            "node_id": config.node_id,
+            "hardware_based": True,
+            "fingerprint_summary": fingerprint.get_fingerprint_summary(),
+            "consistency_check": fingerprint.validate_consistency(config.node_id, config.port),
+            "generated_node_id": fingerprint.generate_node_id(config.port),
+            "stored_node_id": config._get_stored_node_id() if hasattr(config, '_get_stored_node_id') else None,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error getting hardware info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def start_server():
     """Start the inference server"""
