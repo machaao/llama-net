@@ -24,6 +24,9 @@ DEFAULT_DHT_PORT="${DHT_PORT:-8001}"
 DEFAULT_NODE_ID="${NODE_ID:-}"
 DEFAULT_BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-}"
 
+# Suppress Python semaphore warnings for cleaner output
+export PYTHONWARNINGS="ignore:semaphore"
+
 # Validate model file exists
 if [ ! -f "$DEFAULT_MODEL_PATH" ]; then
     echo "❌ Error: Model file not found at $DEFAULT_MODEL_PATH"
