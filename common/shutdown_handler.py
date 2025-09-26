@@ -94,6 +94,19 @@ class DHTPublisherShutdownHandler:
             # Phase 3: Clean up resources
             self.shutdown_phase = ShutdownPhase.CLEANING_UP
             await self._cleanup_resources()
+            
+            self.shutdown_phase = ShutdownPhase.COMPLETED
+            total_time = time.time() - self.shutdown_start_time
+            self.shutdown_stats['total_time'] = total_time
+            
+            logger.info(f"✅ Graceful shutdown completed in {total_time:.2f}s")
+            self._log_shutdown_stats()
+        
+        except Exception as e:
+            self.shutdown_phase = ShutdownPhase.FAILED
+            total_time = time.time() - self.shutdown_start_time
+            logger.error(f"❌ Shutdown failed after {total_time:.2f}s: {e}")
+            raise
 
     async def _event_recovery_mechanism(self):
         """Recover from missed events by periodic reconciliation"""
@@ -194,19 +207,6 @@ class DHTPublisherShutdownHandler:
             logger.debug(f"Error getting node info for recovery: {e}")
             return None
             
-            self.shutdown_phase = ShutdownPhase.COMPLETED
-            total_time = time.time() - self.shutdown_start_time
-            self.shutdown_stats['total_time'] = total_time
-            
-            logger.info(f"✅ Graceful shutdown completed in {total_time:.2f}s")
-            self._log_shutdown_stats()
-        
-        except Exception as e:
-            self.shutdown_phase = ShutdownPhase.FAILED
-            total_time = time.time() - self.shutdown_start_time
-            logger.error(f"❌ Shutdown failed after {total_time:.2f}s: {e}")
-            raise
-
     async def _get_node_info_for_recovery(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Get node info for recovery events"""
         try:
