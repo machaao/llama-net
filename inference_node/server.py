@@ -21,6 +21,7 @@ from common.models import (
     create_streaming_chat_response, create_streaming_completion_response
 )
 from common.sse_handler import SSEForwarder, SSEHandler, SSENetworkMonitor
+from common.shutdown_handler import DHTPublisherShutdownHandler, SignalHandler
 
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
@@ -47,6 +48,8 @@ p2p_handler = None
 sse_handler = None
 sse_network_monitor = None
 discovery_bridge = None
+shutdown_handler = None
+signal_handler = None
 round_robin_state = {"index": 0}  # Global round robin state
 
 class DiscoverySSEBridge(NodeEventListener):
@@ -102,147 +105,71 @@ class DiscoverySSEBridge(NodeEventListener):
 # Request concurrency limiting
 REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
-async def cleanup_services_fast():
-    """Fast cleanup optimized for uvicorn shutdown compatibility"""
-    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, discovery_bridge, sse_network_monitor
+async def graceful_shutdown():
+    """Graceful shutdown using the enhanced shutdown handler"""
+    global shutdown_handler
     
-    logger.info("🚀 Fast shutdown initiated...")
-    start_time = time.time()
+    if shutdown_handler:
+        try:
+            await shutdown_handler.initiate_shutdown("server_shutdown")
+        except Exception as e:
+            logger.error(f"Error during graceful shutdown: {e}")
+            # Fallback to basic cleanup if shutdown handler fails
+            await basic_cleanup()
+    else:
+        logger.warning("Shutdown handler not available, using basic cleanup")
+        await basic_cleanup()
+
+async def basic_cleanup():
+    """Basic cleanup as fallback"""
+    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, sse_network_monitor
     
-    # Set maximum cleanup time (much shorter for uvicorn)
-    max_cleanup_time = 8.0  # 8 seconds max
+    logger.info("🔄 Basic cleanup initiated...")
     
     try:
-        # Step 1: Stop accepting new requests immediately
-        if sse_handler:
-            sse_handler.running = False
-        
-        # Step 2: Send quick departure notification (non-blocking)
-        departure_task = None
-        if dht_publisher and sse_handler:
-            try:
-                departure_task = asyncio.create_task(
-                    dht_publisher._broadcast_node_event("node_left", {
-                        'node_id': config.node_id if config else 'unknown',
-                        'reason': 'fast_shutdown',
-                        'timestamp': time.time()
-                    })
-                )
-                # Don't wait for it, let it run in background
-                logger.debug("Departure notification started (background)")
-            except Exception as e:
-                logger.debug(f"Could not start departure notification: {e}")
-        
-        # Step 3: Cancel all background tasks quickly
-        tasks_to_cancel = []
-        
-        # Collect cancellable tasks
-        if heartbeat_manager and hasattr(heartbeat_manager, 'heartbeat_task'):
-            tasks_to_cancel.append(heartbeat_manager.heartbeat_task)
-        
-        if dht_publisher and hasattr(dht_publisher, 'monitor_task'):
-            tasks_to_cancel.append(dht_publisher.monitor_task)
-        
-        if dht_discovery and hasattr(dht_discovery, 'event_processor_task'):
-            tasks_to_cancel.append(dht_discovery.event_processor_task)
-            if hasattr(dht_discovery, 'dht_monitor_task'):
-                tasks_to_cancel.append(dht_discovery.dht_monitor_task)
-            if hasattr(dht_discovery, 'unknown_nodes_task'):
-                tasks_to_cancel.append(dht_discovery.unknown_nodes_task)
-        
-        if sse_network_monitor and hasattr(sse_network_monitor, 'monitor_task'):
-            tasks_to_cancel.append(sse_network_monitor.monitor_task)
-        
-        # Cancel all tasks immediately
-        for task in tasks_to_cancel:
-            if task and not task.done():
-                task.cancel()
-        
-        logger.debug(f"Cancelled {len(tasks_to_cancel)} background tasks")
-        
-        # Step 4: Quick service stops (with very short timeouts)
-        cleanup_operations = []
-        
+        # Stop services quickly
         if heartbeat_manager:
-            cleanup_operations.append(("heartbeat", heartbeat_manager.stop()))
+            await heartbeat_manager.stop()
         
         if sse_network_monitor:
-            cleanup_operations.append(("sse_monitor", sse_network_monitor.stop()))
+            await sse_network_monitor.stop()
         
         if p2p_handler:
-            cleanup_operations.append(("p2p", p2p_handler.close()))
+            await p2p_handler.close()
         
-        # Execute with very short timeouts
-        for name, operation in cleanup_operations:
-            if time.time() - start_time > max_cleanup_time:
-                logger.warning(f"⏰ Cleanup timeout, skipping {name}")
-                break
-            
-            try:
-                await asyncio.wait_for(operation, timeout=1.0)  # 1 second max per operation
-                logger.debug(f"✅ {name} stopped")
-            except asyncio.TimeoutError:
-                logger.debug(f"⏰ {name} stop timed out (continuing)")
-            except Exception as e:
-                logger.debug(f"❌ Error stopping {name}: {e}")
+        if dht_publisher:
+            await dht_publisher.stop()
         
-        # Step 5: DHT cleanup (fastest possible)
-        try:
-            if dht_publisher:
-                dht_publisher.running = False
-            
-            if dht_discovery:
-                dht_discovery.running = False
-            
-            # Quick DHT service stop
-            from common.dht_service import SharedDHTService
-            dht_service = SharedDHTService()
-            
-            # Force immediate stop without waiting
-            if dht_service._kademlia_node:
-                dht_service._kademlia_node.running = False
-            
-            # Don't wait for DHT cleanup - let it happen in background
-            asyncio.create_task(dht_service.stop())
-            logger.debug("✅ DHT cleanup initiated (background)")
-            
-        except Exception as e:
-            logger.debug(f"DHT cleanup error (non-blocking): {e}")
+        if dht_discovery:
+            await dht_discovery.stop()
         
-        # Step 6: Wait briefly for departure notification if it's still running
-        if departure_task and not departure_task.done():
-            try:
-                await asyncio.wait_for(departure_task, timeout=0.5)
-                logger.debug("✅ Departure notification completed")
-            except asyncio.TimeoutError:
-                departure_task.cancel()
-                logger.debug("⏰ Departure notification cancelled")
-            except Exception as e:
-                logger.debug(f"Departure notification error: {e}")
+        # Quick DHT service stop
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
+        await dht_service.fast_stop()
         
-        total_time = time.time() - start_time
-        logger.info(f"🚀 Fast shutdown completed in {total_time:.2f}s")
+        logger.info("✅ Basic cleanup completed")
         
     except Exception as e:
-        logger.error(f"Error during fast cleanup: {e}")
-    
-    # Ensure we don't exceed time limit
-    total_time = time.time() - start_time
-    if total_time > max_cleanup_time:
-        logger.warning(f"⚠️ Cleanup took {total_time:.2f}s (exceeded {max_cleanup_time}s limit)")
-    else:
-        logger.info(f"✅ Cleanup completed in {total_time:.2f}s")
+        logger.error(f"Error during basic cleanup: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge, shutdown_handler, signal_handler
     
     # Store shutdown event for coordination
     shutdown_event = asyncio.Event()
     app.state.shutdown_event = shutdown_event
     
     try:
+        # Initialize shutdown handler early
+        shutdown_handler = DHTPublisherShutdownHandler(max_shutdown_time=8.0)
+        
+        # Initialize signal handler
+        signal_handler = SignalHandler(shutdown_handler)
+        signal_handler.register_signals()
+        
         # Load configuration
         config = InferenceConfig()
         logger.info(f"Starting OpenAI-compatible inference node: {config}")
@@ -259,6 +186,9 @@ async def lifespan(app: FastAPI):
         logger.info("Starting heartbeat manager...")
         heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
         await heartbeat_manager.start()
+        
+        # Register heartbeat manager with shutdown handler
+        shutdown_handler.register_component('heartbeat_manager', heartbeat_manager)
         
         # Initialize shared DHT service FIRST
         logger.info("Initializing shared DHT service...")
@@ -283,10 +213,16 @@ async def lifespan(app: FastAPI):
         dht_publisher = DHTPublisher(config, llm.get_metrics)
         await dht_publisher.start()
         
+        # Register DHT publisher with shutdown handler
+        shutdown_handler.register_component('dht_publisher', dht_publisher)
+        
         # Start DHT discovery (uses shared service)
         logger.info("Starting DHT discovery...")
         dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
         await dht_discovery.start()
+        
+        # Register DHT discovery with shutdown handler
+        shutdown_handler.register_component('dht_discovery', dht_discovery)
         
         # Initialize SSE handler AFTER DHT discovery
         logger.info("Initializing SSE handler...")
@@ -297,6 +233,10 @@ async def lifespan(app: FastAPI):
         sse_network_monitor = SSENetworkMonitor(base_url)
         sse_network_monitor.set_sse_handler(sse_handler)
         await sse_network_monitor.start()
+        
+        # Register SSE components with shutdown handler
+        shutdown_handler.register_component('sse_handler', sse_handler)
+        shutdown_handler.register_component('sse_network_monitor', sse_network_monitor)
         
         # Bridge discovery events to SSE
         if dht_discovery and sse_handler:
@@ -316,6 +256,8 @@ async def lifespan(app: FastAPI):
             await p2p_handler.start()
             if p2p_handler:
                 dht_publisher.p2p_handler = p2p_handler
+                # Register P2P handler with shutdown handler
+                shutdown_handler.register_component('p2p_handler', p2p_handler)
             logger.info("P2P handler started successfully")
         except Exception as e:
             logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
@@ -326,7 +268,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
         # Cleanup any partially started services
-        await cleanup_services_fast()
+        await graceful_shutdown()
         raise
     
     yield
@@ -335,8 +277,8 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Lifespan shutdown initiated")
     shutdown_event.set()
     
-    # Fast cleanup for uvicorn compatibility
-    await cleanup_services_fast()
+    # Use graceful shutdown with enhanced handler
+    await graceful_shutdown()
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
@@ -1767,7 +1709,7 @@ async def update_hardware_node_id():
         raise HTTPException(status_code=500, detail=str(e))
 
 def start_server():
-    """Start the inference server with optimized graceful shutdown"""
+    """Start the inference server with enhanced graceful shutdown"""
     global config
     if config is None:
         config = InferenceConfig()  # Will parse command line args
@@ -1780,7 +1722,7 @@ def start_server():
         log_level="info",
         # Optimized shutdown configuration
         timeout_keep_alive=2,
-        timeout_graceful_shutdown=10,  # Reduced from 30 to 10 seconds
+        timeout_graceful_shutdown=10,  # Matches our shutdown handler timeout
         access_log=False,
         # Additional uvicorn optimizations
         loop="asyncio",
@@ -1790,21 +1732,8 @@ def start_server():
     
     server = uvicorn.Server(uvicorn_config)
     
-    # Install custom signal handler that works with uvicorn
-    def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, initiating shutdown...")
-        # Don't call sys.exit() - let uvicorn handle it
-        if hasattr(server, 'should_exit'):
-            server.should_exit = True
-        # Trigger the shutdown event if app is available
-        if hasattr(server, 'config') and hasattr(server.config, 'app'):
-            app = server.config.app
-            if hasattr(app, 'state') and hasattr(app.state, 'shutdown_event'):
-                app.state.shutdown_event.set()
-    
-    import signal
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # The signal handling is now managed by the SignalHandler class
+    # in the lifespan function, so we don't need custom signal handlers here
     
     try:
         server.run()
