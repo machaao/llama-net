@@ -106,6 +106,106 @@ Open http://localhost:8000 in your browser for an interactive chat interface wit
 - **Hardware fingerprint information** in node details
 
 
+## Hardware-Based Node Identity
+
+### Automatic Node ID Generation
+
+LlamaNet automatically generates consistent node IDs based on your hardware:
+
+```bash
+# First run - generates and stores hardware-based node ID
+python -m inference_node.server --model-path ./models/model.gguf
+# Output: Generated hardware-based node ID: 5f3d6263b7009e54... from 6 hardware components
+
+# Subsequent runs - uses the same stored node ID
+python -m inference_node.server --model-path ./models/model.gguf  
+# Output: Using consistent stored hardware-based node ID: 5f3d6263b7009e54...
+```
+
+### Manual Node ID Override
+
+You can still specify custom node IDs if needed:
+
+```bash
+# Override with custom node ID
+python -m inference_node.server \
+  --model-path ./models/model.gguf \
+  --node-id my-custom-node-id-12345678901234567890
+
+# Or via environment variable
+export NODE_ID=my-custom-node-id-12345678901234567890
+python -m inference_node.server --model-path ./models/model.gguf
+```
+
+### Hardware Change Handling
+
+When hardware changes are detected:
+
+```bash
+# Hardware change detected - automatic update
+# Output: Hardware fingerprint changed, generating new node ID
+# Output: Updated stored node ID to: a1b2c3d4e5f6789a...
+```
+
+### Multiple Nodes on Same Hardware
+
+Run multiple nodes on the same machine with automatic port-based differentiation:
+
+```bash
+# Node 1 - gets hardware-based ID with port 8000
+python -m inference_node.server --model-path ./models/model.gguf --port 8000
+
+# Node 2 - gets different hardware-based ID with port 8002  
+python -m inference_node.server --model-path ./models/model.gguf --port 8002 --dht-port 8003 --bootstrap-nodes localhost:8001
+
+# Node 3 - gets another unique hardware-based ID with port 8004
+python -m inference_node.server --model-path ./models/model.gguf --port 8004 --dht-port 8005 --bootstrap-nodes localhost:8001
+```
+
+Each node gets a unique ID like:
+- Node 1: `5f3d6263b7009e54...` (hardware + port:8000)
+- Node 2: `7a948cc229cb9c9d...` (hardware + port:8002)  
+- Node 3: `b8e1f4a5c6d7e8f9...` (hardware + port:8004)
+
+## Hardware Debugging and Monitoring
+
+### Check Hardware Fingerprint
+
+```bash
+# View hardware fingerprint details
+curl http://localhost:8000/hardware
+
+# Validate hardware consistency
+curl http://localhost:8000/hardware/validate
+
+# Debug node ID across all components
+curl http://localhost:8000/debug/node-id
+```
+
+### Hardware Fingerprint Information
+
+The hardware fingerprint includes:
+
+```json
+{
+  "mac_count": 2,
+  "has_system_uuid": true,
+  "cpu_count": 8,
+  "memory_gb": 16,
+  "platform": "Linux-5.15.0-91-generic-x86_64-with-glibc2.35",
+  "hostname": "my-server",
+  "is_fallback": false
+}
+```
+
+### Node ID Storage
+
+Hardware-based node IDs are automatically stored in:
+- **Linux/macOS**: `~/.llamanet_node_id`
+- **Windows**: `%USERPROFILE%\.llamanet_node_id`
+
+This ensures the same node ID is used across restarts.
+
 ## Model Setup
 
 ### Model Requirements
