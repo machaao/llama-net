@@ -46,64 +46,125 @@ round_robin_state = {"index": 0}  # Global round robin state
 # Request concurrency limiting
 REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
+async def cleanup_services():
+    """Clean up all services in reverse order"""
+    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery
+    
+    logger.info("Shutting down services...")
+    
+    # Stop services in reverse order
+    if heartbeat_manager:
+        try:
+            await heartbeat_manager.stop()
+        except Exception as e:
+            logger.error(f"Error stopping heartbeat manager: {e}")
+    
+    if p2p_handler:
+        try:
+            await p2p_handler.close()
+        except Exception as e:
+            logger.error(f"Error stopping P2P handler: {e}")
+    
+    if dht_publisher:
+        try:
+            await dht_publisher.stop()
+        except Exception as e:
+            logger.error(f"Error stopping DHT publisher: {e}")
+    
+    if dht_discovery:
+        try:
+            await dht_discovery.stop()
+        except Exception as e:
+            logger.error(f"Error stopping DHT discovery: {e}")
+    
+    # Stop the shared DHT service last
+    try:
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
+        await dht_service.stop()
+    except Exception as e:
+        logger.error(f"Error stopping shared DHT service: {e}")
+    
+    logger.info("All services shut down")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler
     
-    # Load configuration
-    config = InferenceConfig()
-    logger.info(f"Starting OpenAI-compatible inference node: {config}")
-    
-    # Initialize LLM
-    llm = LlamaWrapper(config)
-    
-    # Get system info
-    system_info = SystemInfo.get_all_info()
-    
-    # Start heartbeat manager
-    heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
-    await heartbeat_manager.start()
-    
-    # Start P2P handler
     try:
-        p2p_handler = P2PRequestHandler(config, llm)
-        await p2p_handler.start()
-        logger.info("P2P handler started successfully")
+        # Load configuration
+        config = InferenceConfig()
+        logger.info(f"Starting OpenAI-compatible inference node: {config}")
+        
+        # Initialize LLM first (most likely to fail)
+        logger.info("Initializing LLM...")
+        llm = LlamaWrapper(config)
+        logger.info("LLM initialized successfully")
+        
+        # Get system info
+        system_info = SystemInfo.get_all_info()
+        
+        # Start heartbeat manager (lightweight)
+        logger.info("Starting heartbeat manager...")
+        heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
+        await heartbeat_manager.start()
+        
+        # Initialize shared DHT service FIRST
+        logger.info("Initializing shared DHT service...")
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
+        
+        # Parse bootstrap nodes
+        bootstrap_nodes = []
+        if config.bootstrap_nodes:
+            for node_str in config.bootstrap_nodes.split(','):
+                try:
+                    ip, port = node_str.strip().split(':')
+                    bootstrap_nodes.append((ip, int(port)))
+                except ValueError:
+                    logger.warning(f"Invalid bootstrap node format: {node_str}")
+        
+        # Initialize the shared DHT service
+        await dht_service.initialize(config.node_id, config.dht_port, bootstrap_nodes)
+        
+        # Start DHT publisher (uses shared service)
+        logger.info("Starting DHT publisher...")
+        dht_publisher = DHTPublisher(config, llm.get_metrics)
+        await dht_publisher.start()
+        
+        # Start DHT discovery (uses shared service)
+        logger.info("Starting DHT discovery...")
+        dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
+        await dht_discovery.start()
+        
+        # Initialize node selector
+        node_selector = NodeSelector(dht_discovery)
+        
+        # Start P2P handler LAST (most likely to have conflicts)
+        try:
+            logger.info("Starting P2P handler...")
+            p2p_handler = P2PRequestHandler(config, llm)
+            await p2p_handler.start()
+            if p2p_handler:
+                dht_publisher.p2p_handler = p2p_handler
+            logger.info("P2P handler started successfully")
+        except Exception as e:
+            logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
+            p2p_handler = None
+        
+        logger.info("🚀 All services started successfully!")
+        
     except Exception as e:
-        logger.warning(f"Failed to start P2P handler: {e}")
-        p2p_handler = None
-    
-    # Start DHT publisher FIRST (this initializes the shared service)
-    dht_publisher = DHTPublisher(config, llm.get_metrics)
-    # Pass P2P handler to DHT publisher for info sharing
-    if p2p_handler:
-        dht_publisher.p2p_handler = p2p_handler
-    await dht_publisher.start()
-    
-    # THEN initialize DHT discovery (this will use the shared service)
-    dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
-    await dht_discovery.start()
-    
-    # Initialize node selector for request routing
-    node_selector = NodeSelector(dht_discovery)
+        logger.error(f"Failed to start services: {e}")
+        # Cleanup any partially started services
+        await cleanup_services()
+        raise
     
     yield
     
     # Shutdown
-    if heartbeat_manager:
-        await heartbeat_manager.stop()
-    if p2p_handler:
-        await p2p_handler.close()
-    if dht_publisher:
-        await dht_publisher.stop()
-    if dht_discovery:
-        await dht_discovery.stop()
-    
-    # Stop the shared DHT service last
-    from common.dht_service import SharedDHTService
-    dht_service = SharedDHTService()
-    await dht_service.stop()
+    await cleanup_services()
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 

@@ -24,10 +24,17 @@ class P2PRequestHandler:
         self.transport = P2PTransport(config.node_id, config.model_name)
         
     async def start(self):
-        """Start P2P request handler"""
-        await self.transport.start()
-        self.transport.add_message_callback(self._handle_p2p_request)
-        logger.info(f"P2P request handler started")
+        """Start P2P request handler with error handling"""
+        try:
+            await self.transport.start()
+            self.transport.add_message_callback(self._handle_p2p_request)
+            logger.info(f"P2P request handler started")
+        except ImportError as e:
+            logger.warning(f"P2P dependencies not available: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to start P2P transport: {e}")
+            raise
         
     async def _handle_p2p_request(self, msg: bytes, client_tup, pipe):
         """Handle incoming P2P inference requests"""

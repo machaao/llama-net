@@ -20,13 +20,75 @@ class KademliaProtocol(asyncio.DatagramProtocol):
     def connection_made(self, transport):
         self.transport = transport
     
+    def error_received(self, exc):
+        """Handle transport errors gracefully"""
+        logger.error(f"UDP transport error: {exc}")
+        
+        # Handle specific error types without crashing
+        error_str = str(exc).lower()
+        if "connection refused" in error_str:
+            logger.warning("Connection refused - remote node may be down")
+        elif "network unreachable" in error_str:
+            logger.warning("Network unreachable - check connectivity")
+        elif "no buffer space available" in error_str:
+            logger.warning("Network buffer full - system under load")
+        elif "address already in use" in error_str:
+            logger.error("Port already in use - check for conflicting processes")
+        else:
+            logger.error(f"Unhandled transport error: {exc}")
+
+    def connection_lost(self, exc):
+        """Handle connection loss"""
+        if exc:
+            logger.error(f"UDP connection lost: {exc}")
+        else:
+            logger.debug("UDP connection closed normally")
+
     def datagram_received(self, data: bytes, addr: Tuple[str, int]):
-        """Handle incoming UDP messages"""
+        """Handle incoming UDP messages with robust error handling"""
         try:
-            message = json.loads(data.decode())
-            asyncio.create_task(self._handle_message(message, addr))
+            # Validate data
+            if not data:
+                logger.debug(f"Received empty UDP packet from {addr}")
+                return
+                
+            if len(data) > 65507:  # Max UDP payload size
+                logger.warning(f"Received oversized UDP packet ({len(data)} bytes) from {addr}")
+                return
+            
+            # Decode with proper error handling
+            try:
+                message_str = data.decode('utf-8')
+            except UnicodeDecodeError as e:
+                logger.warning(f"Failed to decode message from {addr}: {e}")
+                return
+                
+            # Parse JSON with validation
+            try:
+                message = json.loads(message_str)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse JSON from {addr}: {e}")
+                return
+                
+            # Validate message structure
+            if not isinstance(message, dict) or 'type' not in message:
+                logger.warning(f"Invalid message structure from {addr}")
+                return
+                
+            # Handle message asynchronously with error protection
+            asyncio.create_task(self._handle_message_safe(message, addr))
+            
         except Exception as e:
-            logger.warning(f"Failed to parse message from {addr}: {e}")
+            logger.error(f"Unexpected error in datagram_received from {addr}: {e}")
+            # Don't re-raise - this would crash the event loop
+
+    async def _handle_message_safe(self, message: Dict[str, Any], addr: Tuple[str, int]):
+        """Safely handle message with error isolation"""
+        try:
+            await self._handle_message(message, addr)
+        except Exception as e:
+            logger.error(f"Error handling message from {addr}: {e}")
+            # Log but don't crash the protocol handler
     
     async def _handle_message(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle a parsed message"""

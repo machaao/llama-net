@@ -181,6 +181,36 @@ class InferenceConfig:
         
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path).split('.')[0]
+        
+        # Configure networking for better stability
+        self._configure_networking()
+    
+    def _configure_networking(self):
+        """Configure networking settings for better stability"""
+        import socket
+        
+        try:
+            # Set socket options for better UDP handling
+            socket.setdefaulttimeout(30)
+            
+            # Configure socket reuse
+            original_socket = socket.socket
+            def patched_socket(*args, **kwargs):
+                sock = original_socket(*args, **kwargs)
+                if sock.family == socket.AF_INET and sock.type == socket.SOCK_DGRAM:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    # Set buffer sizes for UDP
+                    try:
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                    except OSError:
+                        pass  # Some systems don't allow this
+                return sock
+            socket.socket = patched_socket
+            
+            logger.info("Network configuration applied successfully")
+        except Exception as e:
+            logger.warning(f"Could not configure networking: {e}")
     
     def _generate_node_id(self) -> str:
         """Generate a unique node ID as a hex string for Kademlia compatibility"""
