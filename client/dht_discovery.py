@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from dht.kademlia_node import KademliaNode
 from common.models import NodeInfo
 from common.utils import get_logger
+from common.network_utils import NetworkUtils, SubnetFilter
 from client.discovery import DiscoveryInterface
 
 logger = get_logger(__name__)
@@ -11,7 +12,11 @@ logger = get_logger(__name__)
 class DHTDiscovery(DiscoveryInterface):
     """Client for discovering nodes via Kademlia DHT"""
     
-    def __init__(self, bootstrap_nodes: str = "", dht_port: int = 8001):
+    def __init__(self, bootstrap_nodes: str = "", dht_port: int = 8001,
+                 enable_subnet_filtering: bool = True,
+                 connectivity_test: bool = True,
+                 allowed_subnets: List[str] = None,
+                 blocked_subnets: List[str] = None):
         self.bootstrap_nodes = self._parse_bootstrap_nodes(bootstrap_nodes)
         self.dht_port = dht_port
         self.kademlia_node = None
@@ -20,6 +25,20 @@ class DHTDiscovery(DiscoveryInterface):
         self.nodes_cache: List[NodeInfo] = []
         self._cache_is_model_specific = False
         self.known_node_ids = set()  # Track known nodes
+        
+        # Network filtering configuration
+        self.enable_subnet_filtering = enable_subnet_filtering
+        self.connectivity_test = connectivity_test
+        self.subnet_filter = SubnetFilter(
+            allowed_subnets=allowed_subnets,
+            blocked_subnets=blocked_subnets,
+            auto_detect_local=enable_subnet_filtering
+        ) if enable_subnet_filtering else None
+        
+        if enable_subnet_filtering:
+            logger.info("DHT Discovery initialized with subnet filtering enabled")
+        else:
+            logger.info("DHT Discovery initialized with subnet filtering disabled")
         
     def _parse_bootstrap_nodes(self, bootstrap_str: str) -> List[Tuple[str, int]]:
         """Parse bootstrap nodes from comma-separated string"""
@@ -177,7 +196,7 @@ class DHTDiscovery(DiscoveryInterface):
         return nodes
 
     async def _refresh_nodes(self, model: Optional[str] = None):
-        """Refresh the nodes cache from DHT with enhanced discovery and fallback"""
+        """Refresh the nodes cache from DHT with enhanced discovery and subnet filtering"""
         try:
             # Use a dict to ensure uniqueness by node_id (not ip:port)
             unique_nodes = {}
@@ -196,56 +215,75 @@ class DHTDiscovery(DiscoveryInterface):
                     logger.debug(f"Error getting model-specific nodes: {e}")
             
             # Process published nodes
+            raw_nodes = []
             for node_data in published_nodes:
                 if isinstance(node_data, dict) and node_data.get('node_id'):
                     node_id = node_data['node_id']
                     # Use longer timeout for published data (2 minutes)
                     if time.time() - node_data.get('last_seen', 0) < 120:
-                        try:
-                            node_info = NodeInfo(**node_data)
-                            unique_nodes[node_id] = {
-                                'node': node_info,
-                                'source': 'published',
-                                'priority': 1
-                            }
-                            logger.info(f"Added published node: {node_id[:8]}... at {node_info.ip}:{node_info.port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to parse published node: {e}")
-
-            # Convert to list and update cache
-            self.nodes_cache = [entry['node'] for entry in unique_nodes.values()]
+                        raw_nodes.append(node_data)
+                        unique_nodes[node_id] = {
+                            'node': node_data,
+                            'source': 'published',
+                            'priority': 1
+                        }
             
-            # Track new nodes
-            for node_id, entry in unique_nodes.items():
-                if node_id not in self.known_node_ids:
-                    node = entry['node']
-                    source = entry['source']
-                    logger.info(f"🆕 New {source} node: {node_id[:12]}... ({node.ip}:{node.port}) - Model: {node.model}")
-                    self.known_node_ids.add(node_id)
+            logger.debug(f"Found {len(raw_nodes)} published nodes before filtering")
+            
+            # Apply subnet filtering if enabled
+            if self.enable_subnet_filtering and self.subnet_filter and raw_nodes:
+                logger.debug(f"Applying subnet filtering to {len(raw_nodes)} nodes")
+                
+                # First apply subnet rules
+                filtered_nodes = self.subnet_filter.filter_nodes(raw_nodes)
+                
+                # Then validate reachability if enabled
+                if self.connectivity_test and filtered_nodes:
+                    filtered_nodes = await NetworkUtils.validate_node_reachability(
+                        filtered_nodes, 
+                        connectivity_test=True,
+                        timeout=3.0
+                    )
+                
+                raw_nodes = filtered_nodes
+            
+            # Convert to NodeInfo objects and update cache
+            self.nodes_cache = []
+            for node_data in raw_nodes:
+                try:
+                    node_info = NodeInfo(**node_data)
+                    self.nodes_cache.append(node_info)
+                    
+                    # Check if this is a new node
+                    node_id = node_data.get('node_id')
+                    if node_id not in self.known_node_ids:
+                        logger.info(f"🆕 New reachable node: {node_id[:12]}... ({node_data.get('ip')}:{node_data.get('port')}) - Model: {node_data.get('model')}")
+                        self.known_node_ids.add(node_id)
+                except Exception as e:
+                    logger.warning(f"Failed to create NodeInfo from {node_data}: {e}")
             
             self.cache_time = time.time()
             
-            # Enhanced logging with source breakdown
-            published_count = len([e for e in unique_nodes.values() if e['source'] == 'published'])
-            dht_contact_count = len([e for e in unique_nodes.values() if e['source'] == 'dht_contact'])
+            # Enhanced logging
+            total_discovered = len(published_nodes)
+            total_reachable = len(self.nodes_cache)
+            filtered_count = total_discovered - total_reachable
             
-            logger.info(f"Refreshed nodes cache: {len(self.nodes_cache)} total nodes ({published_count} published, {dht_contact_count} DHT contacts)")
+            if self.enable_subnet_filtering:
+                logger.info(f"Node discovery: {total_discovered} found, {filtered_count} filtered, {total_reachable} reachable")
+            else:
+                logger.info(f"Node discovery: {total_reachable} nodes (filtering disabled)")
             
             # Log all discovered nodes for debugging
             for node in self.nodes_cache:
-                source = next((e['source'] for e in unique_nodes.values() if e['node'].node_id == node.node_id), 'unknown')
-                logger.debug(f"Available {source} node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
+                logger.debug(f"Available node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
             
-            if len(published_nodes) > 0 and published_count == 0:
-                logger.warning("Published nodes found but none were valid - possible data corruption")
-            
-            # Log DHT storage keys for debugging
-            if self.kademlia_node and hasattr(self.kademlia_node, 'storage'):
-                storage_keys = list(self.kademlia_node.storage.keys())
-                logger.debug(f"DHT storage keys available: {storage_keys}")
+            if total_discovered > 0 and total_reachable == 0:
+                logger.warning("All discovered nodes were filtered out - check network connectivity and subnet configuration")
             
         except Exception as e:
             logger.error(f"Error refreshing nodes from DHT: {e}")
+            self.nodes_cache = []
     
     async def find_specific_node(self, node_id: str) -> Optional[NodeInfo]:
         """Find a specific node by ID"""
@@ -512,6 +550,29 @@ class DHTDiscovery(DiscoveryInterface):
                 distribution["unknown"] += 1
         
         return distribution
+
+    def configure_subnet_filtering(self, 
+                                 enable: bool = True,
+                                 connectivity_test: bool = True,
+                                 allowed_subnets: List[str] = None,
+                                 blocked_subnets: List[str] = None):
+        """Update subnet filtering configuration"""
+        self.enable_subnet_filtering = enable
+        self.connectivity_test = connectivity_test
+        
+        if enable:
+            self.subnet_filter = SubnetFilter(
+                allowed_subnets=allowed_subnets,
+                blocked_subnets=blocked_subnets,
+                auto_detect_local=True
+            )
+            logger.info("Subnet filtering configuration updated")
+        else:
+            self.subnet_filter = None
+            logger.info("Subnet filtering disabled")
+        
+        # Force cache refresh with new settings
+        self.cache_time = 0
 
     async def get_real_time_model_status(self) -> Dict[str, Any]:
         """Get real-time status of all models with live updates"""
