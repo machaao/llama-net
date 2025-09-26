@@ -103,7 +103,7 @@ class EventBasedDHTPublisher:
                 if current_time - self.last_forced_update > self.forced_update_interval:
                     should_update = True
                     self.last_forced_update = current_time
-                    logger.debug("Forcing periodic DHT update")
+                    logger.info("Forcing periodic DHT update")
                 
                 if should_update:
                     await self._publish_node_info()
