@@ -687,7 +687,7 @@ class LlamaNetUI {
                 this.validateNetworkStats(dhtData, modelsData);
             }
             
-            this.showToast('success', 'Network status refreshed (SSE maintained)');
+            this.showToast('success', 'Network status refreshed');
             
         } catch (error) {
             console.error('Error refreshing network status:', error);
