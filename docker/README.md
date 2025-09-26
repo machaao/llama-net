@@ -187,6 +187,9 @@ Once running, the following OpenAI-compatible endpoints are available:
 - `GET /info` - Node information and system details
 - `GET /nodes` - Discovered network nodes
 - `GET /dht/status` - DHT network status
+- `GET /hardware` - Hardware fingerprint information
+- `GET /hardware/validate` - Validate hardware consistency
+- `GET /debug/node-id` - Debug node ID across components
 
 ### Real-time Updates
 - `GET /events/network` - Server-Sent Events for real-time network updates

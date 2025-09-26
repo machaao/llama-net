@@ -104,7 +104,7 @@ class HardwareFingerprint:
         # Primary identifiers (most stable)
         if self.fingerprint_data.get('mac_addresses'):
             fingerprint_parts.extend(self.fingerprint_data['mac_addresses'])
-        
+
         # Secondary identifiers
         fingerprint_parts.extend([
             str(self.fingerprint_data.get('cpu_count', 0)),
@@ -127,7 +127,7 @@ class HardwareFingerprint:
         # Generate SHA-1 hash for Kademlia compatibility (160-bit)
         node_id = hashlib.sha1(fingerprint_string.encode('utf-8')).hexdigest()
         
-        logger.info(f"Generated hardware-based node ID: {node_id[:16]}... from {len(fingerprint_parts)} hardware components")
+        logger.info(f"using hardware-based node ID: {node_id}")
         return node_id
     
     def get_fingerprint_summary(self) -> Dict:
