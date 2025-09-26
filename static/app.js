@@ -281,10 +281,15 @@ class LlamaNetUI {
                 break;
                 
             case 'node_joined':
+            case 'node_updated':
                 if (data.node_info) {
-                    this.activeNodes.set(data.node_info.node_id, data.node_info);
-                    console.log(`🆕 Node joined: ${data.node_info.node_id.substring(0, 8)}... (${data.node_info.model})`);
-                    this.showToast('success', `🆕 Node joined: ${data.node_info.node_id.substring(0, 8)}... (${data.node_info.model})`);
+                    // Normalize the node data structure
+                    const normalizedNode = this.normalizeNodeData(data.node_info);
+                    this.activeNodes.set(normalizedNode.node_id, normalizedNode);
+                    console.log(`${data.type === 'node_joined' ? '🆕' : '🔄'} Node ${data.type.split('_')[1]}: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                    if (data.type === 'node_joined') {
+                        this.showToast('success', `🆕 Node joined: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                    }
                     this.updateNetworkDisplayRealTime();
                 }
                 break;
@@ -294,14 +299,6 @@ class LlamaNetUI {
                     this.activeNodes.delete(data.node_info.node_id);
                     console.log(`👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
                     this.showToast('warning', `👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
-                    this.updateNetworkDisplayRealTime();
-                }
-                break;
-                
-            case 'node_updated':
-                if (data.node_info) {
-                    this.activeNodes.set(data.node_info.node_id, data.node_info);
-                    console.log(`🔄 Node updated: ${data.node_info.node_id.substring(0, 8)}...`);
                     this.updateNetworkDisplayRealTime();
                 }
                 break;
@@ -326,6 +323,21 @@ class LlamaNetUI {
         }
     }
     
+    normalizeNodeData(nodeData) {
+        // Ensure consistent data structure
+        return {
+            node_id: nodeData.node_id || nodeData.id,
+            ip: nodeData.ip || 'unknown',
+            port: nodeData.port || nodeData.http_port || 8000,
+            model: nodeData.model || 'unknown',
+            load: nodeData.load || 0,
+            tps: nodeData.tps || 0,
+            uptime: nodeData.uptime || 0,
+            last_seen: nodeData.last_seen || Math.floor(Date.now() / 1000),
+            dht_port: nodeData.dht_port
+        };
+    }
+    
     updateNetworkDisplayRealTime() {
         const container = document.getElementById('network-status');
         if (!container) return;
@@ -345,15 +357,17 @@ class LlamaNetUI {
         const totalNodes = nodes.length;
         const avgLoad = nodes.length > 0 ? nodes.reduce((sum, n) => sum + n.load, 0) / nodes.length : 0;
         const totalTps = nodes.reduce((sum, n) => sum + n.tps, 0);
+        const onlineNodes = nodes.filter(n => (Date.now() / 1000) - n.last_seen < 60).length;
         
         // Update network stats
         this.nodeStats = {
             totalNodes,
+            onlineNodes,
             modelsAvailable: new Set(Object.keys(modelGroups)),
             networkHealth: this.calculateNetworkHealth(avgLoad, totalNodes)
         };
         
-        // Create new content with real-time data
+        // Create enhanced content with better metrics
         const newContent = `
             <div class="mb-3">
                 <h6>
@@ -363,17 +377,18 @@ class LlamaNetUI {
                     </span>
                 </h6>
                 <div class="small mb-2">
-                    <div>Total Nodes: <span class="metric-value">${totalNodes}</span></div>
-                    <div>Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
-                    <div>Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
-                    <div>Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span></div>
-                    <div>Total Capacity: <span class="metric-value">${totalTps.toFixed(1)} TPS</span></div>
+                    <div><i class="fas fa-network-wired"></i> Total Nodes: <span class="metric-value">${totalNodes}</span> (${onlineNodes} online)</div>
+                    <div><i class="fas fa-brain"></i> Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
+                    <div><i class="fas fa-heartbeat"></i> Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
+                    <div><i class="fas fa-chart-line"></i> Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span></div>
+                    <div><i class="fas fa-tachometer-alt"></i> Total Capacity: <span class="metric-value">${totalTps.toFixed(1)} TPS</span></div>
+                    <div class="text-muted mt-1"><i class="fas fa-clock"></i> Last update: ${new Date().toLocaleTimeString()}</div>
                 </div>
             </div>
             
             <div class="mb-3">
                 <h6><i class="fas fa-brain"></i> Available Models</h6>
-                ${this.renderModelGroupsRealTime(modelGroups)}
+                ${Object.keys(modelGroups).length > 0 ? this.renderModelGroupsRealTime(modelGroups) : '<div class="text-muted small">No models discovered on network</div>'}
             </div>
         `;
         
@@ -428,15 +443,23 @@ class LlamaNetUI {
             const statusClass = isRecent ? 'online' : 'warning';
             const lastSeenText = this.formatLastSeen(node.last_seen);
             
+            // Calculate uptime display
+            const uptimeText = node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown';
+            
             return `
                 <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
                     <div class="d-flex align-items-center">
                         <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
                         <div class="flex-grow-1">
-                            <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
-                            <div class="text-muted">${node.ip}:${node.port}</div>
-                            <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
-                            <div class="text-muted small">${lastSeenText}</div>
+                            <div class="fw-bold">
+                                ${node.node_id.substring(0, 8)}... 
+                                <i class="fas fa-info-circle text-primary ms-1 node-info-icon" title="Click for details"></i>
+                            </div>
+                            <div class="text-muted small">
+                                <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
+                                <div><i class="fas fa-chart-line"></i> Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
+                                <div><i class="fas fa-clock"></i> Up: ${uptimeText} | ${lastSeenText}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1013,9 +1036,10 @@ class LlamaNetUI {
     }
     
     async showNodeInfo(nodeId) {
-        // Show detailed information about a specific node
         const modal = new bootstrap.Modal(document.getElementById('nodeInfoModal'));
-        modal.show();
+        
+        // Update modal title
+        document.querySelector('#nodeInfoModal .modal-title').innerHTML = `<i class="fas fa-server"></i> Node Information: ${nodeId.substring(0, 12)}...`;
         
         // Show loading state
         document.getElementById('node-info-details').innerHTML = `
@@ -1025,24 +1049,96 @@ class LlamaNetUI {
             </div>
         `;
         
+        modal.show();
+        
         try {
+            // Try to get from real-time data first
+            const realtimeNode = this.activeNodes.get(nodeId);
+            
+            // Then get detailed info from API
             const response = await fetch(`${this.baseUrl}/node/${nodeId}`);
             
             if (response.ok) {
                 const nodeInfo = await response.json();
+                
+                // Merge real-time data with detailed info
+                if (realtimeNode) {
+                    nodeInfo.realtime_data = realtimeNode;
+                }
+                
                 document.getElementById('node-info-details').innerHTML = this.renderNodeDetails(nodeInfo);
             } else {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                // Fallback to real-time data if API fails
+                if (realtimeNode) {
+                    document.getElementById('node-info-details').innerHTML = this.renderNodeDetailsFromRealtime(realtimeNode);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
             }
         } catch (error) {
             console.error('Error loading node info:', error);
-            document.getElementById('node-info-details').innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    Failed to load node information: ${error.message}
-                </div>
-            `;
+            
+            // Try to show what we have from real-time data
+            const realtimeNode = this.activeNodes.get(nodeId);
+            if (realtimeNode) {
+                document.getElementById('node-info-details').innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Could not load complete node information. Showing available data from real-time updates.
+                    </div>
+                    ${this.renderNodeDetailsFromRealtime(realtimeNode)}
+                `;
+            } else {
+                document.getElementById('node-info-details').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Failed to load node information: ${error.message}
+                    </div>
+                `;
+            }
         }
+    }
+    
+    renderNodeDetailsFromRealtime(nodeData) {
+        const lastSeenText = new Date(nodeData.last_seen * 1000).toLocaleString();
+        const uptimeText = nodeData.uptime ? `${Math.floor(nodeData.uptime / 60)} minutes` : 'Unknown';
+        
+        return `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-server"></i> Node Information (Real-time)</h6>
+                    <div class="network-detail-item">
+                        <strong>Node ID:</strong> ${nodeData.node_id}<br>
+                        <strong>Address:</strong> ${nodeData.ip}:${nodeData.port}<br>
+                        <strong>Model:</strong> ${nodeData.model}<br>
+                        <strong>DHT Port:</strong> ${nodeData.dht_port || 'Unknown'}<br>
+                        <strong>Last Seen:</strong> ${lastSeenText}
+                    </div>
+                    
+                    <h6 class="mt-3"><i class="fas fa-chart-line"></i> Performance Metrics</h6>
+                    <div class="network-detail-item">
+                        <strong>Load:</strong> ${nodeData.load.toFixed(2)}<br>
+                        <strong>TPS:</strong> ${nodeData.tps.toFixed(1)}<br>
+                        <strong>Uptime:</strong> ${uptimeText}
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Real-time Data:</strong> This information is from live network updates. 
+                        Click refresh to get complete node details.
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="llamaNetUI.refreshNodeInfo('${nodeData.node_id}')">
+                        <i class="fas fa-sync-alt"></i> Get Complete Info
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    async refreshNodeInfo(nodeId) {
+        await this.showNodeInfo(nodeId);
     }
     
     renderNodeDetails(nodeInfo) {
@@ -2097,6 +2193,12 @@ function clearChatHistory() {
 function confirmClearHistory() {
     if (llamaNetUI) {
         llamaNetUI.clearChatHistory();
+    }
+}
+
+function refreshNodeInfo(nodeId) {
+    if (llamaNetUI) {
+        llamaNetUI.refreshNodeInfo(nodeId);
     }
 }
 
