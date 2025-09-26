@@ -39,8 +39,8 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/llamanet.git
-   cd llamanet
+   git clone https://github.com/machaao/llama-net.git
+   cd llama-net
    ```
 
 2. Install the requirements:
