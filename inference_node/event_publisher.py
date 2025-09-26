@@ -87,31 +87,35 @@ class EventBasedDHTPublisher:
         """Start the event-based publisher"""
         if self.running:
             return
-        
+
         # Validate node ID consistency before starting
         consistency_check = self._validate_node_id_consistency()
-        
+
         # If hardware changed, regenerate node ID
         if not consistency_check and self.hardware_fingerprint:
             try:
                 new_node_id = self.hardware_fingerprint.generate_node_id(self.config.port)
                 logger.warning(f"Hardware changed detected, updating node ID from {self.config.node_id[:16]}... to {new_node_id[:16]}...")
-                
+
                 # Update configuration
                 old_node_id = self.config.node_id
                 self.config.node_id = new_node_id
-                
+
                 # Store the new node ID
                 if hasattr(self.config, '_store_node_id'):
                     self.config._store_node_id(new_node_id)
-                
+
                 logger.info(f"Node ID updated due to hardware changes: {old_node_id[:8]}... → {new_node_id[:8]}...")
-                
+
             except Exception as e:
                 logger.error(f"Failed to update node ID after hardware change: {e}")
                 # Continue with existing node ID
-        
+
         self.running = True
+
+        # Initialize known nodes tracking for periodic detection
+        self._known_node_ids = set()
+        self._has_published_before = False
         
         # Use shared DHT service
         from common.dht_service import SharedDHTService
@@ -141,20 +145,10 @@ class EventBasedDHTPublisher:
         
         # Publish initial state
         await self._publish_node_info()
-        
-        # Broadcast initial node join event
-        try:
-            await self._broadcast_node_event("node_joined", {
-                'node_id': self.config.node_id,
-                'ip': get_host_ip(),
-                'port': self.config.port,
-                'model': self.config.model_name,
-                'dht_port': self.config.dht_port
-            })
-        except Exception as e:
-            logger.debug(f"Could not broadcast initial node join: {e}")
-        
-        logger.info(f"Event-based DHT publisher started with hardware-based node ID: {self.config.node_id[:16]}...")
+
+        # The initial publish will automatically broadcast node_joined event
+
+        logger.info(f"Event-based DHT publisher started with periodic new node detection: {self.config.node_id[:16]}...")
         
         # Log hardware fingerprint details for debugging
         if self.hardware_fingerprint:
@@ -208,34 +202,42 @@ class EventBasedDHTPublisher:
         logger.info("Event-based DHT publisher stopped")
     
     async def _monitor_changes(self):
-        """Enhanced monitoring with active departure detection"""
+        """Enhanced monitoring with periodic new node detection"""
         hardware_check_interval = 600  # Check hardware every 10 minutes
         departure_check_interval = 45  # Check for departures every 45 seconds
+        new_node_check_interval = 60   # Check for new nodes every 1 minute
+        
         last_hardware_check = 0
         last_departure_check = 0
-        
+        last_new_node_check = 0
+
         while self.running:
             try:
                 current_metrics = self.metrics_callback()
                 current_time = time.time()
-                
+
                 # Only check if metrics changed significantly (NO PERIODIC UPDATES)
                 should_update = self._should_update_metrics(current_metrics)
-                
+
                 # Hardware consistency check (less frequent)
                 if current_time - last_hardware_check > hardware_check_interval:
                     await self.handle_hardware_change()
                     last_hardware_check = current_time
-                
+
                 # Active departure detection
                 if current_time - last_departure_check > departure_check_interval:
                     await self._active_departure_detection()
                     last_departure_check = current_time
-                
+
+                # NEW: Periodic new node detection
+                if current_time - last_new_node_check > new_node_check_interval:
+                    await self._periodic_new_node_detection()
+                    last_new_node_check = current_time
+
                 # Only update on significant changes
                 if should_update:
                     await self._publish_node_info()
-                    
+
                     # Broadcast node update event
                     await self._broadcast_node_event("node_updated", {
                         'node_id': self.config.node_id,
@@ -245,17 +247,17 @@ class EventBasedDHTPublisher:
                         'metrics': current_metrics,
                         'change_reason': 'significant_metrics_change'
                     })
-                    
+
                     self.last_published_metrics = current_metrics.copy()
                     self.last_significant_change = current_time
                     logger.info(f"Published update due to significant metric change")
-                
+
                 # Monitor for node departures in DHT
                 await self._check_for_node_departures()
-                
-                # Much longer sleep - we're not polling, just checking for significant changes
-                await asyncio.sleep(30)  # Reduced from 5 to 30 seconds
-                
+
+                # Sleep for 30 seconds between checks
+                await asyncio.sleep(30)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -289,20 +291,23 @@ class EventBasedDHTPublisher:
         return False
     
     async def _publish_node_info(self):
-        """Publish current node info to DHT"""
+        """Publish current node info to DHT with node join detection"""
         try:
             # Get current metrics
             metrics = self.metrics_callback()
-            
+
+            # Check if this is the first time we're publishing (node join)
+            is_first_publish = not hasattr(self, '_has_published_before')
+
             # Discover all available IP addresses
             from common.network_utils import NetworkInterfaceDiscovery
-            
+
             available_ips = NetworkInterfaceDiscovery.get_advertisable_ips(
                 exclude_loopback=True,
                 exclude_link_local=True,
                 only_up_interfaces=True
             )
-            
+
             # Get primary IP
             if available_ips:
                 primary_ip = available_ips[0]
@@ -310,14 +315,14 @@ class EventBasedDHTPublisher:
                 from common.utils import get_host_ip
                 primary_ip = get_host_ip()
                 available_ips = [primary_ip]
-            
+
             # Classify IP types
             ip_types = {}
             interfaces = NetworkInterfaceDiscovery.discover_all_interfaces()
             for interface in interfaces:
                 if interface.ip in available_ips:
                     ip_types[interface.ip] = interface.classification
-            
+
             node_info = {
                 'node_id': self.config.node_id,
                 'ip': primary_ip,
@@ -333,22 +338,23 @@ class EventBasedDHTPublisher:
                 'multi_ip_enabled': True,
                 'hardware_based': True,  # Flag to indicate hardware-based node ID
                 'hardware_fingerprint_version': '1.0',  # Version for future compatibility
+                'is_first_publish': is_first_publish  # Flag for join detection
             }
-            
+
             # Add hardware fingerprint summary for debugging and validation
             if self.hardware_fingerprint:
                 node_info['hardware_summary'] = self.hardware_fingerprint.get_fingerprint_summary()
                 node_info['hardware_consistency'] = self.hardware_fingerprint.validate_consistency(
                     self.config.node_id, self.config.port
                 )
-            
+
             # Store under multiple keys for different discovery patterns
             keys = [
                 f"model:{self.config.model_name}",  # Find by model
                 f"node:{self.config.node_id}",      # Find specific node
                 f"hardware:{self._get_hardware_key()}"  # Find by hardware fingerprint
             ]
-            
+
             for key in keys:
                 try:
                     success = await self.kademlia_node.store(key, node_info)
@@ -358,16 +364,27 @@ class EventBasedDHTPublisher:
                         logger.warning(f"Failed to publish under key: {key}")
                 except Exception as e:
                     logger.error(f"Error publishing to key {key}: {e}")
-            
+
             # Update all_nodes registry
             await self._update_all_nodes_registry(node_info)
-        
-            # Broadcast node update via SSE only on significant changes
-            # if self._is_significant_update(node_info):
-            #     await self._broadcast_node_event("node_updated", node_info)
-        
-            # logger.debug(f"Published hardware-based node info: load={metrics['load']:.3f}, tps={metrics['tps']:.2f}")
-            
+
+            # EMIT NODE JOIN EVENT on first publish
+            if is_first_publish:
+                await self._broadcast_node_event("node_joined", {
+                    'node_id': self.config.node_id,
+                    'ip': primary_ip,
+                    'port': self.config.port,
+                    'model': self.config.model_name,
+                    'dht_port': self.config.dht_port,
+                    'available_ips': available_ips,
+                    'join_reason': 'initial_publish',
+                    'timestamp': time.time()
+                })
+                logger.info(f"🆕 Broadcasted node_joined event for initial publish: {self.config.node_id[:12]}...")
+                
+                # Mark that we've published before
+                self._has_published_before = True
+
         except Exception as e:
             logger.error(f"Error publishing node info: {e}")
 
@@ -675,7 +692,7 @@ class EventBasedDHTPublisher:
     async def _handle_node_departure(self, node_data: Dict[str, Any]):
         """Handle a detected node departure"""
         node_id = node_data['node_id']
-        
+
         # Remove from all_nodes registry
         try:
             existing_data = await self.kademlia_node.find_value("all_nodes")
@@ -686,7 +703,7 @@ class EventBasedDHTPublisher:
                 logger.info(f"Removed departed node {node_id[:8]}... from all_nodes registry")
         except Exception as e:
             logger.error(f"Error removing departed node from registry: {e}")
-        
+
         # Broadcast departure event
         await self._broadcast_node_event("node_left", {
             'node_id': node_id,
@@ -697,6 +714,86 @@ class EventBasedDHTPublisher:
             'detected_by': self.config.node_id,
             'last_seen': node_data.get('last_seen')
         })
+
+    async def _periodic_new_node_detection(self):
+        """Periodic check for new nodes that have joined the network"""
+        try:
+            # Get all published nodes from DHT
+            all_nodes_data = await self.kademlia_node.find_value("all_nodes")
+            if not all_nodes_data:
+                return
+
+            if not isinstance(all_nodes_data, list):
+                all_nodes_data = [all_nodes_data]
+
+            current_time = time.time()
+            new_nodes = []
+
+            # Track known nodes to detect new ones
+            if not hasattr(self, '_known_node_ids'):
+                self._known_node_ids = set()
+
+            for node_data in all_nodes_data:
+                if not isinstance(node_data, dict) or not node_data.get('node_id'):
+                    continue
+                    
+                node_id = node_data['node_id']
+
+                # Skip ourselves
+                if node_id == self.config.node_id:
+                    continue
+
+                # Check if this is a new node we haven't seen before
+                if node_id not in self._known_node_ids:
+                    # Verify the node is fresh (published within last 2 minutes)
+                    last_seen = node_data.get('last_seen', 0)
+                    if current_time - last_seen < 120:
+                        # Verify the node is actually reachable
+                        is_reachable = await self._verify_node_reachable(node_data)
+                        if is_reachable:
+                            new_nodes.append(node_data)
+                            self._known_node_ids.add(node_id)
+                            logger.info(f"🆕 Detected new node via periodic scan: {node_id[:8]}... (last seen: {current_time - last_seen:.0f}s ago)")
+
+            # Broadcast join events for newly detected nodes
+            for node_data in new_nodes:
+                await self._broadcast_node_event("node_joined", {
+                    'node_id': node_data['node_id'],
+                    'ip': node_data.get('ip'),
+                    'port': node_data.get('port'),
+                    'model': node_data.get('model'),
+                    'dht_port': node_data.get('dht_port'),
+                    'join_reason': 'periodic_detection',
+                    'detected_by': self.config.node_id,
+                    'last_seen': node_data.get('last_seen'),
+                    'timestamp': current_time
+                })
+                
+        except Exception as e:
+            logger.error(f"Error in periodic new node detection: {e}")
+
+    async def _verify_node_reachable(self, node_data: Dict[str, Any]) -> bool:
+        """Verify that a detected node is actually reachable"""
+        try:
+            import aiohttp
+            
+            ip = node_data.get('ip')
+            port = node_data.get('port')
+            
+            if not ip or not port:
+                return False
+            
+            # Quick health check with short timeout
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+                async with session.get(f"http://{ip}:{port}/health") as response:
+                    if response.status == 200:
+                        logger.debug(f"Node {node_data['node_id'][:8]}... is reachable")
+                        return True
+                        
+        except Exception as e:
+            logger.debug(f"Reachability check failed for {node_data['node_id'][:8]}...: {e}")
+        
+        return False
 
     async def force_update(self):
         """Force an immediate update of node info"""

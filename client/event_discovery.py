@@ -246,7 +246,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 await asyncio.sleep(10)  # Wait longer on errors
     
     async def _handle_routing_table_change(self):
-        """Handle changes in the DHT routing table with better logging"""
+        """Handle changes in the DHT routing table with enhanced new node detection"""
         try:
             # Get current contacts from routing table
             contacts = self.kademlia_node.routing_table.get_all_contacts()
@@ -258,7 +258,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             
             logger.info(f"📊 DHT routing table change: {len(contacts)} total contacts, {len(new_contact_ids)} new")
             
-            # Process new contacts
+            # Process new contacts with enhanced detection
             for contact in contacts:
                 if contact.node_id in new_contact_ids:
                     logger.info(f"🆕 New DHT contact detected: {contact.node_id[:8]}... at {contact.ip}")
@@ -267,7 +267,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             # Update known contacts
             self.known_node_ids.update(current_contact_ids)
             
-            # Emit network change event
+            # Emit network change event with enhanced metadata
             await self._emit_event(NodeEvent(
                 event_type=NodeEventType.NETWORK_CHANGED,
                 node_info=None,
@@ -275,7 +275,8 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 metadata={
                     "routing_table_size": len(contacts),
                     "new_contacts": len(new_contact_ids),
-                    "total_known_nodes": len(self.known_node_ids)
+                    "total_known_nodes": len(self.known_node_ids),
+                    "change_source": "routing_table_update"
                 }
             ))
             
