@@ -1,6 +1,4 @@
 import os
-os.environ['PYTHONWARNINGS'] = 'ignore:semaphore'
-
 import asyncio
 import time
 import uuid
