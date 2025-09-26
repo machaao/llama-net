@@ -380,8 +380,6 @@ class LlamaNetUI {
                     <div><i class="fas fa-network-wired"></i> Total Nodes: <span class="metric-value">${totalNodes}</span> (${onlineNodes} online)</div>
                     <div><i class="fas fa-brain"></i> Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
                     <div><i class="fas fa-heartbeat"></i> Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
-                    <div><i class="fas fa-chart-line"></i> Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span></div>
-                    <div><i class="fas fa-tachometer-alt"></i> Total Capacity: <span class="metric-value">${totalTps.toFixed(1)} TPS</span></div>
                     <div class="text-muted mt-1"><i class="fas fa-clock"></i> Last update: ${new Date().toLocaleTimeString()}</div>
                 </div>
             </div>
