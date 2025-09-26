@@ -264,25 +264,32 @@ class InferenceConfig:
             fingerprint = HardwareFingerprint()
             node_id = fingerprint.generate_node_id(port)
             
+            # Set source for debugging
+            self._node_id_source = 'hardware_based'
+            
             # Validate consistency if we have a stored ID
             stored_node_id = self._get_stored_node_id()
             if stored_node_id:
                 if fingerprint.validate_consistency(stored_node_id, port):
                     logger.info(f"Using consistent stored node ID: {stored_node_id[:16]}...")
+                    self._node_id_source = 'stored_hardware_based'
                     return stored_node_id
                 else:
                     logger.warning("Hardware fingerprint changed, generating new node ID")
                     # Store the new node ID
                     self._store_node_id(node_id)
+                    self._node_id_source = 'hardware_based_updated'
             else:
                 # First time, store the generated ID
                 self._store_node_id(node_id)
+                self._node_id_source = 'hardware_based_new'
             
             return node_id
             
         except Exception as e:
             logger.error(f"Failed to generate hardware-based node ID: {e}")
             # Fallback to legacy method
+            self._node_id_source = 'legacy_fallback'
             return self._generate_legacy_node_id(port)
     
     def _get_stored_node_id(self) -> Optional[str]:
@@ -317,6 +324,42 @@ class InferenceConfig:
         except Exception as e:
             logger.warning(f"Could not get hardware info: {e}")
             return {"error": str(e)}
+    
+    def _validate_node_id_format(self, node_id: str) -> bool:
+        """Validate that node_id is a valid hex string of correct length"""
+        try:
+            if not node_id or not isinstance(node_id, str):
+                return False
+            
+            # Should be a valid hex string (SHA-1 = 40 characters)
+            if len(node_id) != 40:
+                logger.warning(f"Node ID length is {len(node_id)}, expected 40 characters")
+                return False
+                
+            int(node_id, 16)  # Test if it's valid hex
+            return True
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Node ID validation failed: {e}")
+            return False
+
+    def _get_node_id_source(self) -> str:
+        """Get the source of the current node ID for debugging"""
+        return getattr(self, '_node_id_source', 'hardware_based')
+
+    def get_configuration_summary(self) -> Dict:
+        """Get a summary of the current configuration for debugging"""
+        return {
+            "node_id": self.node_id[:16] + "...",
+            "node_id_source": self._get_node_id_source(),
+            "model_name": self.model_name,
+            "model_path": self.model_path,
+            "host": self.host,
+            "port": self.port,
+            "dht_port": self.dht_port,
+            "bootstrap_nodes": self.bootstrap_nodes,
+            "heartbeat_interval": self.heartbeat_interval,
+            "hardware_based": True
+        }
         
     def __str__(self) -> str:
         return (

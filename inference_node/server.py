@@ -1382,6 +1382,83 @@ async def get_configuration():
         logger.error(f"Error getting configuration: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/debug/node-id")
+async def debug_node_id():
+    """Debug endpoint to show node ID information across all components"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    debug_info = {
+        "config_node_id": config.node_id,
+        "config_source": config._get_node_id_source() if hasattr(config, '_get_node_id_source') else 'unknown',
+        "dht_node_id": None,
+        "dht_service_status": {},
+        "hardware_validation": {},
+        "consistency_check": False,
+        "timestamp": time.time()
+    }
+    
+    # Get DHT node ID
+    if dht_publisher and dht_publisher.kademlia_node:
+        debug_info["dht_node_id"] = dht_publisher.kademlia_node.node_id
+        debug_info["consistency_check"] = debug_info["config_node_id"] == debug_info["dht_node_id"]
+    
+    # Get DHT service status
+    try:
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
+        debug_info["dht_service_status"] = dht_service.get_status()
+    except Exception as e:
+        debug_info["dht_service_status"] = {"error": str(e)}
+    
+    # Get hardware validation
+    try:
+        from common.hardware_fingerprint import HardwareFingerprint
+        fingerprint = HardwareFingerprint()
+        expected_node_id = fingerprint.generate_node_id(config.port)
+        
+        debug_info["hardware_validation"] = {
+            "expected_node_id": expected_node_id,
+            "matches_config": expected_node_id == config.node_id,
+            "fingerprint_summary": fingerprint.get_fingerprint_summary()
+        }
+    except Exception as e:
+        debug_info["hardware_validation"] = {"error": str(e)}
+    
+    return debug_info
+
+@app.post("/debug/fix-node-id")
+async def fix_node_id():
+    """Emergency endpoint to fix node ID mismatches"""
+    if not config or not dht_publisher:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    try:
+        from common.dht_service import SharedDHTService
+        dht_service = SharedDHTService()
+        
+        # Force correction using the config's hardware-based node ID
+        success = await dht_service.force_node_id_correction(config.node_id)
+        
+        if success:
+            # Validate the fix worked
+            is_consistent = dht_service.validate_node_id(config.node_id)
+            
+            return {
+                "success": True,
+                "message": "Node ID mismatch corrected",
+                "config_node_id": config.node_id,
+                "dht_node_id": dht_service.kademlia_node.node_id if dht_service.kademlia_node else None,
+                "is_consistent": is_consistent,
+                "timestamp": time.time()
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to correct node ID mismatch")
+            
+    except Exception as e:
+        logger.error(f"Error fixing node ID: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/hardware")
 async def hardware_info():
     """Get detailed hardware fingerprint information"""

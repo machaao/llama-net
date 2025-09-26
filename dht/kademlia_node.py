@@ -43,11 +43,22 @@ class KademliaNode:
     """Kademlia DHT Node implementation"""
     
     def __init__(self, node_id: str = None, port: int = 8001):
-        if node_id and not self._validate_node_id(node_id):
-            logger.warning(f"Invalid node_id format: {node_id}, generating new one")
-            node_id = None
+        # CRITICAL: Always use the provided node_id if it's valid (hardware-based)
+        if node_id:
+            if self._validate_node_id(node_id):
+                self.node_id = node_id
+                logger.info(f"✅ Using provided hardware-based node ID: {node_id[:16]}...")
+            else:
+                logger.error(f"❌ Invalid node_id format provided: {node_id}")
+                logger.warning("This should not happen with hardware-based node IDs")
+                # Don't fallback - this indicates a serious issue
+                raise ValueError(f"Invalid hardware-based node ID format: {node_id}")
+        else:
+            # Only generate random ID if no node_id provided (should not happen in normal operation)
+            logger.warning("No node_id provided to KademliaNode, generating random ID")
+            logger.warning("This indicates a configuration issue - hardware-based node ID should always be provided")
+            self.node_id = self._generate_node_id()
         
-        self.node_id = node_id or self._generate_node_id()
         self.port = port
         self.routing_table = RoutingTable(self.node_id)
         self.storage: Dict[str, Any] = {}
@@ -64,6 +75,9 @@ class KademliaNode:
         self.cleanup_interval = 90  # Increased from 30 to 90 seconds
         self.cleanup_task = None
         self.last_cleanup = 0
+        
+        # Log final node ID for verification
+        logger.debug(f"KademliaNode initialized with final node_id: {self.node_id[:16]}...")
         
     def _generate_node_id(self) -> str:
         """Generate a random 160-bit node ID"""
