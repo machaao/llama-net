@@ -25,7 +25,7 @@ class NodeSelector:
         # Use target_model if specified, otherwise fall back to model parameter
         model_filter = target_model or model
         
-        # Get nodes from DHT, filtered by specific model if requested
+        # Get nodes from event-based discovery (real-time, no polling)
         nodes = await self.dht_discovery.get_nodes(model=model_filter)
         
         if not nodes:
