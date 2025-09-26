@@ -324,10 +324,10 @@ class EventBasedDHTPublisher:
             await self._update_all_nodes_registry(node_info)
         
             # Broadcast node update via SSE only on significant changes
-            if self._is_significant_update(node_info):
-                await self._broadcast_node_event("node_updated", node_info)
+            # if self._is_significant_update(node_info):
+            #     await self._broadcast_node_event("node_updated", node_info)
         
-            logger.debug(f"Published hardware-based node info: load={metrics['load']:.3f}, tps={metrics['tps']:.2f}")
+            # logger.debug(f"Published hardware-based node info: load={metrics['load']:.3f}, tps={metrics['tps']:.2f}")
             
         except Exception as e:
             logger.error(f"Error publishing node info: {e}")

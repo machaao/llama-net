@@ -91,18 +91,27 @@ body {
     border-radius: 50%;
     display: inline-block;
     margin-right: 0.5rem;
+    transition: all 0.3s ease;
 }
 
 .node-status.online {
     background-color: var(--success-color);
-}
-
-.node-status.offline {
-    background-color: var(--danger-color);
+    box-shadow: 0 0 4px rgba(25, 135, 84, 0.4);
 }
 
 .node-status.warning {
     background-color: var(--warning-color);
+    animation: warningPulse 2s infinite;
+}
+
+.node-status.offline {
+    background-color: var(--danger-color);
+    opacity: 0.7;
+}
+
+@keyframes warningPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
 }
 
 .loading-spinner {
@@ -622,6 +631,10 @@ pre {
     animation: livePulse 2s infinite;
 }
 
+.live-pulse {
+    animation: livePulse 2s infinite;
+}
+
 @keyframes livePulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
@@ -656,22 +669,31 @@ pre {
 }
 
 /* Status indicators */
-.node-status.online {
-    animation: onlinePulse 2s infinite;
+/* Connection status indicators */
+.connection-status {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
 }
 
-@keyframes onlinePulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
+/* SSE status specific styles */
+#sse-status {
+    font-weight: 500;
+    transition: all 0.3s ease;
 }
 
-.node-status.warning {
-    animation: warningBlink 1s infinite;
+#sse-status.text-success {
+    color: var(--success-color) !important;
 }
 
-@keyframes warningBlink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0.5; }
+#sse-status.text-warning {
+    color: var(--warning-color) !important;
+}
+
+#sse-status.text-danger {
+    color: var(--danger-color) !important;
 }
 
 /* Update indicators */
