@@ -1363,6 +1363,25 @@ async def debug_routing():
     
     return debug_info
 
+@app.get("/config")
+async def get_configuration():
+    """Get current node configuration including hardware fingerprint details"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    try:
+        config_summary = config.get_configuration_summary()
+        hardware_info = config.get_hardware_info()
+        
+        return {
+            "configuration": config_summary,
+            "hardware_fingerprint": hardware_info,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error getting configuration: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/hardware")
 async def hardware_info():
     """Get detailed hardware fingerprint information"""
