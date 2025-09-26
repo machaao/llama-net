@@ -94,9 +94,11 @@ body {
     transition: all 0.3s ease;
 }
 
+/* Event-driven status indicators */
 .node-status.online {
     background-color: var(--success-color);
     box-shadow: 0 0 4px rgba(25, 135, 84, 0.4);
+    animation: onlinePulse 2s infinite;
 }
 
 .node-status.warning {
@@ -106,12 +108,40 @@ body {
 
 .node-status.offline {
     background-color: var(--danger-color);
-    opacity: 0.7;
+    opacity: 0.8;
+    animation: offlineFade 1s ease-in-out;
+}
+
+.node-status.unknown {
+    background-color: var(--secondary-color);
+    opacity: 0.6;
+}
+
+@keyframes onlinePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
 }
 
 @keyframes warningPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+@keyframes offlineFade {
+    0% { opacity: 1; background-color: var(--warning-color); }
+    100% { opacity: 0.8; background-color: var(--danger-color); }
+}
+
+/* Event-driven node updates */
+.node-item.event-updated {
+    animation: eventUpdate 0.5s ease-in-out;
+    border-left: 3px solid var(--info-color);
+}
+
+@keyframes eventUpdate {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(13, 202, 240, 0.1); }
+    100% { background-color: transparent; }
 }
 
 .loading-spinner {

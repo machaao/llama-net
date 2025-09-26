@@ -210,9 +210,23 @@ class EventBasedDHTPublisher:
                 # Only update on significant changes
                 if should_update:
                     await self._publish_node_info()
+                    
+                    # Broadcast node update event
+                    await self._broadcast_node_event("node_updated", {
+                        'node_id': self.config.node_id,
+                        'ip': get_host_ip(),
+                        'port': self.config.port,
+                        'model': self.config.model_name,
+                        'metrics': current_metrics,
+                        'change_reason': 'significant_metrics_change'
+                    })
+                    
                     self.last_published_metrics = current_metrics.copy()
                     self.last_significant_change = current_time
                     logger.info(f"Published update due to significant metric change")
+                
+                # Monitor for node departures in DHT
+                await self._check_for_node_departures()
                 
                 # Much longer sleep - we're not polling, just checking for significant changes
                 await asyncio.sleep(30)  # Reduced from 5 to 30 seconds
@@ -333,26 +347,73 @@ class EventBasedDHTPublisher:
             logger.error(f"Error publishing node info: {e}")
 
     async def _broadcast_node_event(self, event_type: str, node_info: Dict[str, Any]):
-        """Broadcast node events via SSE (if available) - event-driven only"""
+        """Broadcast node events via SSE with enhanced metadata"""
         try:
             # Import here to avoid circular imports
             from inference_node.server import sse_handler
             
             if sse_handler and hasattr(sse_handler, 'broadcast_event'):
-                # Add event-driven metadata
+                # Enhanced event data
                 event_data = {
                     'node_info': node_info,
                     'timestamp': time.time(),
                     'event_driven': True,
-                    'source': 'dht_publisher'
+                    'source': 'dht_publisher',
+                    'event_id': f"{event_type}_{int(time.time() * 1000)}",
+                    'network_size': len(getattr(self, '_last_known_nodes', set()))
                 }
                 
                 await sse_handler.broadcast_event(event_type, event_data)
-                logger.info(f"✅ Broadcasted event-driven {event_type} via SSE: {node_info.get('node_id', 'unknown')[:12]}...")
+                logger.info(f"✅ Broadcasted {event_type} event: {node_info.get('node_id', 'unknown')[:12]}...")
             else:
                 logger.debug(f"SSE handler not available for {event_type}")
         except Exception as e:
             logger.debug(f"SSE broadcast not available for {event_type}: {e}")
+    
+    async def _check_for_node_departures(self):
+        """Check DHT for nodes that have left the network"""
+        try:
+            if not self.kademlia_node:
+                return
+            
+            # Get current DHT contacts
+            current_contacts = set()
+            if self.kademlia_node.routing_table:
+                contacts = self.kademlia_node.routing_table.get_all_contacts()
+                current_contacts = {contact.node_id for contact in contacts}
+            
+            # Get published nodes
+            published_nodes = set()
+            try:
+                all_nodes_data = await self.kademlia_node.find_value("all_nodes")
+                if all_nodes_data:
+                    if isinstance(all_nodes_data, list):
+                        published_nodes = {node.get('node_id') for node in all_nodes_data if isinstance(node, dict) and node.get('node_id')}
+                    elif isinstance(all_nodes_data, dict) and all_nodes_data.get('node_id'):
+                        published_nodes = {all_nodes_data['node_id']}
+            except Exception as e:
+                logger.debug(f"Could not check published nodes: {e}")
+            
+            # Find nodes that were published but are no longer in DHT
+            if hasattr(self, '_last_known_nodes'):
+                departed_nodes = self._last_known_nodes - current_contacts - published_nodes
+                
+                for departed_node_id in departed_nodes:
+                    if departed_node_id != self.config.node_id:  # Don't report ourselves as departed
+                        logger.info(f"Detected node departure: {departed_node_id[:8]}...")
+                        
+                        # Broadcast node left event
+                        await self._broadcast_node_event("node_left", {
+                            'node_id': departed_node_id,
+                            'reason': 'dht_removal',
+                            'detected_by': self.config.node_id
+                        })
+            
+            # Update known nodes
+            self._last_known_nodes = current_contacts | published_nodes
+            
+        except Exception as e:
+            logger.debug(f"Error checking for node departures: {e}")
     
     def _is_significant_update(self, node_info: Dict[str, Any]) -> bool:
         """Check if this update represents a significant change"""

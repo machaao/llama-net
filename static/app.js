@@ -107,6 +107,11 @@ class LlamaNetUI {
             networkHealth: 'unknown'
         };
         
+        // Event-driven node status tracking (not time-based)
+        this.nodeStatuses = new Map(); // node_id -> 'online'|'offline'|'unknown'
+        this.nodeLastEvent = new Map(); // node_id -> timestamp of last event
+        this.nodeEventTypes = new Map(); // node_id -> last event type
+        
         // SSE connection info
         this.connectionInfo = null;
         this.lastUpdateTime = 0;
@@ -273,6 +278,11 @@ class LlamaNetUI {
                     const normalizedNode = this.normalizeNodeData(data.node_info);
                     this.activeNodes.set(normalizedNode.node_id, normalizedNode);
                     
+                    // Set status based on event (not time)
+                    this.nodeStatuses.set(normalizedNode.node_id, 'online');
+                    this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
+                    this.nodeEventTypes.set(normalizedNode.node_id, data.type);
+                    
                     const eventIcon = data.type === 'node_joined' ? '🆕' : '🔄';
                     const eventAction = data.type.split('_')[1];
                     
@@ -288,9 +298,25 @@ class LlamaNetUI {
                 
             case 'node_left':
                 if (data.node_info) {
-                    this.activeNodes.delete(data.node_info.node_id);
-                    console.log(`👋 Node left (SSE): ${data.node_info.node_id.substring(0, 8)}...`);
-                    this.showToast('warning', `👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
+                    const nodeId = data.node_info.node_id;
+                    
+                    // Mark as offline via event (not time)
+                    this.nodeStatuses.set(nodeId, 'offline');
+                    this.nodeLastEvent.set(nodeId, Date.now());
+                    this.nodeEventTypes.set(nodeId, 'node_left');
+                    
+                    // Keep node in activeNodes for a short time to show "offline" status
+                    // Remove after 30 seconds
+                    setTimeout(() => {
+                        this.activeNodes.delete(nodeId);
+                        this.nodeStatuses.delete(nodeId);
+                        this.nodeLastEvent.delete(nodeId);
+                        this.nodeEventTypes.delete(nodeId);
+                        this.updateNetworkDisplayRealTime();
+                    }, 30000);
+                    
+                    console.log(`👋 Node left (SSE): ${nodeId.substring(0, 8)}...`);
+                    this.showToast('warning', `👋 Node left: ${nodeId.substring(0, 8)}...`);
                     this.updateNetworkDisplayRealTime();
                 }
                 break;
@@ -436,47 +462,74 @@ class LlamaNetUI {
     
     renderModelNodesRealTime(nodes) {
         return nodes.map(node => {
-            const currentTime = Date.now() / 1000;
-            const timeSinceLastSeen = currentTime - node.last_seen;
+            // Use event-driven status instead of time-based calculation
+            const eventStatus = this.nodeStatuses.get(node.node_id) || 'unknown';
+            const lastEventTime = this.nodeLastEvent.get(node.node_id) || 0;
+            const lastEventType = this.nodeEventTypes.get(node.node_id) || '';
             
-            let statusClass = 'offline';
-            let statusTitle = 'Offline';
+            let statusClass, statusTitle;
             
-            if (timeSinceLastSeen < 30) {
-                statusClass = 'online';
-                statusTitle = 'Online (active)';
-            } else if (timeSinceLastSeen < 60) {
-                statusClass = 'online';
-                statusTitle = 'Online';
-            } else if (timeSinceLastSeen < 120) {
-                statusClass = 'warning';
-                statusTitle = 'Stale (may be offline)';
-            } else {
-                statusClass = 'offline';
-                statusTitle = 'Offline';
+            switch (eventStatus) {
+                case 'online':
+                    statusClass = 'online';
+                    statusTitle = lastEventType === 'node_joined' ? 'Online (joined)' : 'Online (active)';
+                    break;
+                case 'offline':
+                    statusClass = 'offline';
+                    statusTitle = 'Offline (left network)';
+                    break;
+                case 'unknown':
+                default:
+                    // Fallback for nodes discovered before events started
+                    const timeSinceLastSeen = (Date.now() / 1000) - node.last_seen;
+                    if (timeSinceLastSeen < 60) {
+                        statusClass = 'online';
+                        statusTitle = 'Online (discovered)';
+                        // Set status for future updates
+                        this.nodeStatuses.set(node.node_id, 'online');
+                        this.nodeLastEvent.set(node.node_id, Date.now());
+                    } else {
+                        statusClass = 'warning';
+                        statusTitle = 'Status unknown';
+                    }
+                    break;
             }
             
             const lastSeenText = this.formatLastSeen(node.last_seen);
             const uptimeText = node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown';
+            const eventAge = lastEventTime ? this.formatEventAge(lastEventTime) : '';
             
             return `
-                <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
+                <div class="node-item small ms-2 clickable-node event-updated" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
                     <div class="d-flex align-items-center">
-                        <span class="node-status ${statusClass}" title="${statusTitle} - Last seen: ${lastSeenText}"></span>
+                        <span class="node-status ${statusClass}" title="${statusTitle}${eventAge ? ` - Event: ${eventAge}` : ''}"></span>
                         <div class="flex-grow-1">
                             <div class="fw-bold">
                                 ${node.node_id.substring(0, 8)}... 
                                 <i class="fas fa-info-circle text-primary ms-1 node-info-icon" title="Click for details"></i>
+                                ${eventStatus === 'offline' ? '<i class="fas fa-times-circle text-danger ms-1" title="Node left network"></i>' : ''}
+                                ${lastEventType === 'node_joined' ? '<i class="fas fa-plus-circle text-success ms-1" title="Recently joined"></i>' : ''}
                             </div>
                             <div class="text-muted small">
                                 <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
                                 <div><i class="fas fa-clock"></i> Up: ${uptimeText} | ${lastSeenText}</div>
+                                ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
                             </div>
                         </div>
                     </div>
                 </div>
             `;
         }).join('');
+    }
+    
+    formatEventAge(eventTime) {
+        const now = Date.now();
+        const diff = (now - eventTime) / 1000;
+        
+        if (diff < 5) return 'just now';
+        if (diff < 60) return `${Math.floor(diff)}s ago`;
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        return `${Math.floor(diff / 3600)}h ago`;
     }
     
     calculateNetworkHealth(avgLoad, nodeCount) {
