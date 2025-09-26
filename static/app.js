@@ -389,7 +389,10 @@ class LlamaNetUI {
         const totalNodes = nodes.length;
         const avgLoad = nodes.length > 0 ? nodes.reduce((sum, n) => sum + n.load, 0) / nodes.length : 0;
         const totalTps = nodes.reduce((sum, n) => sum + n.tps, 0);
-        const onlineNodes = nodes.filter(n => (Date.now() / 1000) - n.last_seen < 60).length;
+        const onlineNodes = nodes.filter(n => {
+            const eventStatus = this.nodeStatuses.get(n.node_id);
+            return eventStatus === 'online' || (Date.now() / 1000) - n.last_seen < 60;
+        }).length;
         
         // Update network stats
         this.nodeStats = {
@@ -399,20 +402,25 @@ class LlamaNetUI {
             networkHealth: this.calculateNetworkHealth(avgLoad, totalNodes)
         };
         
-        // Create enhanced content with better metrics
+        // Create enhanced content with refresh timestamp
+        const refreshTime = new Date().toLocaleTimeString();
         const newContent = `
             <div class="mb-3">
                 <h6>
                     <i class="fas fa-server"></i> Network Status
-                    <span class="live-indicator ms-2" title="Real-time updates">
-                        <i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i>
+                    <span class="live-indicator ms-2" title="Real-time updates via SSE">
+                        <i class="fas fa-circle text-success live-pulse" style="font-size: 0.5rem;"></i>
                     </span>
+                    <small class="text-muted ms-2" id="sse-status">Live</small>
                 </h6>
                 <div class="small mb-2">
                     <div><i class="fas fa-network-wired"></i> Total Nodes: <span class="metric-value">${totalNodes}</span> (${onlineNodes} online)</div>
                     <div><i class="fas fa-brain"></i> Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
-                    <div><i class="fas fa-heartbeat"></i> Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
-                    <div class="text-muted mt-1"><i class="fas fa-clock"></i> Last update: ${new Date().toLocaleTimeString()}</div>
+                    <div><i class="fas fa-heartbeat"></i> Network Health: <span class="network-health-badge">${this.getHealthBadge(this.nodeStats.networkHealth)}</span></div>
+                    <div class="text-muted mt-1">
+                        <i class="fas fa-clock"></i> Last refresh: ${refreshTime}
+                        ${this.isConnected ? '<i class="fas fa-broadcast-tower ms-2 text-success" title="Real-time updates active"></i>' : ''}
+                    </div>
                 </div>
             </div>
             
@@ -422,12 +430,28 @@ class LlamaNetUI {
             </div>
         `;
         
-        // Smooth update
-        container.style.opacity = '0.7';
+        // Smooth update with maintained selection state
+        const selectedModel = document.querySelector('.model-group.selected-model')?.dataset.model;
+        
+        container.style.opacity = '0.9';
         setTimeout(() => {
             container.innerHTML = newContent;
             container.style.opacity = '1';
-        }, 150);
+            
+            // Restore selected model state
+            if (selectedModel) {
+                const selectedGroup = document.querySelector(`[data-model="${selectedModel}"]`);
+                if (selectedGroup) {
+                    selectedGroup.classList.add('selected-model');
+                }
+            }
+            
+            // Add subtle refresh animation
+            container.style.transform = 'scale(1.01)';
+            setTimeout(() => {
+                container.style.transform = 'scale(1)';
+            }, 200);
+        }, 100);
     }
     
     renderModelGroupsRealTime(modelGroups) {
@@ -632,14 +656,49 @@ class LlamaNetUI {
     }
     
     async refreshNetworkStatus() {
-        // Manual refresh - no automatic polling
+        // Manual refresh - maintain SSE-based UX
         try {
             this.showUpdateIndicator(true);
-            await this.loadInitialNetworkStatus();
-            this.showToast('success', 'Network status refreshed');
+            
+            // Instead of loading initial status, just refresh the current SSE-based display
+            // and optionally fetch additional data for validation
+            
+            // Get current network stats for validation (don't overwrite display)
+            const [dhtResponse, modelsResponse] = await Promise.all([
+                fetch(`${this.baseUrl}/dht/status`).catch(() => null),
+                fetch(`${this.baseUrl}/v1/models/network`).catch(() => null)
+            ]);
+            
+            // Validate SSE connection and data freshness
+            if (!this.isConnected) {
+                console.log('🔄 SSE disconnected during refresh, reconnecting...');
+                this.startSSENetworkMonitoring();
+            }
+            
+            // Force a fresh update of the current SSE-based display
+            this.updateNetworkDisplayRealTime();
+            
+            // Show validation info if available
+            if (dhtResponse && dhtResponse.ok && modelsResponse && modelsResponse.ok) {
+                const dhtData = await dhtResponse.json();
+                const modelsData = await modelsResponse.json();
+                
+                // Update stats for validation but maintain SSE-based node list
+                this.validateNetworkStats(dhtData, modelsData);
+            }
+            
+            this.showToast('success', 'Network status refreshed (SSE maintained)');
+            
         } catch (error) {
             console.error('Error refreshing network status:', error);
-            this.showToast('error', 'Failed to refresh network status');
+            
+            // On error, try to reconnect SSE
+            if (!this.isConnected) {
+                console.log('🔄 Attempting SSE reconnection due to refresh error...');
+                this.startSSENetworkMonitoring();
+            }
+            
+            this.showToast('error', 'Refresh failed - SSE connection maintained');
         } finally {
             this.showUpdateIndicator(false);
         }
@@ -2007,12 +2066,25 @@ class LlamaNetUI {
         const indicator = document.querySelector('.live-indicator');
         if (indicator) {
             if (show) {
-                indicator.innerHTML = '<i class="fas fa-sync-alt fa-spin text-primary" style="font-size: 0.5rem;" title="Processing update..."></i>';
+                indicator.innerHTML = '<i class="fas fa-sync-alt fa-spin text-primary" style="font-size: 0.5rem;" title="Refreshing..."></i>';
             } else {
+                // Restore SSE status indicator
                 const statusIcon = this.isConnected ? 
-                    '<i class="fas fa-circle text-success" style="font-size: 0.5rem;" title="SSE connected"></i>' :
-                    '<i class="fas fa-circle text-warning" style="font-size: 0.5rem;" title="SSE disconnected"></i>';
+                    '<i class="fas fa-circle text-success live-pulse" style="font-size: 0.5rem;" title="Real-time updates active"></i>' :
+                    '<i class="fas fa-circle text-warning" style="font-size: 0.5rem;" title="Connecting..."></i>';
                 indicator.innerHTML = statusIcon;
+            }
+        }
+        
+        // Also update refresh button state
+        const refreshBtn = document.querySelector('button[onclick="refreshNetworkStatus()"]');
+        if (refreshBtn) {
+            if (show) {
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
+            } else {
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
             }
         }
     }
@@ -2079,6 +2151,44 @@ class LlamaNetUI {
     }
     
     // Update cleanup method to only handle SSE (no polling cleanup)
+    validateNetworkStats(dhtData, modelsData) {
+        // Validate current SSE data against fresh API data without disrupting UX
+        const sseNodeCount = this.activeNodes.size;
+        const apiNodeCount = modelsData.total_nodes || 0;
+        
+        // Log validation results
+        console.log(`📊 Network validation: SSE nodes: ${sseNodeCount}, API nodes: ${apiNodeCount}`);
+        
+        // If there's a significant discrepancy, log it but don't disrupt UX
+        if (Math.abs(sseNodeCount - apiNodeCount) > 2) {
+            console.warn(`⚠️ Node count discrepancy detected: SSE=${sseNodeCount}, API=${apiNodeCount}`);
+            
+            // Optionally show a subtle warning without disrupting the display
+            if (sseNodeCount === 0 && apiNodeCount > 0) {
+                this.showToast('warning', 'SSE may be missing some nodes - data will sync automatically');
+            }
+        }
+        
+        // Update network health indicator based on fresh data
+        if (dhtData.running !== undefined) {
+            const healthStatus = this.calculateNetworkHealth(
+                modelsData.total_nodes > 0 ? 0.5 : 1.0, // Rough estimate
+                modelsData.total_nodes || 0
+            );
+            
+            // Update only the health badge without touching node list
+            this.updateHealthBadgeOnly(healthStatus);
+        }
+    }
+    
+    updateHealthBadgeOnly(networkHealth) {
+        // Update only the health badge without disrupting the node list
+        const healthBadges = document.querySelectorAll('.network-health-badge');
+        healthBadges.forEach(badge => {
+            badge.outerHTML = this.getHealthBadge(networkHealth);
+        });
+    }
+    
     cleanup() {
         this.stopSSENetworkMonitoring();
         
