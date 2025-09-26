@@ -14,7 +14,8 @@ setup(
         "pynvml>=11.4.1",
         "kademlia>=2.2.2,<3.0.0",
         "aiohttp>=3.8.0,<4.0.0",
-        "p2pd>=0.1.0,<1.0.0"
+        "p2pd",
+        "ipaddress>=1.0.23"
     ],
     author="LlamaNet Team",
     author_email="example@example.com",
