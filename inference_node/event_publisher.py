@@ -162,17 +162,28 @@ class EventBasedDHTPublisher:
             logger.info(f"Hardware fingerprint: {summary}")
     
     async def stop(self):
-        """Stop the event-based publisher"""
-        # Broadcast node leave event before stopping
-        try:
-            await self._broadcast_node_event("node_left", {
-                'node_id': self.config.node_id,
-                'ip': get_host_ip(),
-                'port': self.config.port,
-                'model': self.config.model_name
-            })
-        except Exception as e:
-            logger.debug(f"Could not broadcast node leave: {e}")
+        """Stop the event-based publisher with enhanced departure broadcasting"""
+        # Broadcast node leave event with retry mechanism
+        departure_attempts = 3
+        for attempt in range(departure_attempts):
+            try:
+                await self._broadcast_node_event("node_left", {
+                    'node_id': self.config.node_id,
+                    'ip': get_host_ip(),
+                    'port': self.config.port,
+                    'model': self.config.model_name,
+                    'reason': 'graceful_shutdown',
+                    'shutdown_attempt': attempt + 1
+                })
+                
+                # Give time for the event to propagate
+                await asyncio.sleep(1)
+                break
+                
+            except Exception as e:
+                logger.debug(f"Departure broadcast attempt {attempt + 1} failed: {e}")
+                if attempt < departure_attempts - 1:
+                    await asyncio.sleep(0.5)
         
         self.running = False
         
@@ -183,16 +194,25 @@ class EventBasedDHTPublisher:
             except asyncio.CancelledError:
                 pass
         
-        # Remove our node from DHT
-        await self._unpublish_node_info()
+        # Remove our node from DHT with retry
+        for attempt in range(2):
+            try:
+                await self._unpublish_node_info()
+                break
+            except Exception as e:
+                logger.error(f"Error unpublishing node info (attempt {attempt + 1}): {e}")
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
         
         self.kademlia_node = None
         logger.info("Event-based DHT publisher stopped")
     
     async def _monitor_changes(self):
-        """Monitor for SIGNIFICANT changes only - pure event-driven"""
-        hardware_check_interval = 600  # Check hardware every 10 minutes (reduced frequency)
+        """Enhanced monitoring with active departure detection"""
+        hardware_check_interval = 600  # Check hardware every 10 minutes
+        departure_check_interval = 45  # Check for departures every 45 seconds
         last_hardware_check = 0
+        last_departure_check = 0
         
         while self.running:
             try:
@@ -206,6 +226,11 @@ class EventBasedDHTPublisher:
                 if current_time - last_hardware_check > hardware_check_interval:
                     await self.handle_hardware_change()
                     last_hardware_check = current_time
+                
+                # Active departure detection
+                if current_time - last_departure_check > departure_check_interval:
+                    await self._active_departure_detection()
+                    last_departure_check = current_time
                 
                 # Only update on significant changes
                 if should_update:
@@ -584,6 +609,95 @@ class EventBasedDHTPublisher:
             logger.error(f"Error during hardware revalidation: {e}")
             return False
     
+    async def _active_departure_detection(self):
+        """Actively detect departed nodes by health checking published nodes"""
+        try:
+            # Get all published nodes
+            all_nodes_data = await self.kademlia_node.find_value("all_nodes")
+            if not all_nodes_data:
+                return
+            
+            if not isinstance(all_nodes_data, list):
+                all_nodes_data = [all_nodes_data]
+            
+            current_time = time.time()
+            departed_nodes = []
+            
+            for node_data in all_nodes_data:
+                if not isinstance(node_data, dict) or not node_data.get('node_id'):
+                    continue
+                    
+                node_id = node_data['node_id']
+                
+                # Skip ourselves
+                if node_id == self.config.node_id:
+                    continue
+                
+                # Check if node is stale (no updates for 2 minutes)
+                last_seen = node_data.get('last_seen', 0)
+                if current_time - last_seen > 120:
+                    # Verify the node is actually down
+                    is_down = await self._verify_node_down(node_data)
+                    if is_down:
+                        departed_nodes.append(node_data)
+                        logger.info(f"Detected departed node: {node_id[:8]}... (last seen: {current_time - last_seen:.0f}s ago)")
+            
+            # Broadcast departure events and clean up
+            for node_data in departed_nodes:
+                await self._handle_node_departure(node_data)
+                
+        except Exception as e:
+            logger.error(f"Error in active departure detection: {e}")
+
+    async def _verify_node_down(self, node_data: Dict[str, Any]) -> bool:
+        """Verify that a node is actually down by attempting to contact it"""
+        try:
+            import aiohttp
+            
+            ip = node_data.get('ip')
+            port = node_data.get('port')
+            
+            if not ip or not port:
+                return True  # Consider down if no contact info
+            
+            # Quick health check with short timeout
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                async with session.get(f"http://{ip}:{port}/health") as response:
+                    if response.status == 200:
+                        logger.debug(f"Node {node_data['node_id'][:8]}... is actually still alive")
+                        return False  # Node is alive
+                        
+        except Exception as e:
+            logger.debug(f"Health check failed for {node_data['node_id'][:8]}...: {e}")
+        
+        return True  # Consider down if health check fails
+
+    async def _handle_node_departure(self, node_data: Dict[str, Any]):
+        """Handle a detected node departure"""
+        node_id = node_data['node_id']
+        
+        # Remove from all_nodes registry
+        try:
+            existing_data = await self.kademlia_node.find_value("all_nodes")
+            if existing_data and isinstance(existing_data, list):
+                updated_data = [node for node in existing_data 
+                               if node.get('node_id') != node_id]
+                await self.kademlia_node.store("all_nodes", updated_data)
+                logger.info(f"Removed departed node {node_id[:8]}... from all_nodes registry")
+        except Exception as e:
+            logger.error(f"Error removing departed node from registry: {e}")
+        
+        # Broadcast departure event
+        await self._broadcast_node_event("node_left", {
+            'node_id': node_id,
+            'ip': node_data.get('ip'),
+            'port': node_data.get('port'),
+            'model': node_data.get('model'),
+            'reason': 'health_check_failed',
+            'detected_by': self.config.node_id,
+            'last_seen': node_data.get('last_seen')
+        })
+
     async def force_update(self):
         """Force an immediate update of node info"""
         if self.running:

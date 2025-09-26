@@ -101,10 +101,23 @@ class DiscoverySSEBridge(NodeEventListener):
 REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
 async def cleanup_services():
-    """Clean up all services in reverse order"""
+    """Clean up all services with proper departure notification"""
     global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, discovery_bridge
     
     logger.info("Shutting down services...")
+    
+    # Send departure notification FIRST while services are still running
+    if dht_publisher and sse_handler:
+        try:
+            await dht_publisher._broadcast_node_event("node_left", {
+                'node_id': config.node_id if config else 'unknown',
+                'reason': 'server_shutdown',
+                'timestamp': time.time()
+            })
+            # Give time for event to propagate
+            await asyncio.sleep(1)
+        except Exception as e:
+            logger.error(f"Error broadcasting shutdown event: {e}")
     
     # Stop services in reverse order
     if heartbeat_manager:

@@ -213,11 +213,15 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 logger.debug(f"🔄 Node updated: {node_id[:12]}...")
     
     async def _monitor_dht_changes(self):
-        """Monitor DHT for real-time changes"""
+        """Monitor DHT for real-time changes with active health checking"""
         last_routing_table_size = 0
+        health_check_interval = 60  # Check node health every minute
+        last_health_check = 0
         
         while self.running:
             try:
+                current_time = time.time()
+                
                 # Check for routing table changes
                 if self.kademlia_node and self.kademlia_node.routing_table:
                     current_size = len(self.kademlia_node.routing_table.get_all_contacts())
@@ -226,6 +230,11 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                         logger.debug(f"DHT routing table changed: {last_routing_table_size} -> {current_size}")
                         await self._handle_routing_table_change()
                         last_routing_table_size = current_size
+                
+                # Active health checking of known nodes
+                if current_time - last_health_check > health_check_interval:
+                    await self._health_check_active_nodes()
+                    last_health_check = current_time
                 
                 # Pure event-driven monitoring - only respond to actual DHT changes
                 await asyncio.sleep(30)  # Minimal sleep for graceful shutdown only
@@ -474,6 +483,68 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         
         return True  # Node is confirmed down
     
+    async def _health_check_active_nodes(self):
+        """Actively health check known nodes to detect departures"""
+        if not self.active_nodes:
+            return
+        
+        current_time = time.time()
+        nodes_to_check = []
+        
+        # Find nodes that haven't been seen recently
+        for node_id, node_info in self.active_nodes.items():
+            time_since_seen = current_time - node_info.last_seen
+            if time_since_seen > 90:  # Check nodes not seen for 90 seconds
+                nodes_to_check.append((node_id, node_info))
+        
+        # Health check nodes in parallel
+        if nodes_to_check:
+            logger.debug(f"Health checking {len(nodes_to_check)} potentially stale nodes")
+            
+            tasks = []
+            for node_id, node_info in nodes_to_check:
+                task = asyncio.create_task(self._health_check_node(node_id, node_info))
+                tasks.append(task)
+            
+            # Wait for all health checks to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            for i, result in enumerate(results):
+                node_id, node_info = nodes_to_check[i]
+                
+                if isinstance(result, Exception):
+                    logger.debug(f"Health check error for {node_id[:8]}...: {result}")
+                    continue
+                
+                is_alive = result
+                if not is_alive:
+                    logger.info(f"Node {node_id[:8]}... failed health check, marking as departed")
+                    await self._emit_event(NodeEvent(
+                        event_type=NodeEventType.NODE_LEFT,
+                        node_info=node_info,
+                        timestamp=time.time(),
+                        metadata={"reason": "health_check_failed", "last_seen": node_info.last_seen}
+                    ))
+
+    async def _health_check_node(self, node_id: str, node_info: NodeInfo) -> bool:
+        """Health check a specific node"""
+        try:
+            import aiohttp
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.get(f"http://{node_info.ip}:{node_info.port}/health") as response:
+                    if response.status == 200:
+                        # Node is alive, update last_seen
+                        node_info.last_seen = int(time.time())
+                        logger.debug(f"Node {node_id[:8]}... health check passed")
+                        return True
+                        
+        except Exception as e:
+            logger.debug(f"Health check failed for {node_id[:8]}...: {e}")
+        
+        return False
+
     async def _reevaluate_all_nodes(self):
         """Re-evaluate all current nodes against new filtering rules"""
         nodes_to_remove = []
