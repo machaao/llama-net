@@ -232,13 +232,18 @@ class EventBasedDHTPublisher:
 
                 # Active departure detection
                 if current_time - last_departure_check > departure_check_interval:
-                    await self._active_departure_detection()
+                    await self._proactive_departure_detection()
                     last_departure_check = current_time
 
-                # NEW: Periodic new node detection
-                if current_time - last_new_node_check > new_node_check_interval:
-                    await self._periodic_new_node_detection()
-                    last_new_node_check = current_time
+                # Enhanced node discovery
+                if current_time - last_discovery_scan > discovery_scan_interval:
+                    await self._enhanced_node_discovery()
+                    last_discovery_scan = current_time
+
+                # Event recovery mechanism
+                if current_time - last_recovery_check > recovery_check_interval:
+                    await self._event_recovery_mechanism()
+                    last_recovery_check = current_time
 
                 # Only update on significant changes
                 if should_update:
@@ -672,6 +677,71 @@ class EventBasedDHTPublisher:
         except Exception as e:
             logger.error(f"Error in active departure detection: {e}")
 
+    async def _proactive_departure_detection(self):
+        """Proactive detection of node departures with proper events"""
+        try:
+            # Get current DHT contacts
+            current_contacts = set()
+            if self.kademlia_node and self.kademlia_node.routing_table:
+                contacts = self.kademlia_node.routing_table.get_all_contacts()
+                current_contacts = {contact.node_id for contact in contacts}
+            
+            # Get published nodes
+            published_nodes = set()
+            try:
+                all_nodes_data = await self.kademlia_node.find_value("all_nodes")
+                if all_nodes_data:
+                    if isinstance(all_nodes_data, list):
+                        published_nodes = {node.get('node_id') for node in all_nodes_data 
+                                         if isinstance(node, dict) and node.get('node_id')}
+                    elif isinstance(all_nodes_data, dict) and all_nodes_data.get('node_id'):
+                        published_nodes = {all_nodes_data['node_id']}
+            except Exception as e:
+                logger.debug(f"Could not check published nodes for departures: {e}")
+            
+            # Find nodes that have disappeared
+            if hasattr(self, '_last_known_nodes'):
+                # Nodes that were known but are no longer in DHT or published
+                departed_nodes = self._last_known_nodes - current_contacts - published_nodes
+                
+                for departed_node_id in departed_nodes:
+                    if departed_node_id != self.config.node_id:  # Don't report ourselves
+                        # Verify the departure with health check
+                        node_info = self._get_cached_node_info(departed_node_id)
+                        
+                        if node_info:
+                            is_actually_down = await self._verify_node_actually_down(node_info)
+                            
+                            if is_actually_down:
+                                await self._broadcast_node_event("node_departed", {
+                                    'node_id': departed_node_id,
+                                    'ip': node_info.get('ip'),
+                                    'port': node_info.get('port'),
+                                    'model': node_info.get('model'),
+                                    'departure_reason': 'proactive_detection',
+                                    'detected_by': self.config.node_id,
+                                    'last_known_contact': self._last_contact_time.get(departed_node_id, 0)
+                                })
+                                
+                                logger.info(f"👋 Proactively detected node departure: {departed_node_id[:8]}...")
+                            else:
+                                # Node is still alive, update our records
+                                logger.debug(f"Node {departed_node_id[:8]}... is still alive, updating records")
+                                current_contacts.add(departed_node_id)
+            
+            # Update tracking
+            self._last_known_nodes = current_contacts | published_nodes
+            
+            # Update last contact times
+            current_time = time.time()
+            for node_id in current_contacts:
+                if not hasattr(self, '_last_contact_time'):
+                    self._last_contact_time = {}
+                self._last_contact_time[node_id] = current_time
+            
+        except Exception as e:
+            logger.error(f"Error in proactive departure detection: {e}")
+
     async def _verify_node_down(self, node_data: Dict[str, Any]) -> bool:
         """Verify that a node is actually down by attempting to contact it"""
         try:
@@ -694,6 +764,83 @@ class EventBasedDHTPublisher:
             logger.debug(f"Health check failed for {node_data['node_id'][:8]}...: {e}")
         
         return True  # Consider down if health check fails
+
+    async def _verify_node_actually_down(self, node_info: Dict[str, Any]) -> bool:
+        """Verify a node is actually down with multiple checks"""
+        try:
+            import aiohttp
+            
+            ip = node_info.get('ip')
+            port = node_info.get('port')
+            
+            if not ip or not port:
+                return True  # Consider down if no contact info
+            
+            # Try multiple verification methods
+            verification_methods = [
+                self._http_health_check,
+                self._dht_ping_check,
+                self._tcp_connection_check
+            ]
+            
+            for method in verification_methods:
+                try:
+                    is_alive = await method(ip, port)
+                    if is_alive:
+                        return False  # Node is alive
+                except Exception as e:
+                    logger.debug(f"Verification method {method.__name__} failed: {e}")
+                    continue
+            
+            return True  # All verification methods failed
+            
+        except Exception as e:
+            logger.debug(f"Error verifying node down status: {e}")
+            return True
+
+    async def _http_health_check(self, ip: str, port: int) -> bool:
+        """HTTP health check"""
+        import aiohttp
+        
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            async with session.get(f"http://{ip}:{port}/health") as response:
+                return response.status == 200
+
+    async def _dht_ping_check(self, ip: str, port: int) -> bool:
+        """DHT ping check"""
+        if self.kademlia_node:
+            # Try to ping the DHT port (usually HTTP port + 1)
+            dht_port = port + 1
+            contact = await self.kademlia_node._ping_node(ip, dht_port)
+            return contact is not None
+        return False
+
+    async def _tcp_connection_check(self, ip: str, port: int) -> bool:
+        """Basic TCP connection check"""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port), 
+                timeout=5.0
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except:
+            return False
+
+    def _get_cached_node_info(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached node info for a node ID"""
+        if not hasattr(self, '_node_info_cache'):
+            self._node_info_cache = {}
+        
+        return self._node_info_cache.get(node_id)
+
+    def _cache_node_info(self, node_id: str, node_info: Dict[str, Any]):
+        """Cache node info for later use"""
+        if not hasattr(self, '_node_info_cache'):
+            self._node_info_cache = {}
+        
+        self._node_info_cache[node_id] = node_info
 
     async def _handle_node_departure(self, node_data: Dict[str, Any]):
         """Handle a detected node departure"""
@@ -777,6 +924,114 @@ class EventBasedDHTPublisher:
                 
         except Exception as e:
             logger.error(f"Error in periodic new node detection: {e}")
+
+    async def _enhanced_node_discovery(self):
+        """Enhanced node discovery with proper event handling"""
+        try:
+            # Get all published nodes with retry logic
+            all_nodes_data = await self._get_published_nodes_with_retry()
+            
+            if not all_nodes_data:
+                logger.debug("No published nodes found during discovery")
+                return
+            
+            current_time = time.time()
+            discovered_nodes = []
+            
+            for node_data in all_nodes_data:
+                if not isinstance(node_data, dict) or not node_data.get('node_id'):
+                    continue
+                
+                node_id = node_data['node_id']
+                
+                # Skip ourselves
+                if node_id == self.config.node_id:
+                    continue
+                
+                # Check if node is fresh (within last 3 minutes)
+                last_seen = node_data.get('last_seen', 0)
+                if current_time - last_seen < 180:
+                    # Verify node is actually reachable
+                    is_reachable = await self._verify_node_reachable_enhanced(node_data)
+                    
+                    if is_reachable:
+                        discovered_nodes.append(node_data)
+                        
+                        # Check if this is a new discovery
+                        if not hasattr(self, '_known_node_ids'):
+                            self._known_node_ids = set()
+                        
+                        if node_id not in self._known_node_ids:
+                            await self._broadcast_node_event("node_discovered", {
+                                'node_id': node_id,
+                                'ip': node_data.get('ip'),
+                                'port': node_data.get('port'),
+                                'model': node_data.get('model'),
+                                'discovery_method': 'dht_scan',
+                                'last_seen': last_seen,
+                                'discovered_by': self.config.node_id
+                            })
+                            
+                            self._known_node_ids.add(node_id)
+                            logger.info(f"🔍 Discovered new node: {node_id[:8]}... via DHT scan")
+            
+            # Emit discovery summary
+            await self._broadcast_node_event("discovery_scan_completed", {
+                'nodes_discovered': len(discovered_nodes),
+                'total_known_nodes': len(getattr(self, '_known_node_ids', set())),
+                'scan_timestamp': current_time,
+                'scanner_node_id': self.config.node_id
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced node discovery: {e}")
+
+    async def _get_published_nodes_with_retry(self, max_retries: int = 3) -> List[Dict[str, Any]]:
+        """Get published nodes with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                all_nodes_data = await self.kademlia_node.find_value("all_nodes")
+                if all_nodes_data:
+                    if isinstance(all_nodes_data, list):
+                        return all_nodes_data
+                    else:
+                        return [all_nodes_data]
+                return []
+            except Exception as e:
+                logger.debug(f"Attempt {attempt + 1} failed to get published nodes: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+        
+        return []
+
+    async def _verify_node_reachable_enhanced(self, node_data: Dict[str, Any]) -> bool:
+        """Enhanced node reachability verification"""
+        try:
+            import aiohttp
+            
+            ip = node_data.get('ip')
+            port = node_data.get('port')
+            
+            if not ip or not port:
+                return False
+            
+            # Try multiple endpoints with shorter timeout
+            endpoints = ['/health', '/info', '/status']
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                for endpoint in endpoints:
+                    try:
+                        async with session.get(f"http://{ip}:{port}{endpoint}") as response:
+                            if response.status in [200, 404, 405]:
+                                return True
+                    except:
+                        continue
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Enhanced reachability check failed for {node_data.get('node_id', 'unknown')[:8]}...: {e}")
+            return False
 
     async def _verify_node_reachable(self, node_data: Dict[str, Any]) -> bool:
         """Verify that a detected node is actually reachable"""
