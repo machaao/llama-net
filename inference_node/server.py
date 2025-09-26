@@ -1283,12 +1283,14 @@ async def network_events():
     
     return StreamingResponse(
         event_generator(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
-            "Content-Type": "text/plain; charset=utf-8"
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Headers": "Cache-Control"
         }
     )
 
