@@ -1,5 +1,6 @@
 import asyncio
 import time
+import hashlib
 from typing import Dict, Any, List, Tuple
 from common.utils import get_logger
 from inference_node.config import InferenceConfig
@@ -66,6 +67,14 @@ class EventBasedDHTPublisher:
                 logger.warning(f"  Current: {self.config.node_id[:16]}...")
                 logger.warning(f"  Expected: {expected_node_id[:16]}...")
                 logger.warning("This may indicate hardware changes or configuration issues")
+                
+                # Check if we should update the stored node ID
+                stored_node_id = self.config._get_stored_node_id() if hasattr(self.config, '_get_stored_node_id') else None
+                if stored_node_id and stored_node_id != expected_node_id:
+                    logger.info("Hardware appears to have changed, updating stored node ID")
+                    if hasattr(self.config, '_store_node_id'):
+                        self.config._store_node_id(expected_node_id)
+                        logger.info(f"Updated stored node ID to: {expected_node_id[:16]}...")
             else:
                 logger.debug("Node ID is consistent with current hardware")
             
@@ -80,7 +89,27 @@ class EventBasedDHTPublisher:
             return
         
         # Validate node ID consistency before starting
-        self._validate_node_id_consistency()
+        consistency_check = self._validate_node_id_consistency()
+        
+        # If hardware changed, regenerate node ID
+        if not consistency_check and self.hardware_fingerprint:
+            try:
+                new_node_id = self.hardware_fingerprint.generate_node_id(self.config.port)
+                logger.warning(f"Hardware changed detected, updating node ID from {self.config.node_id[:16]}... to {new_node_id[:16]}...")
+                
+                # Update configuration
+                old_node_id = self.config.node_id
+                self.config.node_id = new_node_id
+                
+                # Store the new node ID
+                if hasattr(self.config, '_store_node_id'):
+                    self.config._store_node_id(new_node_id)
+                
+                logger.info(f"Node ID updated due to hardware changes: {old_node_id[:8]}... → {new_node_id[:8]}...")
+                
+            except Exception as e:
+                logger.error(f"Failed to update node ID after hardware change: {e}")
+                # Continue with existing node ID
         
         self.running = True
         
@@ -94,6 +123,14 @@ class EventBasedDHTPublisher:
                 port=self.config.dht_port,
                 bootstrap_nodes=self.bootstrap_nodes
             )
+            
+            # Validate that the DHT node is using the correct node ID
+            if self.kademlia_node.node_id != self.config.node_id:
+                logger.warning(f"DHT node ID mismatch: config={self.config.node_id[:16]}..., dht={self.kademlia_node.node_id[:16]}...")
+                # Update DHT node to use config node ID
+                self.kademlia_node.node_id = self.config.node_id
+                logger.info("Updated DHT node to use hardware-based node ID")
+                
         except Exception as e:
             logger.error(f"Failed to start DHT node: {e}")
             self.running = False
@@ -106,6 +143,11 @@ class EventBasedDHTPublisher:
         await self._publish_node_info()
         
         logger.info(f"Event-based DHT publisher started with hardware-based node ID: {self.config.node_id[:16]}...")
+        
+        # Log hardware fingerprint details for debugging
+        if self.hardware_fingerprint:
+            summary = self.hardware_fingerprint.get_fingerprint_summary()
+            logger.info(f"Hardware fingerprint: {summary}")
     
     async def stop(self):
         """Stop the event-based publisher"""
@@ -126,6 +168,9 @@ class EventBasedDHTPublisher:
     
     async def _monitor_changes(self):
         """Monitor for changes that should trigger updates"""
+        hardware_check_interval = 300  # Check hardware every 5 minutes
+        last_hardware_check = 0
+        
         while self.running:
             try:
                 current_metrics = self.metrics_callback()
@@ -138,7 +183,12 @@ class EventBasedDHTPublisher:
                 if current_time - self.last_forced_update > self.forced_update_interval:
                     should_update = True
                     self.last_forced_update = current_time
-                    logger.info("Forcing periodic DHT update")
+                    logger.debug("Forcing periodic DHT update")
+                
+                # Periodic hardware consistency check
+                if current_time - last_hardware_check > hardware_check_interval:
+                    await self.handle_hardware_change()
+                    last_hardware_check = current_time
                 
                 if should_update:
                     await self._publish_node_info()
@@ -222,16 +272,21 @@ class EventBasedDHTPublisher:
                 'ip_types': ip_types,
                 'multi_ip_enabled': True,
                 'hardware_based': True,  # Flag to indicate hardware-based node ID
+                'hardware_fingerprint_version': '1.0',  # Version for future compatibility
             }
             
-            # Add hardware fingerprint summary for debugging
+            # Add hardware fingerprint summary for debugging and validation
             if self.hardware_fingerprint:
                 node_info['hardware_summary'] = self.hardware_fingerprint.get_fingerprint_summary()
+                node_info['hardware_consistency'] = self.hardware_fingerprint.validate_consistency(
+                    self.config.node_id, self.config.port
+                )
             
-            # Store under multiple keys
+            # Store under multiple keys for different discovery patterns
             keys = [
-                f"model:{self.config.model_name}",
-                f"node:{self.config.node_id}"
+                f"model:{self.config.model_name}",  # Find by model
+                f"node:{self.config.node_id}",      # Find specific node
+                f"hardware:{self._get_hardware_key()}"  # Find by hardware fingerprint
             ]
             
             for key in keys:
@@ -304,13 +359,105 @@ class EventBasedDHTPublisher:
             'node_id': self.config.node_id,
             'hardware_based': True,
             'dht_running': self.running,
-            'bootstrap_nodes': self.bootstrap_nodes
+            'bootstrap_nodes': self.bootstrap_nodes,
+            'hardware_key': self._get_hardware_key(),
+            'consistency_validated': True
         }
         
         if self.hardware_fingerprint:
             info['hardware_fingerprint'] = self.hardware_fingerprint.get_fingerprint_summary()
+            info['consistency_validated'] = self.hardware_fingerprint.validate_consistency(
+                self.config.node_id, self.config.port
+            )
         
         return info
+    
+    def _get_hardware_key(self) -> str:
+        """Generate a hardware-based DHT key for node discovery"""
+        if not self.hardware_fingerprint:
+            return f"hardware:unknown:{self.config.node_id[:8]}"
+        
+        try:
+            summary = self.hardware_fingerprint.get_fingerprint_summary()
+            
+            # Create a stable hardware identifier
+            hardware_parts = [
+                str(summary.get('cpu_count', 0)),
+                str(summary.get('memory_gb', 0)),
+                summary.get('hostname', 'unknown')[:8],  # Truncate hostname
+                str(summary.get('mac_count', 0))
+            ]
+            
+            hardware_id = hashlib.sha1('|'.join(hardware_parts).encode()).hexdigest()[:12]
+            return f"hardware:{hardware_id}"
+            
+        except Exception as e:
+            logger.debug(f"Error generating hardware key: {e}")
+            return f"hardware:fallback:{self.config.node_id[:8]}"
+    
+    async def handle_hardware_change(self):
+        """Handle hardware changes detected during runtime"""
+        if not self.hardware_fingerprint:
+            logger.warning("Cannot handle hardware change: hardware fingerprint not available")
+            return
+        
+        try:
+            # Generate new node ID based on current hardware
+            new_node_id = self.hardware_fingerprint.generate_node_id(self.config.port)
+            
+            if new_node_id != self.config.node_id:
+                logger.warning(f"Hardware change detected during runtime!")
+                logger.info(f"Current node ID: {self.config.node_id[:16]}...")
+                logger.info(f"New node ID: {new_node_id[:16]}...")
+                
+                # Unpublish old node info
+                await self._unpublish_node_info()
+                
+                # Update configuration
+                old_node_id = self.config.node_id
+                self.config.node_id = new_node_id
+                
+                # Update DHT node ID
+                if self.kademlia_node:
+                    self.kademlia_node.node_id = new_node_id
+                
+                # Store new node ID
+                if hasattr(self.config, '_store_node_id'):
+                    self.config._store_node_id(new_node_id)
+                
+                # Republish with new node ID
+                await self._publish_node_info()
+                
+                logger.info(f"Successfully updated node ID due to hardware change: {old_node_id[:8]}... → {new_node_id[:8]}...")
+                
+            else:
+                logger.debug("Hardware check passed: no changes detected")
+                
+        except Exception as e:
+            logger.error(f"Error handling hardware change: {e}")
+    
+    async def force_hardware_revalidation(self):
+        """Force a complete hardware revalidation and node ID update if needed"""
+        logger.info("Forcing hardware revalidation...")
+        
+        if not self.hardware_fingerprint:
+            logger.warning("Cannot revalidate: hardware fingerprint not available")
+            return False
+        
+        try:
+            # Reinitialize hardware fingerprint to get fresh data
+            from common.hardware_fingerprint import HardwareFingerprint
+            self.hardware_fingerprint = HardwareFingerprint()
+            
+            # Check consistency with fresh data
+            await self.handle_hardware_change()
+            
+            logger.info("Hardware revalidation completed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during hardware revalidation: {e}")
+            return False
     
     async def force_update(self):
         """Force an immediate update of node info"""

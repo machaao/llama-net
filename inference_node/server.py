@@ -1405,6 +1405,75 @@ async def hardware_info():
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/hardware/validate")
+async def validate_hardware_consistency():
+    """Validate hardware consistency and node ID"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    try:
+        from common.hardware_fingerprint import HardwareFingerprint
+        fingerprint = HardwareFingerprint()
+        
+        # Perform validation
+        expected_node_id = fingerprint.generate_node_id(config.port)
+        is_consistent = config.node_id == expected_node_id
+        stored_node_id = config._get_stored_node_id() if hasattr(config, '_get_stored_node_id') else None
+        
+        validation_result = {
+            "current_node_id": config.node_id,
+            "expected_node_id": expected_node_id,
+            "stored_node_id": stored_node_id,
+            "is_consistent": is_consistent,
+            "hardware_fingerprint": fingerprint.get_fingerprint_summary(),
+            "validation_timestamp": time.time()
+        }
+        
+        # Add recommendations
+        if not is_consistent:
+            validation_result["recommendations"] = []
+            
+            if stored_node_id == expected_node_id:
+                validation_result["recommendations"].append("Configuration should use stored node ID")
+            elif stored_node_id and stored_node_id != expected_node_id:
+                validation_result["recommendations"].append("Hardware appears to have changed significantly")
+                validation_result["recommendations"].append("Consider updating stored node ID")
+            else:
+                validation_result["recommendations"].append("Store current hardware-based node ID")
+        
+        return validation_result
+        
+    except Exception as e:
+        logger.error(f"Error validating hardware consistency: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/hardware/update")
+async def update_hardware_node_id():
+    """Force update node ID based on current hardware"""
+    if not config or not dht_publisher:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    try:
+        # Force hardware revalidation
+        if hasattr(dht_publisher, 'force_hardware_revalidation'):
+            success = await dht_publisher.force_hardware_revalidation()
+            
+            if success:
+                return {
+                    "success": True,
+                    "message": "Hardware revalidation completed",
+                    "new_node_id": config.node_id,
+                    "timestamp": time.time()
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Hardware revalidation failed")
+        else:
+            raise HTTPException(status_code=501, detail="Hardware revalidation not supported")
+            
+    except Exception as e:
+        logger.error(f"Error updating hardware node ID: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 def start_server():
     """Start the inference server"""
     global config
