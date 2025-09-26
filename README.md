@@ -7,6 +7,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 ## Features
 
 - **Decentralized DHT-based node discovery** using Kademlia protocol
+- **High-performance inference** powered by [llama.cpp](https://github.com/ggerganov/llama.cpp)
 - **Real-time streaming inference** with Server-Sent Events (SSE)
 - **OpenAI-compatible API** with streaming support
 - **Interactive web interface** with live streaming responses
@@ -30,7 +31,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 ## Requirements
 
 - Python 3.8+
-- LLM models in GGUF format
+- **LLM models in GGUF format** (compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp))
 - Docker (optional, for containerized deployment)
 
 ## Installation
@@ -1220,6 +1221,32 @@ LlamaNet's decentralized architecture with streaming support makes it ideal for:
 3. Add tests for new functionality
 4. Ensure streaming works in both modes
 5. Submit a pull request
+
+## Credits & Acknowledgments
+
+### Core Dependencies
+
+**[llama.cpp](https://github.com/ggerganov/llama.cpp)** - The foundation of LlamaNet's inference capabilities
+- Created by [Georgi Gerganov](https://github.com/ggerganov) and the llama.cpp community
+- Provides efficient CPU and GPU inference for LLM models
+- Enables GGUF format support and quantization
+- Powers the core text generation in every LlamaNet node
+
+**[llama-cpp-python](https://github.com/abetlen/llama-cpp-python)** - Python bindings for llama.cpp
+- Created by [Andrei Betlen](https://github.com/abetlen)
+- Provides the Python interface used by LlamaNet's LLM wrapper
+- Enables seamless integration between Python and llama.cpp
+
+### Other Key Dependencies
+- **[Kademlia](https://github.com/bmuller/kademlia)** - Distributed hash table implementation
+- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern web framework for the API layer
+- **[Uvicorn](https://www.uvicorn.org/)** - ASGI server for high-performance serving
+
+### Special Thanks
+- The **llama.cpp community** for continuous improvements and optimizations
+- **Meta AI** for releasing the Llama model family
+- All **model publishers** on Hugging Face providing GGUF quantizations
+- The **open-source AI community** for making decentralized AI possible
 
 ## License
 
