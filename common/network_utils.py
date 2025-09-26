@@ -8,6 +8,221 @@ from common.utils import get_logger
 
 logger = get_logger(__name__)
 
+class NetworkInterfaceInfo:
+    """Information about a network interface and its addresses"""
+    
+    def __init__(self, name: str, ip: str, netmask: str = None, 
+                 interface_type: str = "unknown", is_up: bool = True):
+        self.name = name
+        self.ip = ip
+        self.netmask = netmask
+        self.interface_type = interface_type
+        self.is_up = is_up
+        
+        # Determine network classification
+        try:
+            ip_obj = ipaddress.IPv4Address(ip)
+            if ip_obj.is_loopback:
+                self.classification = "loopback"
+            elif ip_obj.is_private:
+                self.classification = "private"
+            elif ip_obj.is_link_local:
+                self.classification = "link_local"
+            else:
+                self.classification = "public"
+        except (ipaddress.AddressValueError, ValueError):
+            self.classification = "invalid"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            "name": self.name,
+            "ip": self.ip,
+            "netmask": self.netmask,
+            "interface_type": self.interface_type,
+            "is_up": self.is_up,
+            "classification": self.classification
+        }
+    
+    def __str__(self) -> str:
+        return f"{self.name}: {self.ip} ({self.classification})"
+
+class NetworkInterfaceDiscovery:
+    """Comprehensive network interface discovery for multi-IP advertising"""
+    
+    @staticmethod
+    def discover_all_interfaces() -> List[NetworkInterfaceInfo]:
+        """Discover all network interfaces and their IP addresses"""
+        interfaces = []
+        
+        try:
+            import psutil
+            
+            # Get interface statistics for up/down status
+            interface_stats = psutil.net_if_stats()
+            
+            for interface_name, addrs in psutil.net_if_addrs().items():
+                # Get interface status
+                is_up = interface_stats.get(interface_name, type('obj', (object,), {'isup': True})).isup
+                
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:  # IPv4 only for now
+                        # Determine interface type
+                        interface_type = NetworkInterfaceDiscovery._classify_interface(interface_name)
+                        
+                        interface_info = NetworkInterfaceInfo(
+                            name=interface_name,
+                            ip=addr.address,
+                            netmask=addr.netmask,
+                            interface_type=interface_type,
+                            is_up=is_up
+                        )
+                        
+                        interfaces.append(interface_info)
+                        logger.debug(f"Discovered interface: {interface_info}")
+            
+        except ImportError:
+            logger.warning("psutil not available, using fallback interface discovery")
+            interfaces = NetworkInterfaceDiscovery._fallback_interface_discovery()
+        
+        # Sort interfaces by priority (public > private > loopback)
+        priority_order = {"public": 0, "private": 1, "loopback": 2, "link_local": 3, "invalid": 4}
+        interfaces.sort(key=lambda x: (priority_order.get(x.classification, 5), x.name))
+        
+        logger.info(f"Discovered {len(interfaces)} network interfaces")
+        return interfaces
+    
+    @staticmethod
+    def _classify_interface(interface_name: str) -> str:
+        """Classify interface type based on name patterns"""
+        name_lower = interface_name.lower()
+        
+        if name_lower.startswith(('eth', 'en')):
+            return "ethernet"
+        elif name_lower.startswith(('wlan', 'wifi', 'wl')):
+            return "wireless"
+        elif name_lower.startswith('lo'):
+            return "loopback"
+        elif name_lower.startswith(('docker', 'br-')):
+            return "docker"
+        elif name_lower.startswith('veth'):
+            return "virtual"
+        elif name_lower.startswith('tun'):
+            return "tunnel"
+        else:
+            return "unknown"
+    
+    @staticmethod
+    def _fallback_interface_discovery() -> List[NetworkInterfaceInfo]:
+        """Fallback method when psutil is not available"""
+        interfaces = []
+        
+        try:
+            # Get primary interface IP
+            from common.utils import get_host_ip
+            primary_ip = get_host_ip()
+            
+            if primary_ip and primary_ip != '127.0.0.1':
+                interface_info = NetworkInterfaceInfo(
+                    name="primary",
+                    ip=primary_ip,
+                    netmask="255.255.255.0",  # Assume /24
+                    interface_type="ethernet",
+                    is_up=True
+                )
+                interfaces.append(interface_info)
+            
+            # Always add loopback
+            loopback_info = NetworkInterfaceInfo(
+                name="lo",
+                ip="127.0.0.1",
+                netmask="255.0.0.0",
+                interface_type="loopback",
+                is_up=True
+            )
+            interfaces.append(loopback_info)
+            
+        except Exception as e:
+            logger.error(f"Fallback interface discovery failed: {e}")
+        
+        return interfaces
+    
+    @staticmethod
+    def get_advertisable_ips(exclude_loopback: bool = True, 
+                           exclude_link_local: bool = True,
+                           only_up_interfaces: bool = True) -> List[str]:
+        """Get list of IP addresses suitable for advertising to other nodes"""
+        interfaces = NetworkInterfaceDiscovery.discover_all_interfaces()
+        advertisable_ips = []
+        
+        for interface in interfaces:
+            # Apply filters
+            if exclude_loopback and interface.classification == "loopback":
+                continue
+            if exclude_link_local and interface.classification == "link_local":
+                continue
+            if only_up_interfaces and not interface.is_up:
+                continue
+            
+            advertisable_ips.append(interface.ip)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_ips = []
+        for ip in advertisable_ips:
+            if ip not in seen:
+                seen.add(ip)
+                unique_ips.append(ip)
+        
+        logger.info(f"Found {len(unique_ips)} advertisable IP addresses: {unique_ips}")
+        return unique_ips
+    
+    @staticmethod
+    def get_interface_by_ip(target_ip: str) -> Optional[NetworkInterfaceInfo]:
+        """Find the interface that has the specified IP address"""
+        interfaces = NetworkInterfaceDiscovery.discover_all_interfaces()
+        
+        for interface in interfaces:
+            if interface.ip == target_ip:
+                return interface
+        
+        return None
+    
+    @staticmethod
+    def get_best_interface_for_target(target_ip: str) -> Optional[NetworkInterfaceInfo]:
+        """Get the best local interface to reach a target IP address"""
+        try:
+            target_addr = ipaddress.IPv4Address(target_ip)
+            interfaces = NetworkInterfaceDiscovery.discover_all_interfaces()
+            
+            # First, try to find an interface on the same network
+            for interface in interfaces:
+                if not interface.is_up or interface.classification == "loopback":
+                    continue
+                
+                try:
+                    if interface.netmask:
+                        network = ipaddress.IPv4Network(
+                            f"{interface.ip}/{interface.netmask}", 
+                            strict=False
+                        )
+                        if target_addr in network:
+                            logger.debug(f"Found same-network interface {interface.name} for target {target_ip}")
+                            return interface
+                except (ipaddress.AddressValueError, ValueError):
+                    continue
+            
+            # Fallback: return the best available interface
+            for interface in interfaces:
+                if interface.is_up and interface.classification in ["public", "private"]:
+                    logger.debug(f"Using fallback interface {interface.name} for target {target_ip}")
+                    return interface
+            
+        except (ipaddress.AddressValueError, ValueError):
+            logger.warning(f"Invalid target IP address: {target_ip}")
+        
+        return None
+
 class NetworkUtils:
     """Network utilities for subnet validation and reachability testing"""
     

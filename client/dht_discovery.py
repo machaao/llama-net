@@ -196,7 +196,7 @@ class DHTDiscovery(DiscoveryInterface):
         return nodes
 
     async def _refresh_nodes(self, model: Optional[str] = None):
-        """Refresh the nodes cache from DHT with enhanced discovery and subnet filtering"""
+        """Refresh the nodes cache from DHT with enhanced discovery, IP selection, and subnet filtering"""
         try:
             # Use a dict to ensure uniqueness by node_id (not ip:port)
             unique_nodes = {}
@@ -214,21 +214,24 @@ class DHTDiscovery(DiscoveryInterface):
                 except Exception as e:
                     logger.debug(f"Error getting model-specific nodes: {e}")
             
-            # Process published nodes
+            # Process published nodes with IP accessibility testing
             raw_nodes = []
             for node_data in published_nodes:
                 if isinstance(node_data, dict) and node_data.get('node_id'):
                     node_id = node_data['node_id']
                     # Use longer timeout for published data (2 minutes)
                     if time.time() - node_data.get('last_seen', 0) < 120:
-                        raw_nodes.append(node_data)
-                        unique_nodes[node_id] = {
-                            'node': node_data,
-                            'source': 'published',
-                            'priority': 1
-                        }
+                        # Perform IP accessibility testing for multi-IP nodes
+                        processed_node = await self._test_and_select_best_ip(node_data)
+                        if processed_node:
+                            raw_nodes.append(processed_node)
+                            unique_nodes[node_id] = {
+                                'node': processed_node,
+                                'source': 'published',
+                                'priority': 1
+                            }
             
-            logger.debug(f"Found {len(raw_nodes)} published nodes before filtering")
+            logger.debug(f"Found {len(raw_nodes)} published nodes after IP testing")
             
             # Apply subnet filtering if enabled
             if self.enable_subnet_filtering and self.subnet_filter and raw_nodes:
@@ -257,7 +260,9 @@ class DHTDiscovery(DiscoveryInterface):
                     # Check if this is a new node
                     node_id = node_data.get('node_id')
                     if node_id not in self.known_node_ids:
-                        logger.info(f"🆕 New reachable node: {node_id[:12]}... ({node_data.get('ip')}:{node_data.get('port')}) - Model: {node_data.get('model')}")
+                        selected_ip = node_data.get('preferred_ip', node_data.get('ip'))
+                        available_ips = node_data.get('available_ips', [node_data.get('ip')])
+                        logger.info(f"🆕 New reachable node: {node_id[:12]}... ({selected_ip}:{node_data.get('port')}) - Model: {node_data.get('model')} - IPs: {len(available_ips)}")
                         self.known_node_ids.add(node_id)
                 except Exception as e:
                     logger.warning(f"Failed to create NodeInfo from {node_data}: {e}")
@@ -276,7 +281,9 @@ class DHTDiscovery(DiscoveryInterface):
             
             # Log all discovered nodes for debugging
             for node in self.nodes_cache:
-                logger.debug(f"Available node: {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model})")
+                selected_ip = node.preferred_ip or node.ip
+                available_count = len(node.available_ips) if node.available_ips else 1
+                logger.debug(f"Available node: {node.node_id[:8]}... at {selected_ip}:{node.port} (model: {node.model}) - {available_count} IPs")
             
             if total_discovered > 0 and total_reachable == 0:
                 logger.warning("All discovered nodes were filtered out - check network connectivity and subnet configuration")
@@ -284,6 +291,77 @@ class DHTDiscovery(DiscoveryInterface):
         except Exception as e:
             logger.error(f"Error refreshing nodes from DHT: {e}")
             self.nodes_cache = []
+
+    async def _test_and_select_best_ip(self, node_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Test accessibility of all available IPs and select the best one"""
+        node_id = node_data.get('node_id', 'unknown')[:12]
+        port = node_data.get('port')
+        
+        # Check if this node supports multi-IP
+        available_ips = node_data.get('available_ips')
+        if not available_ips:
+            # Fallback to single IP mode
+            return node_data
+        
+        logger.debug(f"Testing {len(available_ips)} IPs for node {node_id}: {available_ips}")
+        
+        # Test each IP for accessibility
+        accessible_ips = []
+        test_results = {}
+        
+        for ip in available_ips:
+            try:
+                # Test HTTP connectivity with timeout
+                is_accessible = await NetworkUtils.test_http_connectivity(ip, port, timeout=2.0)
+                test_results[ip] = is_accessible
+                
+                if is_accessible:
+                    accessible_ips.append(ip)
+                    logger.debug(f"IP {ip} is accessible for node {node_id}")
+                else:
+                    logger.debug(f"IP {ip} is not accessible for node {node_id}")
+                    
+            except Exception as e:
+                logger.debug(f"Error testing IP {ip} for node {node_id}: {e}")
+                test_results[ip] = False
+        
+        if not accessible_ips:
+            logger.warning(f"No accessible IPs found for node {node_id}, using primary IP")
+            return node_data
+        
+        # Select the best IP based on priority and type
+        best_ip = self._select_best_ip(accessible_ips, node_data.get('ip_types', {}))
+        
+        # Update node data with selected IP
+        updated_node_data = node_data.copy()
+        updated_node_data['preferred_ip'] = best_ip
+        
+        # Update primary IP if different
+        if best_ip != node_data.get('ip'):
+            logger.info(f"Selected better IP {best_ip} over {node_data.get('ip')} for node {node_id}")
+            updated_node_data['ip'] = best_ip
+        
+        logger.debug(f"Node {node_id}: selected {best_ip} from {len(accessible_ips)} accessible IPs")
+        return updated_node_data
+    
+    def _select_best_ip(self, accessible_ips: List[str], ip_types: Dict[str, str]) -> str:
+        """Select the best IP from accessible options based on type priority"""
+        if len(accessible_ips) == 1:
+            return accessible_ips[0]
+        
+        # Priority order: public > private > others
+        priority_order = {"public": 0, "private": 1, "loopback": 2, "link_local": 3}
+        
+        # Sort IPs by priority
+        def get_priority(ip):
+            ip_type = ip_types.get(ip, "unknown")
+            return priority_order.get(ip_type, 4)
+        
+        sorted_ips = sorted(accessible_ips, key=get_priority)
+        best_ip = sorted_ips[0]
+        
+        logger.debug(f"Selected best IP {best_ip} (type: {ip_types.get(best_ip, 'unknown')}) from options: {accessible_ips}")
+        return best_ip
     
     async def find_specific_node(self, node_id: str) -> Optional[NodeInfo]:
         """Find a specific node by ID"""

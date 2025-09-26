@@ -101,12 +101,33 @@ class DHTPublisher:
                 await asyncio.sleep(5)  # Wait before retrying
     
     async def _publish_node_info(self):
-        """Publish current node info to DHT including P2P address"""
+        """Publish current node info to DHT with multi-IP advertising"""
         # Get current metrics
         metrics = self.metrics_callback()
         
-        # Get host IP for node info
-        host_ip = get_host_ip()
+        # Discover all available IP addresses
+        from common.network_utils import NetworkInterfaceDiscovery
+        
+        # Get all advertisable IPs
+        available_ips = NetworkInterfaceDiscovery.get_advertisable_ips(
+            exclude_loopback=True,
+            exclude_link_local=True,
+            only_up_interfaces=True
+        )
+        
+        # Get primary IP (fallback to first available or host IP)
+        if available_ips:
+            primary_ip = available_ips[0]
+        else:
+            primary_ip = get_host_ip()
+            available_ips = [primary_ip]
+        
+        # Classify IP types for better client selection
+        ip_types = {}
+        interfaces = NetworkInterfaceDiscovery.discover_all_interfaces()
+        for interface in interfaces:
+            if interface.ip in available_ips:
+                ip_types[interface.ip] = interface.classification
         
         # Get P2P info if available
         p2p_info = {}
@@ -115,7 +136,7 @@ class DHTPublisher:
         
         node_info = {
             'node_id': self.config.node_id,  # Use the proper hex node_id from config
-            'ip': host_ip,
+            'ip': primary_ip,  # Primary IP for backward compatibility
             'port': self.config.port,  # HTTP port for inference API
             'model': self.config.model_name,
             'load': metrics['load'],
@@ -126,8 +147,15 @@ class DHTPublisher:
             'supports_p2p': bool(p2p_info),
             'p2p_nickname': p2p_info.get('nickname'),
             'supports_nat_traversal': p2p_info.get('supports_nat_traversal', False),
-            'address': f"{host_ip}:{self.config.port}"  # Add human-readable address for reference
+            'address': f"{primary_ip}:{self.config.port}",  # Add human-readable address for reference
+            
+            # Multi-IP support for auto IP selection
+            'available_ips': available_ips,
+            'ip_types': ip_types,
+            'multi_ip_enabled': True  # Flag to indicate this node supports multi-IP
         }
+        
+        logger.debug(f"Publishing node with {len(available_ips)} IP addresses: {available_ips}")
         
         # Store individual node data
         individual_keys = [
