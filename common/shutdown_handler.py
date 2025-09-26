@@ -481,12 +481,35 @@ class SignalHandler:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.error("No running event loop found for signal handling")
+            import os
+            os._exit(1)
             return
         
         # Schedule shutdown
         if not self.shutdown_handler.is_shutdown_in_progress():
-            asyncio.create_task(
+            shutdown_task = asyncio.create_task(
                 self.shutdown_handler.initiate_shutdown(f"signal_{signal_name.lower()}")
             )
+            
+            # Ensure process exits after shutdown completes or times out
+            def monitor_shutdown():
+                import time
+                import os
+                
+                # Wait for shutdown to complete (max 12 seconds)
+                for i in range(120):  # 12 seconds in 0.1s intervals
+                    if shutdown_task.done():
+                        logger.info("✅ Graceful shutdown completed, exiting")
+                        os._exit(0)
+                    time.sleep(0.1)
+                
+                # Force exit if shutdown takes too long
+                logger.warning("⚠️ Shutdown timeout reached, forcing exit")
+                os._exit(1)
+            
+            import threading
+            threading.Thread(target=monitor_shutdown, daemon=True).start()
         else:
-            logger.warning("Shutdown already in progress, ignoring signal")
+            logger.warning("Shutdown already in progress, forcing immediate exit")
+            import os
+            os._exit(0)
