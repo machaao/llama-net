@@ -211,11 +211,21 @@ class EventBasedDHTPublisher:
         """Enhanced monitoring with periodic new node detection"""
         hardware_check_interval = 600  # Check hardware every 10 minutes
         departure_check_interval = 45  # Check for departures every 45 seconds
-        new_node_check_interval = 60   # Check for new nodes every 1 minute
+        discovery_scan_interval = 90   # Enhanced discovery every 90 seconds
+        recovery_check_interval = 120  # Event recovery every 2 minutes
         
         last_hardware_check = 0
         last_departure_check = 0
-        last_new_node_check = 0
+        last_discovery_scan = 0
+        last_recovery_check = 0
+
+        # Initialize tracking variables
+        if not hasattr(self, '_last_known_nodes'):
+            self._last_known_nodes = set()
+        if not hasattr(self, '_last_contact_time'):
+            self._last_contact_time = {}
+        if not hasattr(self, '_node_info_cache'):
+            self._node_info_cache = {}
 
         while self.running:
             try:
