@@ -448,7 +448,6 @@ class LlamaNetUI {
                             </div>
                             <div class="text-muted small">
                                 <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
-                                <div><i class="fas fa-chart-line"></i> Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
                                 <div><i class="fas fa-clock"></i> Up: ${uptimeText} | ${lastSeenText}</div>
                             </div>
                         </div>
@@ -678,9 +677,6 @@ class LlamaNetUI {
                             <i class="fas fa-check"></i>
                         </button>
                     </div>
-                    <div class="small text-muted mb-1">
-                        <div>Nodes: ${model.node_count} | Avg Load: ${avgLoad.toFixed(2)} | Total TPS: ${totalTps.toFixed(1)}</div>
-                    </div>
                     <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
                         ${this.renderModelNodes(model.nodes)}
                     </div>
@@ -727,13 +723,6 @@ class LlamaNetUI {
                             <i class="fas fa-check"></i>
                         </button>
                     </div>
-                    <div class="small text-muted mb-1">
-                        <div>
-                            Nodes: <span class="metric-value">${model.node_count}</span> | 
-                            Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span> | 
-                            Total TPS: <span class="metric-value">${totalTps.toFixed(1)}</span>
-                        </div>
-                    </div>
                     <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
                         ${this.renderModelNodesWithStatus(model.nodes)}
                     </div>
@@ -764,7 +753,6 @@ class LlamaNetUI {
                         <div class="flex-grow-1">
                             <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
                             <div class="text-muted">${node.ip}:${node.port}</div>
-                            <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
                             <div class="text-muted small">${lastSeenText}</div>
                         </div>
                     </div>
@@ -811,10 +799,6 @@ class LlamaNetUI {
                                 ${this.getNodeChangeIndicator(node.node_id)}
                             </div>
                             <div class="text-muted">${node.ip}:${node.port}</div>
-                            <div class="text-muted">
-                                Load: <span class="metric-value">${node.load.toFixed(2)}</span> | 
-                                TPS: <span class="metric-value">${node.tps.toFixed(1)}</span>
-                            </div>
                             <div class="text-muted small">${lastSeenText}</div>
                         </div>
                     </div>
@@ -997,10 +981,6 @@ class LlamaNetUI {
                                 <div>
                                     <small class="fw-bold">${node.node_id.substring(0, 8)}...</small><br>
                                     <small class="text-muted">${node.ip}:${node.port}</small>
-                                </div>
-                                <div class="text-end">
-                                    <small>Load: ${node.load.toFixed(2)}</small><br>
-                                    <small>TPS: ${node.tps.toFixed(1)}</small>
                                 </div>
                             </div>
                         `).join('')}
