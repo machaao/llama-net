@@ -95,11 +95,14 @@ LlamaNet requires models in **GGUF format** (GGML Universal Format). GGUF is the
 #### 1. Hugging Face Hub
 The largest collection of GGUF models is available on Hugging Face:
 
-**Popular Model Collections:**
-- [TheBloke](https://huggingface.co/TheBloke) - Extensive collection of quantized GGUF models
-- [Microsoft](https://huggingface.co/microsoft) - Official Microsoft models
+**Current Active Publishers (2024):**
+- [bartowski](https://huggingface.co/bartowski) - Most active, high-quality quantizations (Llama 3.1/3.2, Qwen 2.5)
+- [mradermacher](https://huggingface.co/mradermacher) - Comprehensive model coverage with excellent documentation
+- [unsloth](https://huggingface.co/unsloth) - Performance-optimized models for inference and fine-tuning
+- [Microsoft](https://huggingface.co/microsoft) - Official Microsoft models (Phi-3.5, etc.)
 - [Meta](https://huggingface.co/meta-llama) - Official Meta Llama models
 - [Mistral AI](https://huggingface.co/mistralai) - Official Mistral models
+- [Qwen](https://huggingface.co/Qwen) - Official Qwen models from Alibaba
 
 #### 2. Direct Downloads
 Some models are available for direct download from official sources.
@@ -112,11 +115,14 @@ Some models are available for direct download from official sources.
 # Install Hugging Face CLI
 pip install huggingface_hub
 
-# Download a specific model
-huggingface-cli download TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf --local-dir ./models --local-dir-use-symlinks False
+# Download latest Llama 3.1 8B model (recommended)
+huggingface-cli download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --local-dir ./models --local-dir-use-symlinks False
 
-# Download multiple quantizations
-huggingface-cli download TheBloke/Llama-2-13B-Chat-GGUF --include="*.gguf" --local-dir ./models/llama-2-13b-chat
+# Download Qwen 2.5 7B (excellent performance)
+huggingface-cli download bartowski/Qwen2.5-7B-Instruct-GGUF Qwen2.5-7B-Instruct-Q4_K_M.gguf --local-dir ./models --local-dir-use-symlinks False
+
+# Download multiple quantizations of a model
+huggingface-cli download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF --include="*.gguf" --local-dir ./models/llama-3.1-8b
 ```
 
 #### Method 2: Using wget/curl
@@ -125,24 +131,24 @@ huggingface-cli download TheBloke/Llama-2-13B-Chat-GGUF --include="*.gguf" --loc
 # Create models directory
 mkdir -p models
 
-# Download directly (example URLs)
-wget -O models/llama-2-7b-chat.Q4_K_M.gguf \
-  "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf"
+# Download Llama 3.1 8B directly
+wget -O models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf \
+  "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
 
-# Or using curl
-curl -L -o models/mistral-7b-instruct.Q4_K_M.gguf \
-  "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.1-GGUF/resolve/main/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+# Download Qwen 2.5 7B using curl
+curl -L -o models/Qwen2.5-7B-Instruct-Q4_K_M.gguf \
+  "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
 ```
 
 #### Method 3: Using Git LFS
 
 ```bash
 # Clone entire model repository
-git clone https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF models/llama-2-7b-chat
+git clone https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF models/llama-3.1-8b
 
 # Clone specific files only
-GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF models/llama-2-7b-chat
-cd models/llama-2-7b-chat
+GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF models/llama-3.1-8b
+cd models/llama-3.1-8b
 git lfs pull --include="*.Q4_K_M.gguf"
 ```
 
@@ -150,41 +156,50 @@ git lfs pull --include="*.Q4_K_M.gguf"
 
 #### 🚀 Getting Started (Small & Fast)
 ```bash
-# Phi-3 Mini (3.8B parameters) - Great for testing
-huggingface-cli download microsoft/Phi-3-mini-4k-instruct-gguf Phi-3-mini-4k-instruct-q4.gguf --local-dir ./models
+# Phi-3.5 Mini (3.8B parameters) - Latest Microsoft model, great for testing
+huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir ./models
 
-# TinyLlama (1.1B parameters) - Very fast, basic capabilities
-huggingface-cli download TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf --local-dir ./models
+# Qwen 2.5 3B (3B parameters) - Excellent small model with strong performance
+huggingface-cli download bartowski/Qwen2.5-3B-Instruct-GGUF Qwen2.5-3B-Instruct-Q4_K_M.gguf --local-dir ./models
 ```
 
-#### 💼 Production Use (Balanced Performance)
+#### 💼 Production Use (Balanced Performance) - **RECOMMENDED**
 ```bash
-# Llama 2 7B Chat - Excellent general purpose model
-huggingface-cli download TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf --local-dir ./models
+# Llama 3.1 8B Instruct - Latest Meta model, excellent general purpose (RECOMMENDED)
+huggingface-cli download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Mistral 7B Instruct - High quality, efficient
-huggingface-cli download TheBloke/Mistral-7B-Instruct-v0.1-GGUF mistral-7b-instruct-v0.1.Q4_K_M.gguf --local-dir ./models
+# Qwen 2.5 7B Instruct - Outstanding performance, multilingual
+huggingface-cli download bartowski/Qwen2.5-7B-Instruct-GGUF Qwen2.5-7B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Code Llama 7B - Specialized for coding
-huggingface-cli download TheBloke/CodeLlama-7B-Instruct-GGUF codellama-7b-instruct.Q4_K_M.gguf --local-dir ./models
+# Mistral 7B v0.3 - Latest Mistral model, high quality
+huggingface-cli download bartowski/Mistral-7B-Instruct-v0.3-GGUF Mistral-7B-Instruct-v0.3-Q4_K_M.gguf --local-dir ./models
+
+# CodeQwen 1.5 7B - Specialized for coding tasks
+huggingface-cli download bartowski/CodeQwen1.5-7B-Chat-GGUF CodeQwen1.5-7B-Chat-Q4_K_M.gguf --local-dir ./models
 ```
 
 #### 🎯 High Performance (Larger Models)
 ```bash
-# Llama 2 13B Chat - Better reasoning and knowledge
-huggingface-cli download TheBloke/Llama-2-13B-Chat-GGUF llama-2-13b-chat.Q4_K_M.gguf --local-dir ./models
+# Llama 3.1 70B Instruct - Top-tier reasoning and knowledge
+huggingface-cli download bartowski/Meta-Llama-3.1-70B-Instruct-GGUF Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Mixtral 8x7B - Mixture of experts, very capable
-huggingface-cli download TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf --local-dir ./models
+# Qwen 2.5 14B Instruct - Excellent balance of size and capability
+huggingface-cli download bartowski/Qwen2.5-14B-Instruct-GGUF Qwen2.5-14B-Instruct-Q4_K_M.gguf --local-dir ./models
+
+# Mixtral 8x7B v0.1 - Mixture of experts, very capable
+huggingface-cli download bartowski/Mixtral-8x7B-Instruct-v0.1-GGUF Mixtral-8x7B-Instruct-v0.1-Q4_K_M.gguf --local-dir ./models
 ```
 
-#### 🧠 Maximum Capability (Large Models)
+#### 🧠 Maximum Capability (Frontier Models)
 ```bash
-# Llama 2 70B Chat - Highest quality responses (requires significant RAM/VRAM)
-huggingface-cli download TheBloke/Llama-2-70B-Chat-GGUF llama-2-70b-chat.Q4_K_M.gguf --local-dir ./models
+# Llama 3.1 405B Instruct - Frontier model capability (requires massive resources)
+huggingface-cli download bartowski/Meta-Llama-3.1-405B-Instruct-GGUF Meta-Llama-3.1-405B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Code Llama 34B - Best for complex coding tasks
-huggingface-cli download TheBloke/CodeLlama-34B-Instruct-GGUF codellama-34b-instruct.Q4_K_M.gguf --local-dir ./models
+# Qwen 2.5 32B Instruct - Excellent large model performance
+huggingface-cli download bartowski/Qwen2.5-32B-Instruct-GGUF Qwen2.5-32B-Instruct-Q4_K_M.gguf --local-dir ./models
+
+# Qwen 2.5 72B Instruct - Top performance for most tasks
+huggingface-cli download bartowski/Qwen2.5-72B-Instruct-GGUF Qwen2.5-72B-Instruct-Q4_K_M.gguf --local-dir ./models
 ```
 
 ### Understanding Quantization Levels
@@ -208,18 +223,18 @@ Organize your models for easy management:
 
 ```
 models/
-├── llama-2-7b-chat/
-│   ├── llama-2-7b-chat.Q4_K_M.gguf
-│   ├── llama-2-7b-chat.Q5_K_M.gguf
+├── llama-3.1-8b/
+│   ├── Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+│   ├── Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf
 │   └── README.md
-├── mistral-7b-instruct/
-│   ├── mistral-7b-instruct-v0.1.Q4_K_M.gguf
+├── qwen-2.5-7b/
+│   ├── Qwen2.5-7B-Instruct-Q4_K_M.gguf
 │   └── README.md
-├── code-llama-7b/
-│   ├── codellama-7b-instruct.Q4_K_M.gguf
+├── phi-3.5-mini/
+│   ├── Phi-3.5-mini-instruct-Q4_K_M.gguf
 │   └── README.md
-└── tiny-llama/
-    ├── tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+└── codeqwen-1.5-7b/
+    ├── CodeQwen1.5-7B-Chat-Q4_K_M.gguf
     └── README.md
 ```
 
@@ -228,21 +243,22 @@ models/
 | Model Size | RAM Required | VRAM (GPU) | CPU Cores | Use Case |
 |------------|--------------|------------|-----------|----------|
 | **1B-3B** | 4-8 GB | 2-4 GB | 2+ | Testing, development |
-| **7B** | 8-16 GB | 6-8 GB | 4+ | General purpose |
-| **13B** | 16-32 GB | 12-16 GB | 8+ | High quality responses |
-| **34B** | 32-64 GB | 24-32 GB | 16+ | Professional use |
-| **70B** | 64-128 GB | 48-80 GB | 32+ | Maximum capability |
+| **7B-8B** | 8-16 GB | 6-10 GB | 4+ | **General purpose (RECOMMENDED)** |
+| **14B-15B** | 16-32 GB | 12-20 GB | 8+ | High quality responses |
+| **32B-34B** | 32-64 GB | 24-40 GB | 16+ | Professional use |
+| **70B-72B** | 64-128 GB | 48-80 GB | 32+ | Maximum capability |
+| **405B** | 256+ GB | 200+ GB | 64+ | Frontier model research |
 
 ### Quick Start with Downloaded Model
 
 Once you have a model downloaded:
 
 ```bash
-# Start LlamaNet with your model
-python -m inference_node.server --model-path ./models/llama-2-7b-chat.Q4_K_M.gguf
+# Start LlamaNet with Llama 3.1 8B (recommended)
+python -m inference_node.server --model-path ./models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
 
 # Or with environment variable
-export MODEL_PATH=./models/mistral-7b-instruct-v0.1.Q4_K_M.gguf
+export MODEL_PATH=./models/Qwen2.5-7B-Instruct-Q4_K_M.gguf
 python -m inference_node.server
 ```
 
