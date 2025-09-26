@@ -91,19 +91,34 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             # Log but don't crash the protocol handler
     
     async def _handle_message(self, message: Dict[str, Any], addr: Tuple[str, int]):
-        """Handle a parsed message"""
+        """Enhanced message handling with join/leave events"""
         msg_type = message.get('type')
         sender_id = message.get('sender_id')
+        
+        # Track if this is a new contact
+        is_new_contact = False
         
         # Update contact activity for any message (except responses to avoid loops)
         if sender_id and msg_type != 'response':
             from dht.kademlia_node import Contact
+            
+            # Check if this is a new contact
+            existing_contacts = self.node.routing_table.get_all_contacts()
+            existing_ids = {c.node_id for c in existing_contacts}
+            is_new_contact = sender_id not in existing_ids
+            
             contact = Contact(sender_id, addr[0], addr[1])
             self.node.routing_table.add_contact(contact)
+            
+            # Emit join event for new contacts
+            if is_new_contact:
+                await self._emit_contact_joined_event(contact)
+            
             logger.debug(f"📡 Updated contact activity: {sender_id[:8]}... from {addr}")
         
+        # Handle specific message types
         if msg_type == 'ping':
-            await self._handle_ping(message, addr)
+            await self._handle_ping_enhanced(message, addr, is_new_contact)
         elif msg_type == 'store':
             await self._handle_store(message, addr)
         elif msg_type == 'find_node':
@@ -112,6 +127,10 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             await self._handle_find_value(message, addr)
         elif msg_type == 'response':
             await self._handle_response(message, addr)
+        elif msg_type == 'join_notification':
+            await self._handle_join_notification(message, addr)
+        elif msg_type == 'leave_notification':
+            await self._handle_leave_notification(message, addr)
         else:
             logger.warning(f"Unknown message type: {msg_type}")
     
@@ -130,6 +149,98 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             'data': {
                 'pong': True,
                 'sender_id': self.node.node_id
+            }
+        }
+        await self._send_message(response, addr)
+
+    async def _handle_ping_enhanced(self, message: Dict[str, Any], addr: Tuple[str, int], is_new_contact: bool):
+        """Enhanced ping handling with join detection"""
+        sender_id = message.get('sender_id')
+        
+        if sender_id:
+            from dht.kademlia_node import Contact
+            contact = Contact(sender_id, addr[0], addr[1])
+            self.node.routing_table.add_contact(contact)
+            
+            # If this is a new contact, it might be joining
+            if is_new_contact:
+                logger.info(f"🆕 New node detected via ping: {sender_id[:8]}... from {addr}")
+        
+        response = {
+            'type': 'response',
+            'id': message.get('id'),
+            'sender_id': self.node.node_id,
+            'data': {
+                'pong': True,
+                'sender_id': self.node.node_id,
+                'node_info': {
+                    'node_id': self.node.node_id,
+                    'timestamp': time.time(),
+                    'is_new_contact_response': is_new_contact
+                }
+            }
+        }
+        await self._send_message(response, addr)
+
+    async def _emit_contact_joined_event(self, contact):
+        """Emit event when a new contact joins the DHT"""
+        try:
+            # Try to get the event publisher to emit the event
+            if hasattr(self.node, 'event_publisher'):
+                await self.node.event_publisher._broadcast_node_event("dht_contact_joined", {
+                    'contact_node_id': contact.node_id,
+                    'contact_ip': contact.ip,
+                    'contact_port': contact.port,
+                    'local_node_id': self.node.node_id,
+                    'join_method': 'dht_protocol'
+                })
+        except Exception as e:
+            logger.debug(f"Could not emit contact joined event: {e}")
+
+    async def _handle_join_notification(self, message: Dict[str, Any], addr: Tuple[str, int]):
+        """Handle explicit join notifications"""
+        sender_id = message.get('sender_id')
+        join_data = message.get('join_data', {})
+        
+        logger.info(f"📥 Received join notification from {sender_id[:8]}... at {addr}")
+        
+        # Add to routing table
+        if sender_id:
+            from dht.kademlia_node import Contact
+            contact = Contact(sender_id, addr[0], addr[1])
+            self.node.routing_table.add_contact(contact)
+        
+        # Acknowledge the join
+        response = {
+            'type': 'response',
+            'id': message.get('id'),
+            'sender_id': self.node.node_id,
+            'data': {
+                'join_acknowledged': True,
+                'welcomer_node_id': self.node.node_id
+            }
+        }
+        await self._send_message(response, addr)
+
+    async def _handle_leave_notification(self, message: Dict[str, Any], addr: Tuple[str, int]):
+        """Handle explicit leave notifications"""
+        sender_id = message.get('sender_id')
+        leave_data = message.get('leave_data', {})
+        
+        logger.info(f"📤 Received leave notification from {sender_id[:8]}... at {addr}")
+        
+        # Remove from routing table
+        if sender_id:
+            self.node.routing_table.remove_contact(sender_id)
+        
+        # Acknowledge the leave
+        response = {
+            'type': 'response',
+            'id': message.get('id'),
+            'sender_id': self.node.node_id,
+            'data': {
+                'leave_acknowledged': True,
+                'acknowledger_node_id': self.node.node_id
             }
         }
         await self._send_message(response, addr)

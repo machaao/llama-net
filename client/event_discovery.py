@@ -215,7 +215,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
     async def _monitor_dht_changes(self):
         """Monitor DHT for real-time changes with active health checking"""
         last_routing_table_size = 0
-        health_check_interval = 60  # Check node health every minute
+        health_check_interval = 30  # Check node health every minute
         last_health_check = 0
         
         while self.running:
