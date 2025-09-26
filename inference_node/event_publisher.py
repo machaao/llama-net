@@ -1,7 +1,7 @@
 import asyncio
 import time
 import hashlib
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from common.utils import get_logger, get_host_ip
 from inference_node.config import InferenceConfig
 
