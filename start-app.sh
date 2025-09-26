@@ -78,9 +78,10 @@ cleanup() {
     echo "🛑 Received shutdown signal, stopping LlamaNet node..."
     if [ ! -z "$SERVER_PID" ]; then
         echo "📤 Sending SIGTERM to server process $SERVER_PID..."
+        # Send SIGTERM and let uvicorn handle graceful shutdown
         kill -TERM $SERVER_PID 2>/dev/null || true
         
-        # Wait for graceful shutdown
+        # Wait for graceful shutdown with shorter timeout
         echo "⏳ Waiting for graceful shutdown (max 35 seconds)..."
         for i in $(seq 1 35); do
             if ! kill -0 $SERVER_PID 2>/dev/null; then
@@ -97,7 +98,7 @@ cleanup() {
     exit 0
 }
 
-# Set up signal traps
+# Set up signal traps - only trap in shell script, not in Python
 trap cleanup SIGINT SIGTERM
 
 # Build command line arguments

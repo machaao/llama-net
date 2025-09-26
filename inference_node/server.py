@@ -125,8 +125,8 @@ async def cleanup_services():
                     timeout=3.0  # Quick departure notification
                 )
                 logger.info("Departure notification sent")
-            except asyncio.TimeoutError:
-                logger.warning("Departure notification timed out")
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                logger.warning("Departure notification timed out or cancelled")
             except Exception as e:
                 logger.error(f"Error broadcasting shutdown event: {e}")
         
@@ -154,8 +154,8 @@ async def cleanup_services():
             try:
                 await asyncio.wait_for(task, timeout=5.0)
                 logger.debug(f"✅ {name} stopped")
-            except asyncio.TimeoutError:
-                logger.warning(f"⏰ {name} stop timed out")
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                logger.warning(f"⏰ {name} stop timed out or cancelled")
             except Exception as e:
                 logger.error(f"❌ Error stopping {name}: {e}")
         
@@ -165,14 +165,17 @@ async def cleanup_services():
             dht_service = SharedDHTService()
             await asyncio.wait_for(dht_service.stop(), timeout=3.0)
             logger.debug("✅ Shared DHT service stopped")
-        except asyncio.TimeoutError:
-            logger.warning("⏰ Shared DHT service stop timed out")
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            logger.warning("⏰ Shared DHT service stop timed out or cancelled")
         except Exception as e:
             logger.error(f"❌ Error stopping shared DHT service: {e}")
         
         total_cleanup_time = time.time() - cleanup_start
         logger.info(f"All services shut down in {total_cleanup_time:.2f}s")
         
+    except asyncio.CancelledError:
+        logger.warning("Cleanup was cancelled, forcing immediate shutdown")
+        # Don't re-raise CancelledError during shutdown
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
     finally:
@@ -1401,7 +1404,7 @@ async def network_events():
                     
         except asyncio.CancelledError:
             logger.info(f"SSE connection cancelled: {connection_id}")
-            raise
+            # Don't re-raise during shutdown
         except Exception as e:
             logger.error(f"Error in network events SSE: {e}")
             error_event = {
@@ -1410,11 +1413,17 @@ async def network_events():
                 "timestamp": time.time(),
                 "connection_id": connection_id
             }
-            yield f"data: {json.dumps(error_event)}\n\n"
+            try:
+                yield f"data: {json.dumps(error_event)}\n\n"
+            except:
+                pass  # Ignore errors during error handling
         finally:
             # Remove connection
-            await sse_handler.remove_connection(connection_id)
-            logger.info(f"SSE connection cleaned up: {connection_id}")
+            try:
+                await sse_handler.remove_connection(connection_id)
+                logger.info(f"SSE connection cleaned up: {connection_id}")
+            except:
+                pass  # Ignore cleanup errors during shutdown
     
     return StreamingResponse(
         event_generator(),
@@ -1710,15 +1719,8 @@ def start_server():
     if config is None:
         config = InferenceConfig()  # Will parse command line args
     
-    # Set up signal handlers for graceful shutdown
-    def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     # Configure uvicorn with graceful shutdown settings
+    # Let uvicorn handle signals - don't add our own signal handlers
     uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host,
