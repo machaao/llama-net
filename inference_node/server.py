@@ -1213,6 +1213,85 @@ async def p2p_status():
         "timestamp": time.time()
     }
 
+@app.get("/events/network")
+async def network_events():
+    """Server-Sent Events for real-time network updates"""
+    async def event_generator():
+        try:
+            # Create a client-side event listener for the UI
+            from client.event_discovery import EventBasedDHTDiscovery, NodeEventListener, NodeEvent
+            
+            class UIEventListener(NodeEventListener):
+                def __init__(self, queue):
+                    self.queue = queue
+                
+                async def on_node_event(self, event: NodeEvent):
+                    event_data = {
+                        "type": event.event_type.value,
+                        "timestamp": event.timestamp,
+                        "node_info": event.node_info.dict() if event.node_info else None,
+                        "metadata": event.metadata or {}
+                    }
+                    await self.queue.put(event_data)
+            
+            # Create event queue for this SSE connection
+            event_queue = asyncio.Queue()
+            
+            # Use the existing DHT discovery but add our listener
+            if dht_discovery:
+                ui_listener = UIEventListener(event_queue)
+                dht_discovery.add_event_listener(ui_listener)
+                
+                try:
+                    # Send initial connection event
+                    yield "data: {\"type\": \"connected\", \"timestamp\": " + str(time.time()) + "}\n\n"
+                    
+                    # Send current nodes
+                    current_nodes = await dht_discovery.get_nodes()
+                    for node in current_nodes:
+                        initial_event = {
+                            "type": "node_joined",
+                            "timestamp": time.time(),
+                            "node_info": node.dict()
+                        }
+                        yield f"data: {json.dumps(initial_event)}\n\n"
+                    
+                    # Listen for new events
+                    while True:
+                        try:
+                            # Wait for events with timeout for heartbeat
+                            event_data = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+                            yield f"data: {json.dumps(event_data)}\n\n"
+                        except asyncio.TimeoutError:
+                            # Send heartbeat
+                            heartbeat = {"type": "heartbeat", "timestamp": time.time()}
+                            yield f"data: {json.dumps(heartbeat)}\n\n"
+                            
+                except asyncio.CancelledError:
+                    logger.info("SSE connection cancelled")
+                    raise
+                finally:
+                    # Clean up listener
+                    dht_discovery.remove_event_listener(ui_listener)
+            else:
+                yield "data: {\"error\": \"DHT discovery not available\"}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Error in network events SSE: {e}")
+            error_event = {"type": "error", "message": str(e), "timestamp": time.time()}
+            yield f"data: {json.dumps(error_event)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "text/plain; charset=utf-8"
+        }
+    )
+
 @app.get("/debug/routing")
 async def debug_routing():
     """Debug endpoint to show routing information"""

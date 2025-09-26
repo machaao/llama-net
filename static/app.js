@@ -92,10 +92,25 @@ class LlamaNetUI {
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
         
-        // Real-time update properties
+        // Real-time event handling
+        this.eventSource = null;
+        this.isConnected = false;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 1000; // Start with 1 second
+        
+        // Node tracking
+        this.activeNodes = new Map(); // node_id -> NodeInfo
+        this.nodeStats = {
+            totalNodes: 0,
+            modelsAvailable: new Set(),
+            networkHealth: 'unknown'
+        };
+        
+        // Real-time update properties (keep existing ones)
         this.updateInterval = null;
         this.isUpdating = false;
-        this.updateFrequency = 15000; // 15 seconds
+        this.updateFrequency = 30000; // Reduced to 30 seconds since we have SSE
         this.lastUpdateTime = 0;
         this.connectionStatus = 'connected';
         this.previousModelStats = null;
@@ -110,10 +125,14 @@ class LlamaNetUI {
     }
     
     init() {
+        // Start real-time network monitoring first
+        this.startRealTimeNetworkMonitoring();
+        
+        // Keep the existing periodic refresh as fallback
         this.refreshNetworkStatus();
         this.setupEventListeners();
         
-        // Start real-time updates
+        // Start real-time updates (reduced frequency since we have SSE)
         this.startRealTimeUpdates();
         
         // Restore selected model UI if available
@@ -124,7 +143,7 @@ class LlamaNetUI {
                 if (selectedGroup) {
                     selectedGroup.classList.add('selected-model');
                 }
-            }, 1000); // Wait for network status to load
+            }, 1000);
         }
         
         // Handle page visibility changes
@@ -133,13 +152,273 @@ class LlamaNetUI {
                 this.stopRealTimeUpdates();
             } else {
                 this.startRealTimeUpdates();
-                this.refreshNetworkStatus(); // Immediate refresh when page becomes visible
+                this.refreshNetworkStatus();
             }
         });
     }
     
     setupEventListeners() {
         // No API mode selector needed - OpenAI only
+    }
+    
+    startRealTimeNetworkMonitoring() {
+        if (this.eventSource) {
+            this.eventSource.close();
+        }
+        
+        console.log('🔗 Connecting to real-time network events...');
+        this.eventSource = new EventSource(`${this.baseUrl}/events/network`);
+        
+        this.eventSource.onopen = () => {
+            console.log('✅ Connected to real-time network events');
+            this.isConnected = true;
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+            this.updateConnectionIndicator(true);
+        };
+        
+        this.eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                this.handleNetworkEvent(data);
+            } catch (e) {
+                console.error('Error parsing network event:', e);
+            }
+        };
+        
+        this.eventSource.onerror = (error) => {
+            console.warn('❌ Network events connection error:', error);
+            this.isConnected = false;
+            this.updateConnectionIndicator(false);
+            
+            // Implement exponential backoff for reconnection
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                this.reconnectAttempts++;
+                const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+                
+                console.log(`🔄 Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                
+                setTimeout(() => {
+                    if (!this.isConnected) {
+                        this.startRealTimeNetworkMonitoring();
+                    }
+                }, delay);
+            } else {
+                console.error('❌ Max reconnection attempts reached, falling back to polling');
+                this.showToast('error', 'Lost connection to real-time updates, using polling mode');
+            }
+        };
+    }
+    
+    handleNetworkEvent(data) {
+        switch (data.type) {
+            case 'connected':
+                console.log('📡 Real-time network monitoring connected');
+                this.showToast('success', 'Connected to real-time network updates');
+                break;
+                
+            case 'node_joined':
+                if (data.node_info) {
+                    this.activeNodes.set(data.node_info.node_id, data.node_info);
+                    console.log(`🆕 Node joined: ${data.node_info.node_id.substring(0, 8)}... (${data.node_info.model})`);
+                    this.showToast('success', `🆕 Node joined: ${data.node_info.node_id.substring(0, 8)}... (${data.node_info.model})`);
+                    this.updateNetworkDisplayRealTime();
+                }
+                break;
+                
+            case 'node_left':
+                if (data.node_info) {
+                    this.activeNodes.delete(data.node_info.node_id);
+                    console.log(`👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
+                    this.showToast('warning', `👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
+                    this.updateNetworkDisplayRealTime();
+                }
+                break;
+                
+            case 'node_updated':
+                if (data.node_info) {
+                    this.activeNodes.set(data.node_info.node_id, data.node_info);
+                    console.log(`🔄 Node updated: ${data.node_info.node_id.substring(0, 8)}...`);
+                    this.updateNetworkDisplayRealTime();
+                }
+                break;
+                
+            case 'network_changed':
+                console.log('🌐 Network topology changed');
+                this.updateNetworkDisplayRealTime();
+                break;
+                
+            case 'heartbeat':
+                // Keep connection alive, update last seen time
+                this.lastUpdateTime = Date.now();
+                break;
+                
+            case 'error':
+                console.error('Network event error:', data.message);
+                this.showToast('error', `Network error: ${data.message}`);
+                break;
+                
+            default:
+                console.log('Unknown network event:', data);
+        }
+    }
+    
+    updateNetworkDisplayRealTime() {
+        const container = document.getElementById('network-status');
+        if (!container) return;
+        
+        const nodes = Array.from(this.activeNodes.values());
+        
+        // Group nodes by model
+        const modelGroups = {};
+        nodes.forEach(node => {
+            if (!modelGroups[node.model]) {
+                modelGroups[node.model] = [];
+            }
+            modelGroups[node.model].push(node);
+        });
+        
+        // Calculate network stats
+        const totalNodes = nodes.length;
+        const avgLoad = nodes.length > 0 ? nodes.reduce((sum, n) => sum + n.load, 0) / nodes.length : 0;
+        const totalTps = nodes.reduce((sum, n) => sum + n.tps, 0);
+        
+        // Update network stats
+        this.nodeStats = {
+            totalNodes,
+            modelsAvailable: new Set(Object.keys(modelGroups)),
+            networkHealth: this.calculateNetworkHealth(avgLoad, totalNodes)
+        };
+        
+        // Create new content with real-time data
+        const newContent = `
+            <div class="mb-3">
+                <h6>
+                    <i class="fas fa-server"></i> Network Status
+                    <span class="live-indicator ms-2" title="Real-time updates">
+                        <i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i>
+                    </span>
+                </h6>
+                <div class="small mb-2">
+                    <div>Total Nodes: <span class="metric-value">${totalNodes}</span></div>
+                    <div>Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
+                    <div>Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
+                    <div>Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span></div>
+                    <div>Total Capacity: <span class="metric-value">${totalTps.toFixed(1)} TPS</span></div>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <h6><i class="fas fa-brain"></i> Available Models</h6>
+                ${this.renderModelGroupsRealTime(modelGroups)}
+            </div>
+        `;
+        
+        // Smooth update
+        container.style.opacity = '0.7';
+        setTimeout(() => {
+            container.innerHTML = newContent;
+            container.style.opacity = '1';
+        }, 150);
+    }
+    
+    renderModelGroupsRealTime(modelGroups) {
+        if (Object.keys(modelGroups).length === 0) {
+            return '<div class="text-muted small">No models discovered on network</div>';
+        }
+        
+        return Object.entries(modelGroups).map(([modelName, nodes]) => {
+            const avgLoad = nodes.reduce((sum, n) => sum + n.load, 0) / nodes.length;
+            const totalTps = nodes.reduce((sum, n) => sum + n.tps, 0);
+            const availability = this.getAvailability(nodes.length);
+            const availabilityClass = this.getAvailabilityClass(availability);
+            
+            return `
+                <div class="model-group mb-2" data-model="${modelName}">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <div class="fw-bold small text-primary">
+                            <i class="fas fa-brain"></i> ${modelName}
+                            <span class="badge bg-${availabilityClass} ms-1">${availability}</span>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel('${modelName}')" title="Select this model">
+                            <i class="fas fa-check"></i>
+                        </button>
+                    </div>
+                    <div class="small text-muted mb-1">
+                        <div>
+                            Nodes: <span class="metric-value">${nodes.length}</span> | 
+                            Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span> | 
+                            Total TPS: <span class="metric-value">${totalTps.toFixed(1)}</span>
+                        </div>
+                    </div>
+                    <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
+                        ${this.renderModelNodesRealTime(nodes)}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    renderModelNodesRealTime(nodes) {
+        return nodes.map(node => {
+            const isRecent = (Date.now() / 1000) - node.last_seen < 60;
+            const statusClass = isRecent ? 'online' : 'warning';
+            const lastSeenText = this.formatLastSeen(node.last_seen);
+            
+            return `
+                <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
+                    <div class="d-flex align-items-center">
+                        <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
+                        <div class="flex-grow-1">
+                            <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
+                            <div class="text-muted">${node.ip}:${node.port}</div>
+                            <div class="text-muted">Load: ${node.load.toFixed(2)} | TPS: ${node.tps.toFixed(1)}</div>
+                            <div class="text-muted small">${lastSeenText}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    calculateNetworkHealth(avgLoad, nodeCount) {
+        if (nodeCount === 0) return 'no_nodes';
+        if (avgLoad < 0.3 && nodeCount >= 2) return 'excellent';
+        if (avgLoad < 0.7) return 'good';
+        return 'poor';
+    }
+    
+    getAvailability(nodeCount) {
+        if (nodeCount >= 3) return 'high';
+        if (nodeCount >= 2) return 'medium';
+        return 'low';
+    }
+    
+    getAvailabilityClass(availability) {
+        const classes = { 'high': 'success', 'medium': 'warning', 'low': 'danger' };
+        return classes[availability] || 'secondary';
+    }
+    
+    updateConnectionIndicator(connected) {
+        const indicators = document.querySelectorAll('.live-indicator');
+        indicators.forEach(indicator => {
+            if (connected) {
+                indicator.innerHTML = '<i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i>';
+                indicator.title = 'Real-time updates active';
+            } else {
+                indicator.innerHTML = '<i class="fas fa-circle text-danger" style="font-size: 0.5rem;"></i>';
+                indicator.title = 'Real-time updates disconnected';
+            }
+        });
+    }
+    
+    stopRealTimeNetworkMonitoring() {
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+        this.isConnected = false;
+        this.updateConnectionIndicator(false);
     }
     
     async refreshNetworkStatus() {
@@ -1609,6 +1888,7 @@ class LlamaNetUI {
     // Add cleanup method
     cleanup() {
         this.stopRealTimeUpdates();
+        this.stopRealTimeNetworkMonitoring();
     }
 }
 
@@ -1634,4 +1914,11 @@ function showNetworkModal() {
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     llamaNetUI = new LlamaNetUI();
+});
+
+// Update the window beforeunload handler
+window.addEventListener('beforeunload', () => {
+    if (llamaNetUI) {
+        llamaNetUI.cleanup();
+    }
 });
