@@ -34,10 +34,7 @@ class HardwareFingerprint:
             
             # Network interfaces (MAC addresses)
             self.fingerprint_data['mac_addresses'] = self._get_mac_addresses()
-            
-            # System UUID (if available)
-            self.fingerprint_data['system_uuid'] = self._get_system_uuid()
-            
+
             # Hostname (as fallback)
             self.fingerprint_data['hostname'] = socket.gethostname()
             
@@ -107,9 +104,6 @@ class HardwareFingerprint:
         # Primary identifiers (most stable)
         if self.fingerprint_data.get('mac_addresses'):
             fingerprint_parts.extend(self.fingerprint_data['mac_addresses'])
-        
-        if self.fingerprint_data.get('system_uuid'):
-            fingerprint_parts.append(self.fingerprint_data['system_uuid'])
         
         # Secondary identifiers
         fingerprint_parts.extend([
