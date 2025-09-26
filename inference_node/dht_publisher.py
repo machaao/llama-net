@@ -77,12 +77,6 @@ class HardwareBasedDHTPublisher(EventBasedDHTPublisher):
                 # Check if metrics changed significantly
                 should_update = self._should_update_metrics(current_metrics)
                 
-                # Force update periodically
-                if current_time - self.last_forced_update > self.forced_update_interval:
-                    should_update = True
-                    self.last_forced_update = current_time
-                    logger.debug("Forcing periodic DHT update")
-                
                 # Periodic hardware validation
                 if current_time - self.last_hardware_validation > self.hardware_validation_interval:
                     await self._validate_hardware_consistency()
