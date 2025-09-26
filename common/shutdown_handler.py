@@ -189,7 +189,7 @@ class DHTPublisherShutdownHandler:
         if self.dht_publisher and hasattr(self.dht_publisher, 'monitor_task'):
             self.add_shutdown_task(
                 "dht_publisher_monitor_task",
-                self._cancel_task(self.dht_publisher.monitor_task, "DHT publisher monitor"),
+                lambda: self._cancel_task_impl(self.dht_publisher.monitor_task, "DHT publisher monitor"),
                 timeout=1.0,
                 priority=1
             )
@@ -197,7 +197,7 @@ class DHTPublisherShutdownHandler:
         if self.dht_discovery and hasattr(self.dht_discovery, 'event_processor_task'):
             self.add_shutdown_task(
                 "dht_discovery_event_processor",
-                self._cancel_task(self.dht_discovery.event_processor_task, "DHT discovery event processor"),
+                lambda: self._cancel_task_impl(self.dht_discovery.event_processor_task, "DHT discovery event processor"),
                 timeout=1.0,
                 priority=1
             )
@@ -205,7 +205,7 @@ class DHTPublisherShutdownHandler:
         if self.dht_discovery and hasattr(self.dht_discovery, 'dht_monitor_task'):
             self.add_shutdown_task(
                 "dht_discovery_monitor",
-                self._cancel_task(self.dht_discovery.dht_monitor_task, "DHT discovery monitor"),
+                lambda: self._cancel_task_impl(self.dht_discovery.dht_monitor_task, "DHT discovery monitor"),
                 timeout=1.0,
                 priority=1
             )
@@ -213,7 +213,7 @@ class DHTPublisherShutdownHandler:
         if self.dht_discovery and hasattr(self.dht_discovery, 'unknown_nodes_task'):
             self.add_shutdown_task(
                 "dht_discovery_unknown_nodes",
-                self._cancel_task(self.dht_discovery.unknown_nodes_task, "DHT discovery unknown nodes"),
+                lambda: self._cancel_task_impl(self.dht_discovery.unknown_nodes_task, "DHT discovery unknown nodes"),
                 timeout=1.0,
                 priority=1
             )
@@ -221,7 +221,7 @@ class DHTPublisherShutdownHandler:
         if self.sse_network_monitor and hasattr(self.sse_network_monitor, 'monitor_task'):
             self.add_shutdown_task(
                 "sse_network_monitor_task",
-                self._cancel_task(self.sse_network_monitor.monitor_task, "SSE network monitor"),
+                lambda: self._cancel_task_impl(self.sse_network_monitor.monitor_task, "SSE network monitor"),
                 timeout=1.0,
                 priority=1
             )
@@ -229,7 +229,7 @@ class DHTPublisherShutdownHandler:
         if self.heartbeat_manager and hasattr(self.heartbeat_manager, 'heartbeat_task'):
             self.add_shutdown_task(
                 "heartbeat_manager_task",
-                self._cancel_task(self.heartbeat_manager.heartbeat_task, "Heartbeat manager"),
+                lambda: self._cancel_task_impl(self.heartbeat_manager.heartbeat_task, "Heartbeat manager"),
                 timeout=1.0,
                 priority=1
             )
@@ -238,7 +238,7 @@ class DHTPublisherShutdownHandler:
         if self.heartbeat_manager:
             self.add_shutdown_task(
                 "heartbeat_manager_stop",
-                self._safe_stop(self.heartbeat_manager, "heartbeat manager"),
+                lambda: self._safe_stop_impl(self.heartbeat_manager, "heartbeat manager"),
                 timeout=1.0,
                 priority=2
             )
@@ -246,7 +246,7 @@ class DHTPublisherShutdownHandler:
         if self.sse_network_monitor:
             self.add_shutdown_task(
                 "sse_network_monitor_stop",
-                self._safe_stop(self.sse_network_monitor, "SSE network monitor"),
+                lambda: self._safe_stop_impl(self.sse_network_monitor, "SSE network monitor"),
                 timeout=1.0,
                 priority=2
             )
@@ -254,7 +254,7 @@ class DHTPublisherShutdownHandler:
         if self.p2p_handler:
             self.add_shutdown_task(
                 "p2p_handler_close",
-                self._safe_close(self.p2p_handler, "P2P handler"),
+                lambda: self._safe_close_impl(self.p2p_handler, "P2P handler"),
                 timeout=1.0,
                 priority=2
             )
@@ -340,43 +340,34 @@ class DHTPublisherShutdownHandler:
             self.sse_handler.running = False
             logger.debug("SSE handler stopped accepting new connections")
     
-    async def _cancel_task(self, task: Optional[asyncio.Task], name: str):
-        """Cancel an asyncio task safely"""
-        async def cancel_impl():
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    logger.debug(f"✅ {name} task cancelled")
-                except Exception as e:
-                    logger.debug(f"❌ Error cancelling {name} task: {e}")
-            else:
-                logger.debug(f"✅ {name} task already done or None")
-        
-        return cancel_impl
-    
-    async def _safe_stop(self, component: Any, name: str):
-        """Safely stop a component with stop() method"""
-        async def stop_impl():
-            if component and hasattr(component, 'stop'):
-                await component.stop()
-                logger.debug(f"✅ {name} stopped")
-            else:
-                logger.debug(f"✅ {name} has no stop method or is None")
-        
-        return stop_impl
-    
-    async def _safe_close(self, component: Any, name: str):
-        """Safely close a component with close() method"""
-        async def close_impl():
-            if component and hasattr(component, 'close'):
-                await component.close()
-                logger.debug(f"✅ {name} closed")
-            else:
-                logger.debug(f"✅ {name} has no close method or is None")
-        
-        return close_impl
+    async def _cancel_task_impl(self, task: Optional[asyncio.Task], name: str):
+        """Implementation for cancelling an asyncio task safely"""
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                logger.debug(f"✅ {name} task cancelled")
+            except Exception as e:
+                logger.debug(f"❌ Error cancelling {name} task: {e}")
+        else:
+            logger.debug(f"✅ {name} task already done or None")
+
+    async def _safe_stop_impl(self, component: Any, name: str):
+        """Implementation for safely stopping a component with stop() method"""
+        if component and hasattr(component, 'stop'):
+            await component.stop()
+            logger.debug(f"✅ {name} stopped")
+        else:
+            logger.debug(f"✅ {name} has no stop method or is None")
+
+    async def _safe_close_impl(self, component: Any, name: str):
+        """Implementation for safely closing a component with close() method"""
+        if component and hasattr(component, 'close'):
+            await component.close()
+            logger.debug(f"✅ {name} closed")
+        else:
+            logger.debug(f"✅ {name} has no close method or is None")
     
     async def _stop_dht_publisher(self):
         """Stop DHT publisher with enhanced cleanup"""
