@@ -65,6 +65,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.event_queue = asyncio.Queue()
         self.event_processor_task = None
         self.dht_monitor_task = None
+        self.unknown_nodes_task = None
         self.running = False
         
         # Pure event-driven - NO POLLING
@@ -110,28 +111,27 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.event_processor_task = asyncio.create_task(self._process_events())
         self.dht_monitor_task = asyncio.create_task(self._monitor_dht_changes())
         
+        # Start background task to update unknown nodes
+        self.unknown_nodes_task = asyncio.create_task(self._update_unknown_nodes())
+        
         # Initial network discovery
         await self._perform_initial_discovery()
         
-        logger.info("Event-based discovery started")
+        logger.info("Event-based discovery started with background node updates")
     
     async def stop(self):
         """Stop the event-based discovery service"""
         self.running = False
         
-        if self.event_processor_task:
-            self.event_processor_task.cancel()
-            try:
-                await self.event_processor_task
-            except asyncio.CancelledError:
-                pass
-        
-        if self.dht_monitor_task:
-            self.dht_monitor_task.cancel()
-            try:
-                await self.dht_monitor_task
-            except asyncio.CancelledError:
-                pass
+        # Stop all tasks
+        tasks = [self.event_processor_task, self.dht_monitor_task, self.unknown_nodes_task]
+        for task in tasks:
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         
         # Clear state
         self.active_nodes.clear()
@@ -246,7 +246,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 await asyncio.sleep(10)  # Wait longer on errors
     
     async def _handle_routing_table_change(self):
-        """Handle changes in the DHT routing table"""
+        """Handle changes in the DHT routing table with better logging"""
         try:
             # Get current contacts from routing table
             contacts = self.kademlia_node.routing_table.get_all_contacts()
@@ -256,25 +256,37 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             known_contact_ids = {node_id for node_id in self.known_node_ids}
             new_contact_ids = current_contact_ids - known_contact_ids
             
+            logger.info(f"📊 DHT routing table change: {len(contacts)} total contacts, {len(new_contact_ids)} new")
+            
             # Process new contacts
             for contact in contacts:
                 if contact.node_id in new_contact_ids:
+                    logger.info(f"🆕 New DHT contact detected: {contact.node_id[:8]}... at {contact.ip}")
                     await self._process_new_contact(contact)
+            
+            # Update known contacts
+            self.known_node_ids.update(current_contact_ids)
             
             # Emit network change event
             await self._emit_event(NodeEvent(
                 event_type=NodeEventType.NETWORK_CHANGED,
                 node_info=None,
                 timestamp=time.time(),
-                metadata={"routing_table_size": len(contacts)}
+                metadata={
+                    "routing_table_size": len(contacts),
+                    "new_contacts": len(new_contact_ids),
+                    "total_known_nodes": len(self.known_node_ids)
+                }
             ))
             
         except Exception as e:
             logger.error(f"Error handling routing table change: {e}")
     
     async def _process_new_contact(self, contact):
-        """Process a new DHT contact"""
+        """Process a new DHT contact with improved reliability"""
         try:
+            logger.debug(f"🔍 Processing new DHT contact: {contact.node_id[:8]}... at {contact.ip}")
+            
             # Try to get node info via HTTP
             node_info = await self._get_node_info_from_contact(contact)
             
@@ -284,63 +296,116 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     await self._emit_event(NodeEvent(
                         event_type=NodeEventType.NODE_JOINED,
                         node_info=node_info,
-                        timestamp=time.time()
+                        timestamp=time.time(),
+                        metadata={
+                            "source": "dht_contact",
+                            "discovery_method": "http_probe" if node_info.model != 'unknown' else "dht_fallback",
+                            "contact_ip": contact.ip,
+                            "contact_port": getattr(contact, 'port', None)
+                        }
                     ))
+                    logger.info(f"✅ Emitted NODE_JOINED event for {contact.node_id[:8]}...")
                 else:
-                    logger.debug(f"Node {contact.node_id[:8]}... filtered out")
-            
+                    logger.debug(f"❌ Node {contact.node_id[:8]}... filtered out by inclusion rules")
+            else:
+                logger.warning(f"❌ Could not create node info for contact {contact.node_id[:8]}...")
+                
         except Exception as e:
-            logger.debug(f"Could not process contact {contact.node_id[:8]}...: {e}")
+            logger.error(f"❌ Error processing contact {contact.node_id[:8]}...: {e}")
     
     async def _get_node_info_from_contact(self, contact) -> Optional[NodeInfo]:
-        """Get detailed node info from a DHT contact"""
+        """Get detailed node info from a DHT contact with fallback"""
         # Try to find the HTTP port for this contact
         http_port = await self._probe_http_port(contact.ip, contact.node_id)
-        if not http_port:
-            return None
         
-        # Get node information via HTTP
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
-                async with session.get(f"http://{contact.ip}:{http_port}/info") as resp:
-                    if resp.status == 200:
-                        info = await resp.json()
-                        
-                        # Create NodeInfo from HTTP response
-                        node_info = NodeInfo(
-                            node_id=info.get('node_id', f"{contact.ip}:{http_port}"),
-                            ip=contact.ip,
-                            port=http_port,
-                            model=info.get('model', 'unknown'),
-                            load=info.get('load', 0.0),
-                            tps=info.get('tps', 0.0),
-                            uptime=info.get('uptime', 0),
-                            last_seen=int(time.time())
-                        )
-                        
-                        return node_info
-        except Exception as e:
-            logger.debug(f"Failed to get node info from {contact.ip}:{http_port}: {e}")
+        if http_port:
+            # Get node information via HTTP
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                    async with session.get(f"http://{contact.ip}:{http_port}/info") as resp:
+                        if resp.status == 200:
+                            info = await resp.json()
+                            
+                            # Create NodeInfo from HTTP response
+                            node_info = NodeInfo(
+                                node_id=info.get('node_id', contact.node_id),
+                                ip=contact.ip,
+                                port=http_port,
+                                model=info.get('model', 'unknown'),
+                                load=0.0,  # Will be updated by metrics
+                                tps=0.0,   # Will be updated by metrics
+                                uptime=0,  # Will be updated by metrics
+                                last_seen=int(time.time())
+                            )
+                            
+                            logger.info(f"✅ Got full node info for {contact.node_id[:8]}... via HTTP")
+                            return node_info
+            except Exception as e:
+                logger.debug(f"Failed to get HTTP node info from {contact.ip}:{http_port}: {e}")
         
-        return None
+        # Fallback: Create basic node info from DHT contact
+        logger.info(f"📡 Creating basic node info for {contact.node_id[:8]}... from DHT contact")
+        
+        # Use common default HTTP port or derive from DHT port
+        fallback_http_port = 8000
+        if hasattr(contact, 'port') and contact.port:
+            # Try to derive HTTP port from DHT port (common pattern: DHT+1000 or DHT-1)
+            if contact.port > 8000:
+                fallback_http_port = contact.port - 1  # e.g., DHT 8001 -> HTTP 8000
+            else:
+                fallback_http_port = contact.port + 1000  # e.g., DHT 8001 -> HTTP 9001
+        
+        node_info = NodeInfo(
+            node_id=contact.node_id,
+            ip=contact.ip,
+            port=fallback_http_port,
+            model='unknown',  # Will be updated when HTTP becomes available
+            load=0.0,
+            tps=0.0,
+            uptime=0,
+            last_seen=int(contact.last_seen) if hasattr(contact, 'last_seen') else int(time.time())
+        )
+        
+        logger.info(f"📡 Created fallback node info for {contact.node_id[:8]}... (HTTP port estimated as {fallback_http_port})")
+        return node_info
     
     async def _probe_http_port(self, ip: str, node_id: str) -> Optional[int]:
-        """Probe for the correct HTTP port for a node"""
+        """Probe for the correct HTTP port for a node with enhanced detection"""
         import aiohttp
         
-        # Try common HTTP ports
-        test_ports = [8000, 8002, 8004, 8006, 8008, 8010]
+        # Expanded port range based on common LlamaNet configurations
+        test_ports = [8000, 8002, 8004, 8006, 8008, 8010, 8012, 8014, 8016, 8018, 8020]
         
-        for port in test_ports:
+        # Try ports in parallel for faster detection
+        async def test_port(port):
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1)) as session:
-                    async with session.get(f"http://{ip}:{port}/health") as resp:
-                        if resp.status in [200, 404]:  # 404 is ok, means server is responding
-                            return port
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+                    # Try multiple endpoints to increase success rate
+                    endpoints = ['/health', '/info', '/status', '/v1/models']
+                    
+                    for endpoint in endpoints:
+                        try:
+                            async with session.get(f"http://{ip}:{port}{endpoint}") as resp:
+                                if resp.status in [200, 404, 405]:  # Any valid HTTP response
+                                    logger.debug(f"Found HTTP port {port} for {node_id[:8]}... via {endpoint}")
+                                    return port
+                        except:
+                            continue
             except:
-                continue
+                pass
+            return None
         
+        # Test ports in parallel
+        tasks = [test_port(port) for port in test_ports]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Return first successful port
+        for result in results:
+            if isinstance(result, int):
+                return result
+        
+        logger.debug(f"Could not find HTTP port for {node_id[:8]}... at {ip}")
         return None
     
     def _should_include_node(self, node_info: NodeInfo) -> bool:
@@ -544,6 +609,76 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             logger.debug(f"Health check failed for {node_id[:8]}...: {e}")
         
         return False
+
+    async def _update_unknown_nodes(self):
+        """Background task to update nodes with unknown model info"""
+        while self.running:
+            try:
+                # Find nodes with unknown models
+                unknown_nodes = [
+                    (node_id, node_info) for node_id, node_info in self.active_nodes.items()
+                    if node_info.model == 'unknown'
+                ]
+                
+                if unknown_nodes:
+                    logger.debug(f"🔄 Attempting to update {len(unknown_nodes)} nodes with unknown info")
+                    
+                    for node_id, node_info in unknown_nodes:
+                        try:
+                            # Try to get updated info via HTTP
+                            updated_info = await self._get_updated_node_info(node_info)
+                            if updated_info and updated_info.model != 'unknown':
+                                # Update the node info
+                                self.active_nodes[node_id] = updated_info
+                                
+                                # Emit update event
+                                await self._emit_event(NodeEvent(
+                                    event_type=NodeEventType.NODE_UPDATED,
+                                    node_info=updated_info,
+                                    timestamp=time.time(),
+                                    metadata={"reason": "http_info_discovered"}
+                                ))
+                                
+                                logger.info(f"✅ Updated node info for {node_id[:8]}... - model: {updated_info.model}")
+                        except Exception as e:
+                            logger.debug(f"Could not update node {node_id[:8]}...: {e}")
+                
+                # Run every 30 seconds
+                await asyncio.sleep(30)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in unknown nodes update task: {e}")
+                await asyncio.sleep(60)
+
+    async def _get_updated_node_info(self, node_info: NodeInfo) -> Optional[NodeInfo]:
+        """Try to get updated node info via HTTP"""
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+                async with session.get(f"http://{node_info.ip}:{node_info.port}/info") as resp:
+                    if resp.status == 200:
+                        info = await resp.json()
+                        
+                        # Update the node info with new data
+                        updated_info = NodeInfo(
+                            node_id=node_info.node_id,
+                            ip=node_info.ip,
+                            port=node_info.port,
+                            model=info.get('model', node_info.model),
+                            load=node_info.load,  # Keep current metrics
+                            tps=node_info.tps,
+                            uptime=node_info.uptime,
+                            last_seen=int(time.time())
+                        )
+                        
+                        return updated_info
+        except Exception as e:
+            logger.debug(f"Failed to get updated info for {node_info.node_id[:8]}...: {e}")
+        
+        return None
 
     async def _reevaluate_all_nodes(self):
         """Re-evaluate all current nodes against new filtering rules"""
