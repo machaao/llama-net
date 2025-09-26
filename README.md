@@ -6,6 +6,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 
 ## Features
 
+- **Hardware-based node identity** - Nodes maintain consistent IDs across restarts based on hardware fingerprinting
 - **Decentralized DHT-based node discovery** using Kademlia protocol
 - **High-performance inference** powered by [llama.cpp](https://github.com/ggerganov/llama.cpp)
 - **Real-time streaming inference** with Server-Sent Events (SSE)
@@ -27,6 +28,27 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 ### Streaming Endpoints
 - **OpenAI Compatible**: `/v1/chat/completions` and `/v1/completions` with `stream: true`
 - **Web Interface**: Toggle streaming on/off in the browser UI
+
+## Hardware-Based Node Identity
+
+### Consistent Node IDs
+- **Hardware Fingerprinting**: Node IDs are generated based on CPU, memory, MAC addresses, and system identifiers
+- **Persistent Identity**: Nodes maintain the same ID across restarts and reboots
+- **Duplicate Prevention**: Eliminates duplicate node registrations in the DHT network
+- **Multi-Node Support**: Multiple nodes on the same hardware get unique IDs based on port numbers
+
+### Hardware Fingerprint Components
+- **CPU Information**: Core count and architecture
+- **Memory Configuration**: Total RAM size
+- **Network Interfaces**: MAC addresses from physical interfaces
+- **System Identifiers**: Platform UUID and hostname
+- **Port Differentiation**: Allows multiple nodes per machine
+
+### Node ID Validation
+- **Consistency Checks**: Validates node ID matches current hardware on startup
+- **Hardware Change Detection**: Automatically updates node ID when hardware changes
+- **Fallback Mechanisms**: Uses legacy random IDs if hardware fingerprinting fails
+- **Debug Endpoints**: `/hardware` and `/debug/node-id` for troubleshooting
 
 ## Requirements
 
@@ -61,6 +83,7 @@ This starts:
 - **HTTP API** on port 8000 (inference endpoints)
 - **DHT node** on port 8001 (peer discovery)
 - **Web UI** at http://localhost:8000
+- **Hardware-based node ID** automatically generated and stored
 
 ### 2. Start Additional Nodes
 
@@ -72,12 +95,15 @@ python -m inference_node.server \
   --bootstrap-nodes localhost:8001
 ```
 
+**Note**: Each additional node will automatically generate a unique hardware-based node ID that includes the port number, ensuring no conflicts when running multiple nodes on the same machine.
+
 ### 3. Use the Web Interface
 
 Open http://localhost:8000 in your browser for an interactive chat interface with:
 - **Real-time streaming responses**
 - **Network status monitoring**
 - **Streaming toggle** for instant vs. complete responses
+- **Hardware fingerprint information** in node details
 
 
 ## Model Setup
@@ -1271,6 +1297,24 @@ curl http://localhost:8000/static/style.css
 - Ensure your HTTP client supports streaming
 - Check for proxy/firewall interference
 - Verify Content-Type headers are correct
+
+### Hardware Identity Issues
+```bash
+# Check hardware fingerprint
+curl http://localhost:8000/hardware
+
+# Validate node ID consistency
+curl http://localhost:8000/hardware/validate
+
+# Debug node ID mismatches
+curl http://localhost:8000/debug/node-id
+
+# Force hardware revalidation
+curl -X POST http://localhost:8000/hardware/update
+
+# Fix node ID mismatches (emergency)
+curl -X POST http://localhost:8000/debug/fix-node-id
+```
 
 ### Debug Mode
 ```bash
