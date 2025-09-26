@@ -112,12 +112,9 @@ class LlamaNetUI {
         this.recentNodeActivity = new Map();
         this.nodeLeftDebounceTime = 15000; // 15 seconds
         
-        // Real-time update properties (keep existing ones)
-        this.updateInterval = null;
-        this.isUpdating = false;
-        this.updateFrequency = 30000; // Reduced to 30 seconds since we have SSE
+        // SSE-based update properties
         this.lastUpdateTime = 0;
-        this.connectionStatus = 'connected';
+        this.connectionStatus = 'connecting';
         this.previousModelStats = null;
         this.previousNodeStates = null;
         this.currentNodeStates = null;
@@ -130,15 +127,14 @@ class LlamaNetUI {
     }
     
     init() {
-        // Start real-time network monitoring first
+        // Start real-time network monitoring with SSE
         this.startRealTimeNetworkMonitoring();
         
-        // Keep the existing periodic refresh as fallback
+        // Initial network status load
         this.refreshNetworkStatus();
         this.setupEventListeners();
         
-        // Start real-time updates (reduced frequency since we have SSE)
-        this.startRealTimeUpdates();
+        // No polling needed - SSE handles real-time updates
         
         // Restore selected model UI if available
         if (this.selectedModel) {
@@ -159,9 +155,13 @@ class LlamaNetUI {
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                this.stopRealTimeUpdates();
+                // Keep SSE running but reduce activity
+                console.log('Page hidden - SSE continues running');
             } else {
-                this.startRealTimeUpdates();
+                // Ensure SSE is still connected
+                if (!this.isConnected) {
+                    this.startRealTimeNetworkMonitoring();
+                }
                 this.refreshNetworkStatus();
             }
         });
@@ -214,8 +214,9 @@ class LlamaNetUI {
                     }
                 }, delay);
             } else {
-                console.error('❌ Max reconnection attempts reached, falling back to polling');
-                this.showToast('error', 'Lost connection to real-time updates, using polling mode');
+                console.error('❌ Max reconnection attempts reached, SSE unavailable');
+                this.showToast('error', 'Lost connection to real-time updates. Please refresh the page.');
+                this.updateConnectionStatus('error');
             }
         };
     }
@@ -1843,74 +1844,9 @@ class LlamaNetUI {
         return div.innerHTML;
     }
     
-    // Real-time update methods
-    startRealTimeUpdates() {
-        if (this.updateInterval) {
-            return; // Already running
-        }
-        
-        this.updateInterval = setInterval(async () => {
-            if (!this.isUpdating) {
-                await this.performRealTimeUpdate();
-            }
-        }, this.updateFrequency);
-        
-        console.log('Real-time model updates started');
-        this.updateConnectionStatus('connected');
-    }
-    
-    stopRealTimeUpdates() {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-            this.updateInterval = null;
-            console.log('Real-time model updates stopped');
-        }
-    }
-    
-    async performRealTimeUpdate() {
-        if (this.isUpdating) return;
-        
-        this.isUpdating = true;
-        
-        try {
-            // Show subtle update indicator
-            this.showUpdateIndicator(true);
-            
-            // Get fresh data with minimal UI disruption
-            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/dht/status`),
-                fetch(`${this.baseUrl}/v1/models/network`),
-                fetch(`${this.baseUrl}/models/statistics`)
-            ]);
-            
-            if (dhtResponse.ok && modelsResponse.ok && statsResponse.ok) {
-                const dhtStatus = await dhtResponse.json();
-                const modelsData = await modelsResponse.json();
-                const statsData = await statsResponse.json();
-                
-                // Update display with smooth transitions
-                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
-                this.updateConnectionStatus('connected');
-                this.lastUpdateTime = Date.now();
-                this.errorCount = 0; // Reset error count on success
-                
-            } else {
-                this.updateConnectionStatus('warning');
-                console.warn('Some network endpoints returned errors during real-time update');
-            }
-            
-        } catch (error) {
-            console.error('Real-time update failed:', error);
-            this.updateConnectionStatus('error');
-            
-            // Implement exponential backoff on errors
-            this.handleUpdateError();
-            
-        } finally {
-            this.isUpdating = false;
-            this.showUpdateIndicator(false);
-        }
-    }
+    // SSE-only real-time updates (no polling)
+    // All real-time updates now handled through SSE events
+    // Polling methods removed to prevent redundant network calls
     
     // Helper methods for tracking changes and animations
     isModelUpdated(modelId, currentStats) {
@@ -1952,9 +1888,12 @@ class LlamaNetUI {
         const indicator = document.querySelector('.live-indicator');
         if (indicator) {
             if (show) {
-                indicator.innerHTML = '<i class="fas fa-sync-alt fa-spin text-primary" style="font-size: 0.5rem;" title="Updating..."></i>';
+                indicator.innerHTML = '<i class="fas fa-sync-alt fa-spin text-primary" style="font-size: 0.5rem;" title="Processing update..."></i>';
             } else {
-                indicator.innerHTML = '<i class="fas fa-circle text-success" style="font-size: 0.5rem;" title="Live updates active"></i>';
+                const statusIcon = this.isConnected ? 
+                    '<i class="fas fa-circle text-success" style="font-size: 0.5rem;" title="SSE connected"></i>' :
+                    '<i class="fas fa-circle text-warning" style="font-size: 0.5rem;" title="SSE disconnected"></i>';
+                indicator.innerHTML = statusIcon;
             }
         }
     }
@@ -1988,19 +1927,21 @@ class LlamaNetUI {
         }
     }
     
-    handleUpdateError() {
-        // Implement exponential backoff
-        const baseDelay = 5000; // 5 seconds
-        const maxDelay = 60000; // 1 minute
+    handleSSEError() {
+        // Handle SSE connection errors with exponential backoff
+        const baseDelay = 2000; // 2 seconds
+        const maxDelay = 30000; // 30 seconds
         
         if (!this.errorCount) this.errorCount = 0;
         this.errorCount++;
         
         const delay = Math.min(baseDelay * Math.pow(2, this.errorCount - 1), maxDelay);
         
+        console.log(`SSE reconnection scheduled in ${delay}ms (attempt ${this.errorCount})`);
+        
         setTimeout(() => {
-            if (this.connectionStatus === 'error') {
-                this.performRealTimeUpdate();
+            if (!this.isConnected) {
+                this.startRealTimeNetworkMonitoring();
             }
         }, delay);
     }
@@ -2020,8 +1961,17 @@ class LlamaNetUI {
     
     // Add cleanup method
     cleanup() {
-        this.stopRealTimeUpdates();
         this.stopRealTimeNetworkMonitoring();
+        
+        // Clear any remaining timers
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+        }
+        
+        // Clear debounce timers
+        this.nodeEventDebouncer.forEach(timer => clearTimeout(timer));
+        this.nodeEventDebouncer.clear();
     }
     
     clearChatHistory() {

@@ -1220,8 +1220,9 @@ async def p2p_status():
 
 @app.get("/events/network")
 async def network_events():
-    """Server-Sent Events for real-time network updates"""
+    """Server-Sent Events for real-time network updates - Pure SSE implementation"""
     async def event_generator():
+        ui_listener = None
         try:
             # Create a client-side event listener for the UI
             from client.event_discovery import EventBasedDHTDiscovery, NodeEventListener, NodeEvent
@@ -1229,62 +1230,111 @@ async def network_events():
             class UIEventListener(NodeEventListener):
                 def __init__(self, queue):
                     self.queue = queue
+                    self.connection_id = uuid.uuid4().hex[:8]
                 
                 async def on_node_event(self, event: NodeEvent):
                     event_data = {
                         "type": event.event_type.value,
                         "timestamp": event.timestamp,
                         "node_info": event.node_info.dict() if event.node_info else None,
-                        "metadata": event.metadata or {}
+                        "metadata": event.metadata or {},
+                        "connection_id": self.connection_id
                     }
-                    await self.queue.put(event_data)
+                    try:
+                        await asyncio.wait_for(self.queue.put(event_data), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"SSE queue full for connection {self.connection_id}")
             
-            # Create event queue for this SSE connection
-            event_queue = asyncio.Queue()
+            # Create event queue for this SSE connection with size limit
+            event_queue = asyncio.Queue(maxsize=100)
             
             # Use the existing DHT discovery but add our listener
             if dht_discovery:
                 ui_listener = UIEventListener(event_queue)
                 dht_discovery.add_event_listener(ui_listener)
                 
+                logger.info(f"SSE connection established: {ui_listener.connection_id}")
+                
+                # Send initial connection event
+                connection_event = {
+                    "type": "connected", 
+                    "timestamp": time.time(),
+                    "connection_id": ui_listener.connection_id,
+                    "server_info": {
+                        "node_id": config.node_id[:8] + "..." if config else "unknown",
+                        "sse_version": "1.0"
+                    }
+                }
+                yield f"data: {json.dumps(connection_event)}\n\n"
+                
+                # Send current network state
                 try:
-                    # Send initial connection event
-                    yield "data: {\"type\": \"connected\", \"timestamp\": " + str(time.time()) + "}\n\n"
-                    
-                    # Send current nodes
                     current_nodes = await dht_discovery.get_nodes()
                     for node in current_nodes:
                         initial_event = {
                             "type": "node_joined",
                             "timestamp": time.time(),
-                            "node_info": node.dict()
+                            "node_info": node.dict(),
+                            "connection_id": ui_listener.connection_id
                         }
                         yield f"data: {json.dumps(initial_event)}\n\n"
-                    
-                    # Listen for new events
-                    while True:
-                        try:
-                            # Wait for events with timeout for heartbeat
-                            event_data = await asyncio.wait_for(event_queue.get(), timeout=30.0)
-                            yield f"data: {json.dumps(event_data)}\n\n"
-                        except asyncio.TimeoutError:
-                            # Send heartbeat
-                            heartbeat = {"type": "heartbeat", "timestamp": time.time()}
-                            yield f"data: {json.dumps(heartbeat)}\n\n"
-                            
-                except asyncio.CancelledError:
-                    logger.info("SSE connection cancelled")
-                    raise
-                finally:
-                    # Clean up listener
-                    dht_discovery.remove_event_listener(ui_listener)
-            else:
-                yield "data: {\"error\": \"DHT discovery not available\"}\n\n"
+                except Exception as e:
+                    logger.warning(f"Failed to send initial nodes: {e}")
                 
+                # Main event loop - pure SSE, no polling
+                heartbeat_interval = 25  # Send heartbeat every 25 seconds
+                last_heartbeat = time.time()
+                
+                while True:
+                    try:
+                        # Calculate timeout until next heartbeat
+                        time_since_heartbeat = time.time() - last_heartbeat
+                        timeout = max(1.0, heartbeat_interval - time_since_heartbeat)
+                        
+                        # Wait for events or timeout for heartbeat
+                        event_data = await asyncio.wait_for(event_queue.get(), timeout=timeout)
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                        
+                    except asyncio.TimeoutError:
+                        # Send heartbeat to keep connection alive
+                        current_time = time.time()
+                        heartbeat = {
+                            "type": "heartbeat", 
+                            "timestamp": current_time,
+                            "connection_id": ui_listener.connection_id,
+                            "uptime": current_time - connection_event["timestamp"]
+                        }
+                        yield f"data: {json.dumps(heartbeat)}\n\n"
+                        last_heartbeat = current_time
+                        
+            else:
+                # DHT discovery not available
+                error_event = {
+                    "type": "error", 
+                    "message": "DHT discovery not available", 
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                
+        except asyncio.CancelledError:
+            logger.info(f"SSE connection cancelled: {ui_listener.connection_id if ui_listener else 'unknown'}")
+            raise
         except Exception as e:
             logger.error(f"Error in network events SSE: {e}")
-            error_event = {"type": "error", "message": str(e), "timestamp": time.time()}
+            error_event = {
+                "type": "error", 
+                "message": str(e), 
+                "timestamp": time.time()
+            }
             yield f"data: {json.dumps(error_event)}\n\n"
+        finally:
+            # Clean up listener
+            if ui_listener and dht_discovery:
+                try:
+                    dht_discovery.remove_event_listener(ui_listener)
+                    logger.info(f"SSE listener cleaned up: {ui_listener.connection_id}")
+                except Exception as e:
+                    logger.warning(f"Error cleaning up SSE listener: {e}")
     
     return StreamingResponse(
         event_generator(),
