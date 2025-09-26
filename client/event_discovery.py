@@ -213,61 +213,63 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 logger.debug(f"🔄 Node updated: {node_id[:12]}...")
     
     async def _monitor_dht_changes(self):
-        """Monitor DHT for real-time changes with active health checking"""
+        """Monitor DHT for real-time changes with enhanced event sequencing"""
         last_routing_table_size = 0
-        health_check_interval = 30  # Check node health every minute
+        health_check_interval = 45  # Check node health every 45 seconds
         last_health_check = 0
+        event_sequence_number = 0
         
         while self.running:
             try:
                 current_time = time.time()
                 
-                # Check for routing table changes
+                # Check for routing table changes with event sequencing
                 if self.kademlia_node and self.kademlia_node.routing_table:
                     current_size = len(self.kademlia_node.routing_table.get_all_contacts())
                     
                     if current_size != last_routing_table_size:
-                        logger.debug(f"DHT routing table changed: {last_routing_table_size} -> {current_size}")
-                        await self._handle_routing_table_change()
+                        event_sequence_number += 1
+                        logger.debug(f"DHT routing table changed: {last_routing_table_size} -> {current_size} (seq: {event_sequence_number})")
+                        await self._handle_routing_table_change_sequenced(event_sequence_number)
                         last_routing_table_size = current_size
                 
-                # Active health checking of known nodes
+                # Active health checking of known nodes with event validation
                 if current_time - last_health_check > health_check_interval:
-                    await self._health_check_active_nodes()
+                    await self._health_check_active_nodes_enhanced()
                     last_health_check = current_time
                 
-                # Pure event-driven monitoring - only respond to actual DHT changes
-                await asyncio.sleep(30)  # Minimal sleep for graceful shutdown only
+                # Event-driven monitoring with sequence validation
+                await asyncio.sleep(30)
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error monitoring DHT changes: {e}")
-                await asyncio.sleep(10)  # Wait longer on errors
+                await asyncio.sleep(10)
     
-    async def _handle_routing_table_change(self):
-        """Handle changes in the DHT routing table with enhanced new node detection"""
+    async def _handle_routing_table_change_sequenced(self, sequence_number: int):
+        """Handle routing table changes with event sequencing"""
         try:
             # Get current contacts from routing table
             contacts = self.kademlia_node.routing_table.get_all_contacts()
             current_contact_ids = {contact.node_id for contact in contacts}
             
-            # Find new contacts
+            # Find new contacts with sequence validation
             known_contact_ids = {node_id for node_id in self.known_node_ids}
             new_contact_ids = current_contact_ids - known_contact_ids
             
-            logger.info(f"📊 DHT routing table change: {len(contacts)} total contacts, {len(new_contact_ids)} new")
+            logger.info(f"📊 DHT routing table change (seq: {sequence_number}): {len(contacts)} total contacts, {len(new_contact_ids)} new")
             
-            # Process new contacts with enhanced detection
+            # Process new contacts with enhanced validation
             for contact in contacts:
                 if contact.node_id in new_contact_ids:
-                    logger.info(f"🆕 New DHT contact detected: {contact.node_id[:8]}... at {contact.ip}")
-                    await self._process_new_contact(contact)
+                    logger.info(f"🆕 New DHT contact detected (seq: {sequence_number}): {contact.node_id[:8]}... at {contact.ip}")
+                    await self._process_new_contact_enhanced(contact, sequence_number)
             
             # Update known contacts
             self.known_node_ids.update(current_contact_ids)
             
-            # Emit network change event with enhanced metadata
+            # Emit network change event with sequence information
             await self._emit_event(NodeEvent(
                 event_type=NodeEventType.NETWORK_CHANGED,
                 node_info=None,
@@ -276,24 +278,31 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     "routing_table_size": len(contacts),
                     "new_contacts": len(new_contact_ids),
                     "total_known_nodes": len(self.known_node_ids),
-                    "change_source": "routing_table_update"
+                    "change_source": "routing_table_update",
+                    "sequence_number": sequence_number,
+                    "event_sequenced": True
                 }
             ))
             
         except Exception as e:
-            logger.error(f"Error handling routing table change: {e}")
+            logger.error(f"Error handling sequenced routing table change: {e}")
     
-    async def _process_new_contact(self, contact):
-        """Process a new DHT contact with improved reliability"""
+    async def _process_new_contact_enhanced(self, contact, sequence_number: int):
+        """Process a new DHT contact with enhanced validation and sequencing"""
         try:
-            logger.debug(f"🔍 Processing new DHT contact: {contact.node_id[:8]}... at {contact.ip}")
+            logger.debug(f"🔍 Processing new DHT contact (seq: {sequence_number}): {contact.node_id[:8]}... at {contact.ip}")
             
-            # Try to get node info via HTTP
-            node_info = await self._get_node_info_from_contact(contact)
+            # Validate contact before processing
+            if not self._validate_contact(contact):
+                logger.warning(f"❌ Contact validation failed for {contact.node_id[:8]}...")
+                return
+            
+            # Try to get node info via HTTP with retry
+            node_info = await self._get_node_info_from_contact_enhanced(contact)
             
             if node_info:
-                # Apply filtering
-                if self._should_include_node(node_info):
+                # Apply filtering with enhanced validation
+                if self._should_include_node_enhanced(node_info, contact):
                     await self._emit_event(NodeEvent(
                         event_type=NodeEventType.NODE_JOINED,
                         node_info=node_info,
@@ -302,103 +311,120 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                             "source": "dht_contact",
                             "discovery_method": "http_probe" if node_info.model != 'unknown' else "dht_fallback",
                             "contact_ip": contact.ip,
-                            "contact_port": getattr(contact, 'port', None)
+                            "contact_port": getattr(contact, 'port', None),
+                            "sequence_number": sequence_number,
+                            "validation_passed": True
                         }
                     ))
-                    logger.info(f"✅ Emitted NODE_JOINED event for {contact.node_id[:8]}...")
+                    logger.info(f"✅ Emitted sequenced NODE_JOINED event (seq: {sequence_number}) for {contact.node_id[:8]}...")
                 else:
-                    logger.debug(f"❌ Node {contact.node_id[:8]}... filtered out by inclusion rules")
+                    logger.debug(f"❌ Node {contact.node_id[:8]}... filtered out by enhanced inclusion rules")
             else:
-                logger.warning(f"❌ Could not create node info for contact {contact.node_id[:8]}...")
+                logger.warning(f"❌ Could not create node info for contact {contact.node_id[:8]}... (seq: {sequence_number})")
                 
         except Exception as e:
-            logger.error(f"❌ Error processing contact {contact.node_id[:8]}...: {e}")
+            logger.error(f"❌ Error processing enhanced contact {contact.node_id[:8]}... (seq: {sequence_number}): {e}")
     
-    async def _get_node_info_from_contact(self, contact) -> Optional[NodeInfo]:
-        """Get detailed node info from a DHT contact with fallback"""
-        # Try to find the HTTP port for this contact
-        http_port = await self._probe_http_port(contact.ip, contact.node_id)
+    async def _get_node_info_from_contact_enhanced(self, contact) -> Optional[NodeInfo]:
+        """Get detailed node info from a DHT contact with enhanced retry logic"""
+        # Try to find the HTTP port with enhanced probing
+        http_port = await self._probe_http_port_enhanced(contact.ip, contact.node_id)
         
         if http_port:
-            # Get node information via HTTP
-            try:
-                import aiohttp
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                    async with session.get(f"http://{contact.ip}:{http_port}/info") as resp:
-                        if resp.status == 200:
-                            info = await resp.json()
-                            
-                            # Create NodeInfo from HTTP response
-                            node_info = NodeInfo(
-                                node_id=info.get('node_id', contact.node_id),
-                                ip=contact.ip,
-                                port=http_port,
-                                model=info.get('model', 'unknown'),
-                                load=0.0,  # Will be updated by metrics
-                                tps=0.0,   # Will be updated by metrics
-                                uptime=0,  # Will be updated by metrics
-                                last_seen=int(time.time())
-                            )
-                            
-                            logger.info(f"✅ Got full node info for {contact.node_id[:8]}... via HTTP")
-                            return node_info
-            except Exception as e:
-                logger.debug(f"Failed to get HTTP node info from {contact.ip}:{http_port}: {e}")
+            # Get node information via HTTP with retry
+            for attempt in range(3):
+                try:
+                    import aiohttp
+                    timeout = aiohttp.ClientTimeout(total=8, connect=3)
+                    
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.get(f"http://{contact.ip}:{http_port}/info") as resp:
+                            if resp.status == 200:
+                                info = await resp.json()
+                                
+                                # Create NodeInfo with validation
+                                node_info = NodeInfo(
+                                    node_id=info.get('node_id', contact.node_id),
+                                    ip=contact.ip,
+                                    port=http_port,
+                                    model=info.get('model', 'unknown'),
+                                    load=0.0,
+                                    tps=0.0,
+                                    uptime=0,
+                                    last_seen=int(time.time()),
+                                    event_driven=True,
+                                    change_reason='http_discovery'
+                                )
+                                
+                                # Validate node ID consistency
+                                if node_info.node_id != contact.node_id:
+                                    logger.warning(f"Node ID mismatch: contact={contact.node_id[:8]}..., http={node_info.node_id[:8]}...")
+                                    # Use the contact's node ID as authoritative
+                                    node_info.node_id = contact.node_id
+                                
+                                logger.info(f"✅ Got enhanced node info for {contact.node_id[:8]}... via HTTP (attempt {attempt + 1})")
+                                return node_info
+                                
+                except Exception as e:
+                    logger.debug(f"HTTP attempt {attempt + 1} failed for {contact.ip}:{http_port}: {e}")
+                    if attempt < 2:  # Retry with exponential backoff
+                        await asyncio.sleep(2 ** attempt)
+                    continue
         
-        # Fallback: Create basic node info from DHT contact
-        logger.info(f"📡 Creating basic node info for {contact.node_id[:8]}... from DHT contact")
+        # Enhanced fallback: Create node info from DHT contact with better port estimation
+        logger.info(f"📡 Creating enhanced fallback node info for {contact.node_id[:8]}...")
         
-        # Use common default HTTP port or derive from DHT port
-        fallback_http_port = 8000
-        if hasattr(contact, 'port') and contact.port:
-            # Try to derive HTTP port from DHT port (common pattern: DHT+1000 or DHT-1)
-            if contact.port > 8000:
-                fallback_http_port = contact.port - 1  # e.g., DHT 8001 -> HTTP 8000
-            else:
-                fallback_http_port = contact.port + 1000  # e.g., DHT 8001 -> HTTP 9001
+        # Better HTTP port estimation
+        fallback_http_port = await self._estimate_http_port(contact)
         
         node_info = NodeInfo(
             node_id=contact.node_id,
             ip=contact.ip,
             port=fallback_http_port,
-            model='unknown',  # Will be updated when HTTP becomes available
+            model='unknown',
             load=0.0,
             tps=0.0,
             uptime=0,
-            last_seen=int(contact.last_seen) if hasattr(contact, 'last_seen') else int(time.time())
+            last_seen=int(contact.last_seen) if hasattr(contact, 'last_seen') else int(time.time()),
+            event_driven=True,
+            change_reason='dht_fallback'
         )
         
-        logger.info(f"📡 Created fallback node info for {contact.node_id[:8]}... (HTTP port estimated as {fallback_http_port})")
+        logger.info(f"📡 Created enhanced fallback node info for {contact.node_id[:8]}... (HTTP port: {fallback_http_port})")
         return node_info
     
-    async def _probe_http_port(self, ip: str, node_id: str) -> Optional[int]:
-        """Probe for the correct HTTP port for a node with enhanced detection"""
+    async def _probe_http_port_enhanced(self, ip: str, node_id: str) -> Optional[int]:
+        """Enhanced HTTP port probing with better coverage and parallel testing"""
         import aiohttp
         
-        # Expanded port range based on common LlamaNet configurations
-        test_ports = [8000, 8002, 8004, 8006, 8008, 8010, 8012, 8014, 8016, 8018, 8020]
+        # Expanded port range with common LlamaNet patterns
+        test_ports = [8000, 8002, 8004, 8006, 8008, 8010, 8012, 8014, 8016, 8018, 8020, 8022, 8024]
         
-        # Try ports in parallel for faster detection
-        async def test_port(port):
-            try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
-                    # Try multiple endpoints to increase success rate
-                    endpoints = ['/health', '/info', '/status', '/v1/models']
-                    
-                    for endpoint in endpoints:
-                        try:
-                            async with session.get(f"http://{ip}:{port}{endpoint}") as resp:
-                                if resp.status in [200, 404, 405]:  # Any valid HTTP response
-                                    logger.debug(f"Found HTTP port {port} for {node_id[:8]}... via {endpoint}")
-                                    return port
-                        except:
-                            continue
-            except:
-                pass
-            return None
+        # Test ports in parallel with limited concurrency
+        semaphore = asyncio.Semaphore(5)  # Limit concurrent tests
         
-        # Test ports in parallel
-        tasks = [test_port(port) for port in test_ports]
+        async def test_port_enhanced(port):
+            async with semaphore:
+                try:
+                    timeout = aiohttp.ClientTimeout(total=4, connect=2)
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        # Try multiple endpoints for better detection
+                        endpoints = ['/health', '/info', '/status', '/v1/models', '/']
+                        
+                        for endpoint in endpoints:
+                            try:
+                                async with session.get(f"http://{ip}:{port}{endpoint}") as resp:
+                                    if resp.status in [200, 404, 405, 501]:  # Any valid HTTP response
+                                        logger.debug(f"Enhanced probe found HTTP port {port} for {node_id[:8]}... via {endpoint}")
+                                        return port
+                            except:
+                                continue
+                except:
+                    pass
+                return None
+        
+        # Test all ports in parallel
+        tasks = [test_port_enhanced(port) for port in test_ports]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Return first successful port
@@ -406,7 +432,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             if isinstance(result, int):
                 return result
         
-        logger.debug(f"Could not find HTTP port for {node_id[:8]}... at {ip}")
+        logger.debug(f"Enhanced probe could not find HTTP port for {node_id[:8]}... at {ip}")
         return None
     
     def _should_include_node(self, node_info: NodeInfo) -> bool:
@@ -549,67 +575,93 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         
         return True  # Node is confirmed down
     
-    async def _health_check_active_nodes(self):
-        """Actively health check known nodes to detect departures"""
+    async def _health_check_active_nodes_enhanced(self):
+        """Enhanced health checking with better error handling and event validation"""
         if not self.active_nodes:
             return
         
         current_time = time.time()
         nodes_to_check = []
         
-        # Find nodes that haven't been seen recently
+        # Find nodes that need health checking with enhanced criteria
         for node_id, node_info in self.active_nodes.items():
             time_since_seen = current_time - node_info.last_seen
-            if time_since_seen > 90:  # Check nodes not seen for 90 seconds
+            
+            # Check nodes not seen for 60 seconds (reduced from 90)
+            if time_since_seen > 60:
                 nodes_to_check.append((node_id, node_info))
         
-        # Health check nodes in parallel
         if nodes_to_check:
-            logger.debug(f"Health checking {len(nodes_to_check)} potentially stale nodes")
+            logger.debug(f"Enhanced health checking {len(nodes_to_check)} potentially stale nodes")
             
+            # Health check with limited concurrency
+            semaphore = asyncio.Semaphore(3)
             tasks = []
+            
             for node_id, node_info in nodes_to_check:
-                task = asyncio.create_task(self._health_check_node(node_id, node_info))
+                task = asyncio.create_task(self._health_check_node_enhanced(node_id, node_info, semaphore))
                 tasks.append(task)
             
-            # Wait for all health checks to complete
+            # Wait for all health checks
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Process results
+            # Process results with event validation
             for i, result in enumerate(results):
                 node_id, node_info = nodes_to_check[i]
                 
                 if isinstance(result, Exception):
-                    logger.debug(f"Health check error for {node_id[:8]}...: {result}")
+                    logger.debug(f"Enhanced health check error for {node_id[:8]}...: {result}")
                     continue
                 
                 is_alive = result
                 if not is_alive:
-                    logger.info(f"Node {node_id[:8]}... failed health check, marking as departed")
-                    await self._emit_event(NodeEvent(
-                        event_type=NodeEventType.NODE_LEFT,
-                        node_info=node_info,
-                        timestamp=time.time(),
-                        metadata={"reason": "health_check_failed", "last_seen": node_info.last_seen}
-                    ))
+                    # Validate departure before emitting event
+                    if await self._validate_node_departure(node_id, node_info):
+                        logger.info(f"Node {node_id[:8]}... confirmed departed via enhanced health check")
+                        await self._emit_event(NodeEvent(
+                            event_type=NodeEventType.NODE_LEFT,
+                            node_info=node_info,
+                            timestamp=time.time(),
+                            metadata={
+                                "reason": "enhanced_health_check_failed", 
+                                "last_seen": node_info.last_seen,
+                                "validation_method": "multi_endpoint_check"
+                            }
+                        ))
 
-    async def _health_check_node(self, node_id: str, node_info: NodeInfo) -> bool:
-        """Health check a specific node"""
-        try:
-            import aiohttp
-            
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
-                async with session.get(f"http://{node_info.ip}:{node_info.port}/health") as response:
-                    if response.status == 200:
-                        # Node is alive, update last_seen
-                        node_info.last_seen = int(time.time())
-                        logger.debug(f"Node {node_id[:8]}... health check passed")
-                        return True
-                        
-        except Exception as e:
-            logger.debug(f"Health check failed for {node_id[:8]}...: {e}")
-        
-        return False
+    async def _health_check_node_enhanced(self, node_id: str, node_info: NodeInfo, semaphore) -> bool:
+        """Enhanced health check with multiple validation methods"""
+        async with semaphore:
+            try:
+                import aiohttp
+                
+                # Try multiple endpoints with different timeouts
+                endpoints = [
+                    ('/health', 5),    # Primary health endpoint
+                    ('/info', 8),      # Secondary info endpoint  
+                    ('/status', 8),    # Status endpoint
+                    ('/v1/models', 10) # OpenAI endpoint
+                ]
+                
+                for endpoint, timeout in endpoints:
+                    try:
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                            async with session.get(f"http://{node_info.ip}:{node_info.port}{endpoint}") as response:
+                                if response.status in [200, 404, 405]:
+                                    # Node is responding, update last_seen
+                                    node_info.last_seen = int(time.time())
+                                    logger.debug(f"Enhanced health check passed for {node_id[:8]}... via {endpoint}")
+                                    return True
+                    except Exception as e:
+                        logger.debug(f"Enhanced health check failed for {node_id[:8]}... on {endpoint}: {e}")
+                        continue
+                
+                logger.debug(f"All enhanced health check methods failed for {node_id[:8]}...")
+                return False
+                
+            except Exception as e:
+                logger.debug(f"Enhanced health check error for {node_id[:8]}...: {e}")
+                return False
 
     async def _update_unknown_nodes(self):
         """Background task to update nodes with unknown model info"""

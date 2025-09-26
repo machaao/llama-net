@@ -474,3 +474,116 @@ class SubnetFilter:
             logger.info(f"Subnet rules filtering: kept {len(filtered_nodes)}, filtered {filtered_count}")
         
         return filtered_nodes
+    
+    def _validate_contact(self, contact) -> bool:
+        """Validate a DHT contact before processing"""
+        try:
+            # Check required fields
+            if not contact.node_id or not contact.ip:
+                return False
+            
+            # Validate node ID format
+            if len(contact.node_id) != 40:  # SHA-1 hex length
+                return False
+            
+            # Validate IP format
+            import ipaddress
+            ipaddress.IPv4Address(contact.ip)
+            
+            # Check if contact is too old
+            if hasattr(contact, 'last_seen'):
+                if time.time() - contact.last_seen > 300:  # 5 minutes
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Contact validation error: {e}")
+            return False
+
+    async def _estimate_http_port(self, contact) -> int:
+        """Enhanced HTTP port estimation based on DHT port and common patterns"""
+        dht_port = getattr(contact, 'port', 8001)
+        
+        # Common LlamaNet port patterns
+        port_patterns = [
+            dht_port - 1,      # DHT 8001 -> HTTP 8000
+            dht_port + 1000,   # DHT 8001 -> HTTP 9001
+            8000,              # Default HTTP port
+            8002,              # Common alternative
+            8004,              # Common alternative
+            dht_port           # Same port (rare but possible)
+        ]
+        
+        # Remove duplicates while preserving order
+        unique_ports = []
+        seen = set()
+        for port in port_patterns:
+            if port not in seen and 1024 <= port <= 65535:
+                unique_ports.append(port)
+                seen.add(port)
+        
+        return unique_ports[0] if unique_ports else 8000
+
+    def _should_include_node_enhanced(self, node_info: NodeInfo, contact) -> bool:
+        """Enhanced node inclusion check with additional validation"""
+        # Basic filtering
+        if not self._should_include_node(node_info):
+            return False
+        
+        # Additional validation for enhanced discovery
+        try:
+            # Validate node ID consistency
+            if node_info.node_id != contact.node_id:
+                logger.warning(f"Node ID inconsistency detected: {node_info.node_id[:8]}... vs {contact.node_id[:8]}...")
+                return False
+            
+            # Check for reasonable port ranges
+            if not (1024 <= node_info.port <= 65535):
+                logger.warning(f"Invalid port range for node {node_info.node_id[:8]}...: {node_info.port}")
+                return False
+            
+            # Check for duplicate IP:port combinations in active nodes
+            for existing_node in self.active_nodes.values():
+                if (existing_node.ip == node_info.ip and 
+                    existing_node.port == node_info.port and 
+                    existing_node.node_id != node_info.node_id):
+                    logger.warning(f"Duplicate IP:port detected: {node_info.ip}:{node_info.port} for different nodes")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Enhanced inclusion check error: {e}")
+            return False
+
+    async def _validate_node_departure(self, node_id: str, node_info: NodeInfo) -> bool:
+        """Validate that a node has actually departed before emitting leave event"""
+        try:
+            # Double-check with a final health probe
+            import aiohttp
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                # Try the most reliable endpoint
+                async with session.get(f"http://{node_info.ip}:{node_info.port}/health") as response:
+                    if response.status == 200:
+                        logger.info(f"Node {node_id[:8]}... is actually still alive during departure validation")
+                        # Update last_seen and don't emit departure
+                        node_info.last_seen = int(time.time())
+                        return False
+                        
+        except Exception as e:
+            logger.debug(f"Departure validation failed for {node_id[:8]}...: {e}")
+        
+        # Also check if node is still in DHT routing table
+        if self.kademlia_node and self.kademlia_node.routing_table:
+            contacts = self.kademlia_node.routing_table.get_all_contacts()
+            for contact in contacts:
+                if contact.node_id == node_id:
+                    # Node is still in routing table, check if recently seen
+                    if time.time() - contact.last_seen < 30:
+                        logger.info(f"Node {node_id[:8]}... still active in DHT routing table")
+                        return False
+        
+        logger.info(f"Node departure validated for {node_id[:8]}...")
+        return True
