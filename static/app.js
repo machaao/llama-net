@@ -878,21 +878,17 @@ class LlamaNetUI {
         }).join('');
     }
     
-    getHealthBadge(networkSummary) {
-        if (!networkSummary) return '<span class="badge bg-secondary">Unknown</span>';
+    getHealthBadge(networkHealth) {
+        const healthConfig = {
+            'excellent': { class: 'success', text: 'Excellent', icon: 'fas fa-check-circle' },
+            'good': { class: 'warning', text: 'Good', icon: 'fas fa-exclamation-circle' },
+            'poor': { class: 'danger', text: 'Poor', icon: 'fas fa-times-circle' },
+            'no_nodes': { class: 'secondary', text: 'No Nodes', icon: 'fas fa-question-circle' }
+        };
         
-        const avgLoad = networkSummary.avg_network_load || 0;
-        const totalNodes = networkSummary.total_nodes || 0;
+        const config = healthConfig[networkHealth] || healthConfig['no_nodes'];
         
-        if (totalNodes === 0) {
-            return '<span class="badge bg-danger">No Nodes</span>';
-        } else if (avgLoad < 0.3 && totalNodes >= 2) {
-            return '<span class="badge bg-success">Excellent</span>';
-        } else if (avgLoad < 0.7) {
-            return '<span class="badge bg-warning">Good</span>';
-        } else {
-            return '<span class="badge bg-danger">High Load</span>';
-        }
+        return `<span class="badge bg-${config.class}"><i class="${config.icon} me-1"></i>${config.text}</span>`;
     }
     
     formatLastSeen(lastSeen) {
