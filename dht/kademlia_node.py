@@ -162,9 +162,15 @@ class KademliaNode:
         # Bootstrap if nodes provided
         if bootstrap_nodes:
             await self._bootstrap(bootstrap_nodes)
+        
+        # Send join notification to network
+        await self._send_join_notification()
     
     async def stop(self):
         """Stop the Kademlia node"""
+        # Send leave notification before stopping
+        await self._send_leave_notification()
+        
         self.running = False
         
         # Stop cleanup task
@@ -185,6 +191,70 @@ class KademliaNode:
                 logger.warning(f"Error closing UDP transport: {e}")
             finally:
                 self.server = None
+
+    async def _send_join_notification(self):
+        """Send join notification to known contacts"""
+        try:
+            contacts = self.routing_table.get_all_contacts()
+            
+            join_message = {
+                'type': 'join_notification',
+                'id': str(uuid.uuid4()),
+                'sender_id': self.node_id,
+                'join_data': {
+                    'timestamp': time.time(),
+                    'node_info': {
+                        'node_id': self.node_id,
+                        'port': self.port
+                    }
+                }
+            }
+            
+            # Send to all known contacts
+            for contact in contacts[:5]:  # Limit to first 5 contacts
+                try:
+                    await self.protocol.send_request(join_message, (contact.ip, contact.port))
+                    logger.debug(f"📤 Sent join notification to {contact.node_id[:8]}...")
+                except Exception as e:
+                    logger.debug(f"Failed to send join notification to {contact.node_id[:8]}...: {e}")
+            
+            if contacts:
+                logger.info(f"📤 Sent join notifications to {min(len(contacts), 5)} contacts")
+                
+        except Exception as e:
+            logger.debug(f"Error sending join notifications: {e}")
+
+    async def _send_leave_notification(self):
+        """Send leave notification to known contacts"""
+        try:
+            contacts = self.routing_table.get_all_contacts()
+            
+            leave_message = {
+                'type': 'leave_notification',
+                'id': str(uuid.uuid4()),
+                'sender_id': self.node_id,
+                'leave_data': {
+                    'timestamp': time.time(),
+                    'reason': 'graceful_shutdown'
+                }
+            }
+            
+            # Send to all known contacts
+            for contact in contacts[:5]:  # Limit to first 5 contacts
+                try:
+                    await asyncio.wait_for(
+                        self.protocol.send_request(leave_message, (contact.ip, contact.port)),
+                        timeout=2.0
+                    )
+                    logger.debug(f"📤 Sent leave notification to {contact.node_id[:8]}...")
+                except Exception as e:
+                    logger.debug(f"Failed to send leave notification to {contact.node_id[:8]}...: {e}")
+            
+            if contacts:
+                logger.info(f"📤 Sent leave notifications to {min(len(contacts), 5)} contacts")
+                
+        except Exception as e:
+            logger.debug(f"Error sending leave notifications: {e}")
     
     async def _cleanup_loop(self):
         """Periodically clean up stale contacts and verify connectivity"""
@@ -300,23 +370,57 @@ class KademliaNode:
         }
     
     async def _bootstrap(self, bootstrap_nodes: List[Tuple[str, int]]):
-        """Bootstrap by connecting to existing nodes"""
+        """Enhanced bootstrap with explicit join events"""
+        successful_connections = []
+        failed_connections = []
+        
         for ip, port in bootstrap_nodes:
             try:
+                logger.info(f"🔗 Attempting to connect to bootstrap node {ip}:{port}")
+                
                 # Ping bootstrap node to get its ID
                 contact = await self._ping_node(ip, port)
                 if contact and contact.node_id:
                     # Validate the node ID before adding
                     if self._validate_node_id(str(contact.node_id)):
                         self.routing_table.add_contact(contact)
+                        successful_connections.append((ip, port, contact.node_id))
+                        
+                        # EMIT BOOTSTRAP CONNECTION EVENT
+                        await self._broadcast_node_event("bootstrap_connected", {
+                            'bootstrap_node': {
+                                'ip': ip,
+                                'port': port,
+                                'node_id': contact.node_id
+                            },
+                            'local_node_id': self.config.node_id,
+                            'connection_method': 'bootstrap_ping'
+                        })
+                        
                         # Find nodes close to ourselves
                         await self.find_node(self.node_id)
                     else:
                         logger.warning(f"Bootstrap node {ip}:{port} returned invalid node ID: {contact.node_id}")
+                        failed_connections.append((ip, port, "invalid_node_id"))
                 else:
                     logger.warning(f"Failed to get valid contact from bootstrap node {ip}:{port}")
+                    failed_connections.append((ip, port, "no_contact"))
             except Exception as e:
                 logger.warning(f"Failed to bootstrap from {ip}:{port}: {e}")
+                failed_connections.append((ip, port, str(e)))
+        
+        # Emit bootstrap summary event
+        await self._broadcast_node_event("bootstrap_completed", {
+            'successful_connections': len(successful_connections),
+            'failed_connections': len(failed_connections),
+            'bootstrap_nodes': successful_connections,
+            'local_node_id': self.config.node_id
+        })
+        
+        if successful_connections:
+            logger.info(f"✅ Successfully connected to {len(successful_connections)} bootstrap nodes")
+        else:
+            logger.warning("❌ Failed to connect to any bootstrap nodes")
     
     async def store(self, key: str, value: Any) -> bool:
         """Store a key-value pair in the DHT"""

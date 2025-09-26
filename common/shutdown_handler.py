@@ -94,6 +94,105 @@ class DHTPublisherShutdownHandler:
             # Phase 3: Clean up resources
             self.shutdown_phase = ShutdownPhase.CLEANING_UP
             await self._cleanup_resources()
+
+    async def _event_recovery_mechanism(self):
+        """Recover from missed events by periodic reconciliation"""
+        try:
+            # Get current network state
+            current_dht_contacts = set()
+            if self.kademlia_node and self.kademlia_node.routing_table:
+                contacts = self.kademlia_node.routing_table.get_all_contacts()
+                current_dht_contacts = {contact.node_id for contact in contacts}
+            
+            # Get published nodes
+            current_published_nodes = set()
+            try:
+                all_nodes_data = await self._get_published_nodes_with_retry()
+                for node_data in all_nodes_data:
+                    if isinstance(node_data, dict) and node_data.get('node_id'):
+                        current_published_nodes.add(node_data['node_id'])
+            except Exception as e:
+                logger.debug(f"Could not get published nodes for recovery: {e}")
+            
+            # Compare with our known state
+            all_current_nodes = current_dht_contacts | current_published_nodes
+            
+            if hasattr(self, '_last_recovery_state'):
+                # Find nodes that appeared (missed joins)
+                missed_joins = all_current_nodes - self._last_recovery_state
+                
+                # Find nodes that disappeared (missed leaves)
+                missed_leaves = self._last_recovery_state - all_current_nodes
+                
+                # Emit recovery events for missed joins
+                for node_id in missed_joins:
+                    if node_id != self.config.node_id:
+                        logger.info(f"🔄 Recovering missed join event for: {node_id[:8]}...")
+                        
+                        # Try to get node info
+                        node_info = await self._get_node_info_for_recovery(node_id)
+                        
+                        await self._broadcast_node_event("node_join_recovered", {
+                            'node_id': node_id,
+                            'recovery_method': 'periodic_reconciliation',
+                            'recovered_by': self.config.node_id,
+                            'node_info': node_info
+                        })
+                
+                # Emit recovery events for missed leaves
+                for node_id in missed_leaves:
+                    if node_id != self.config.node_id:
+                        logger.info(f"🔄 Recovering missed leave event for: {node_id[:8]}...")
+                        
+                        await self._broadcast_node_event("node_leave_recovered", {
+                            'node_id': node_id,
+                            'recovery_method': 'periodic_reconciliation',
+                            'recovered_by': self.config.node_id
+                        })
+                
+                if missed_joins or missed_leaves:
+                    logger.info(f"🔄 Event recovery: {len(missed_joins)} joins, {len(missed_leaves)} leaves")
+            
+            # Update recovery state
+            self._last_recovery_state = all_current_nodes
+            
+        except Exception as e:
+            logger.error(f"Error in event recovery mechanism: {e}")
+
+    async def _get_node_info_for_recovery(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get node info for recovery events"""
+        try:
+            # Check cache first
+            cached_info = self._get_cached_node_info(node_id)
+            if cached_info:
+                return cached_info
+            
+            # Try to find in published nodes
+            all_nodes_data = await self._get_published_nodes_with_retry()
+            for node_data in all_nodes_data:
+                if isinstance(node_data, dict) and node_data.get('node_id') == node_id:
+                    self._cache_node_info(node_id, node_data)
+                    return node_data
+            
+            # Try to find in DHT contacts
+            if self.kademlia_node and self.kademlia_node.routing_table:
+                contacts = self.kademlia_node.routing_table.get_all_contacts()
+                for contact in contacts:
+                    if contact.node_id == node_id:
+                        node_info = {
+                            'node_id': contact.node_id,
+                            'ip': contact.ip,
+                            'port': getattr(contact, 'port', None),
+                            'last_seen': getattr(contact, 'last_seen', time.time())
+                        }
+                        self._cache_node_info(node_id, node_info)
+                        return node_info
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error getting node info for recovery: {e}")
+            return None
             
             self.shutdown_phase = ShutdownPhase.COMPLETED
             total_time = time.time() - self.shutdown_start_time
