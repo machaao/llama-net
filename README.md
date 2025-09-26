@@ -406,42 +406,144 @@ The built-in web interface (http://localhost:8000) provides:
 
 ## Docker Deployment
 
-### Using Docker Compose
+LlamaNet provides comprehensive Docker support with automatic GPU/CPU detection, multi-node orchestration, and production-ready configurations.
 
-```yaml
-version: '3'
-services:
-  bootstrap:
-    build:
-      context: .
-      dockerfile: docker/inference.Dockerfile
-    ports:
-      - "8000:8000"
-      - "8001:8001"
-    environment:
-      - MODEL_PATH=/models/model.gguf
-    volumes:
-      - ./models:/models
+### Quick Start with Docker
 
-  inference1:
-    build:
-      context: .
-      dockerfile: docker/inference.Dockerfile
-    ports:
-      - "8002:8000"
-      - "8003:8001"
-    environment:
-      - MODEL_PATH=/models/model.gguf
-      - BOOTSTRAP_NODES=bootstrap:8001
-    volumes:
-      - ./models:/models
-    depends_on:
-      - bootstrap
+#### Prerequisites
+- Docker and Docker Compose installed
+- NVIDIA Container Toolkit (for GPU support, optional)
+- GGUF model file in `./models/` directory
+
+#### Single Command Deployment
+```bash
+# Clone and start a 3-node network
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+mkdir -p models
+# Place your GGUF model in models/model.gguf
+docker-compose -f docker/docker-compose.yml up -d
 ```
+
+#### Access Points
+- **Web UI**: http://localhost:8000
+- **API**: http://localhost:8000/v1/chat/completions
+- **Additional Nodes**: http://localhost:8002, http://localhost:8004
+
+### Docker Features
+
+#### 🔧 **Automatic Hardware Detection**
+- **GPU Auto-Detection**: Automatically detects NVIDIA GPUs and installs CUDA support
+- **CPU Fallback**: Falls back to optimized CPU mode if no GPU available
+- **Smart Configuration**: Optimizes settings based on detected hardware
+
+#### 🚀 **Multi-Node Orchestration**
+```bash
+# Start the complete network
+docker-compose -f docker/docker-compose.yml up -d
+
+# Scale to more nodes
+docker-compose -f docker/docker-compose.yml up -d --scale inference1=3
+
+# Monitor all nodes
+docker-compose -f docker/docker-compose.yml logs -f
+```
+
+#### 🎯 **Production Ready**
+- Health checks and monitoring
+- Automatic restarts and failover
+- Resource optimization
+- Security best practices
+
+### Manual Docker Deployment
+
+#### GPU-Enabled Node
+```bash
+# Bootstrap node with GPU support
+docker run -d \
+  --name llamanet-gpu \
+  --gpus all \
+  -p 8000:8000 \
+  -p 8001:8001/udp \
+  -v $(pwd)/models:/models:ro \
+  -e MODEL_PATH=/models/your-model.gguf \
+  -e HARDWARE_MODE=auto \
+  llamanet/inference:latest
+```
+
+#### CPU-Only Node
+```bash
+# Additional CPU node
+docker run -d \
+  --name llamanet-cpu \
+  -p 8002:8000 \
+  -p 8003:8001/udp \
+  -v $(pwd)/models:/models:ro \
+  -e MODEL_PATH=/models/your-model.gguf \
+  -e HARDWARE_MODE=cpu \
+  -e BOOTSTRAP_NODES=localhost:8001 \
+  llamanet/inference:latest
+```
+
+### Environment Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL_PATH` | *required* | Path to GGUF model file |
+| `HARDWARE_MODE` | `auto` | `auto`, `gpu`, or `cpu` |
+| `N_GPU_LAYERS` | `auto` | GPU layers (auto-optimized) |
+| `BOOTSTRAP_NODES` | `""` | Comma-separated bootstrap nodes |
+| `PORT` | `8000` | HTTP API port |
+| `DHT_PORT` | `8001` | DHT protocol port |
+
+### Docker API Endpoints
+
+All standard OpenAI endpoints plus LlamaNet extensions:
 
 ```bash
-docker-compose up
+# Health check
+curl http://localhost:8000/health
+
+# List network models
+curl http://localhost:8000/v1/models/network
+
+# Chat completion with load balancing
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llamanet",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "strategy": "load_balanced"
+  }'
 ```
+
+### Monitoring and Debugging
+
+```bash
+# View all container logs
+docker-compose -f docker/docker-compose.yml logs -f
+
+# Check network status
+curl http://localhost:8000/dht/status
+
+# Monitor resources
+docker stats
+
+# Debug hardware detection
+docker logs llamanet-gpu | grep -E "(GPU|Hardware)"
+```
+
+### Advanced Docker Usage
+
+For detailed Docker documentation including:
+- **Hardware optimization strategies**
+- **Production deployment patterns**
+- **Scaling and load balancing**
+- **Troubleshooting guides**
+- **Security configurations**
+- **Performance tuning**
+
+See the comprehensive **[Docker Documentation](docker/README.md)** 📖
 
 ## Network Monitoring
 
