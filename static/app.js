@@ -420,13 +420,6 @@ class LlamaNetUI {
                             <i class="fas fa-check"></i>
                         </button>
                     </div>
-                    <div class="small text-muted mb-1">
-                        <div>
-                            Nodes: <span class="metric-value">${nodes.length}</span> | 
-                            Avg Load: <span class="metric-value">${avgLoad.toFixed(2)}</span> | 
-                            Total TPS: <span class="metric-value">${totalTps.toFixed(1)}</span>
-                        </div>
-                    </div>
                     <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
                         ${this.renderModelNodesRealTime(nodes)}
                     </div>
