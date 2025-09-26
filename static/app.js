@@ -107,6 +107,11 @@ class LlamaNetUI {
             networkHealth: 'unknown'
         };
         
+        // Add debouncing for node events
+        this.nodeEventDebouncer = new Map();
+        this.recentNodeActivity = new Map();
+        this.nodeLeftDebounceTime = 15000; // 15 seconds
+        
         // Real-time update properties (keep existing ones)
         this.updateInterval = null;
         this.isUpdating = false;
@@ -211,6 +216,59 @@ class LlamaNetUI {
     }
     
     handleNetworkEvent(data) {
+        // Add debouncing for node_left events
+        if (data.type === 'node_left') {
+            const nodeId = data.node_info?.node_id;
+            if (nodeId) {
+                // Check if we recently saw this node as active
+                const recentActivity = this.recentNodeActivity.get(nodeId);
+                if (recentActivity && (Date.now() - recentActivity) < 60000) { // 1 minute
+                    console.log(`🔄 Ignoring premature 'node_left' for ${nodeId.substring(0, 8)}... (recently active)`);
+                    return;
+                }
+                
+                // Debounce the node_left event
+                const debounceKey = `${nodeId}_left`;
+                if (this.nodeEventDebouncer.has(debounceKey)) {
+                    clearTimeout(this.nodeEventDebouncer.get(debounceKey));
+                }
+                
+                this.nodeEventDebouncer.set(debounceKey, setTimeout(() => {
+                    this._processNodeLeftEvent(data);
+                    this.nodeEventDebouncer.delete(debounceKey);
+                }, this.nodeLeftDebounceTime));
+                
+                return; // Don't process immediately
+            }
+        }
+        
+        // Track node activity for joined/updated events
+        if (data.type === 'node_joined' || data.type === 'node_updated') {
+            const nodeId = data.node_info?.node_id;
+            if (nodeId) {
+                this.recentNodeActivity.set(nodeId, Date.now());
+                
+                // Cancel any pending node_left events for this node
+                const debounceKey = `${nodeId}_left`;
+                if (this.nodeEventDebouncer.has(debounceKey)) {
+                    clearTimeout(this.nodeEventDebouncer.get(debounceKey));
+                    this.nodeEventDebouncer.delete(debounceKey);
+                    console.log(`🔄 Cancelled pending 'node_left' for ${nodeId.substring(0, 8)}... (node is active)`);
+                }
+            }
+        }
+        
+        // Process other events immediately
+        this._processNetworkEvent(data);
+    }
+    
+    _processNodeLeftEvent(data) {
+        console.log(`👋 Processing delayed node_left: ${data.node_info.node_id.substring(0, 8)}...`);
+        this._processNetworkEvent(data);
+    }
+    
+    _processNetworkEvent(data) {
+        // Original handleNetworkEvent logic
         switch (data.type) {
             case 'connected':
                 console.log('📡 Real-time network monitoring connected');

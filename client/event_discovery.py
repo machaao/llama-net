@@ -67,9 +67,9 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.dht_monitor_task = None
         self.running = False
         
-        # Performance tracking
+        # Performance tracking - INCREASED INTERVALS
         self.last_network_scan = 0
-        self.scan_interval = 30  # Full network scan every 30 seconds as fallback
+        self.scan_interval = 60  # Increased from 30 to 60 seconds as fallback
         
         logger.info("Event-based DHT Discovery initialized")
     
@@ -225,13 +225,13 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 # Check for stale nodes
                 await self._check_stale_nodes()
                 
-                await asyncio.sleep(2)  # Check every 2 seconds
+                await asyncio.sleep(5)  # Increased from 2 to 5 seconds
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error monitoring DHT changes: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)  # Wait longer on errors
     
     async def _handle_routing_table_change(self):
         """Handle changes in the DHT routing table"""
@@ -349,8 +349,8 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             
             for node_data in published_nodes:
                 if isinstance(node_data, dict) and node_data.get('node_id'):
-                    # Check if node is still fresh
-                    if time.time() - node_data.get('last_seen', 0) < 60:
+                    # Check if node is still fresh - INCREASED THRESHOLD
+                    if time.time() - node_data.get('last_seen', 0) < 180:  # Increased from 60 to 180
                         try:
                             node_info = NodeInfo(**node_data)
                             if self._should_include_node(node_info):
@@ -402,8 +402,8 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     if node_id in self.active_nodes:
                         continue
                     
-                    # Check if node is fresh
-                    if time.time() - node_data.get('last_seen', 0) < 120:
+                    # Check if node is fresh - increased from 120 to 180 seconds
+                    if time.time() - node_data.get('last_seen', 0) < 180:
                         try:
                             node_info = NodeInfo(**node_data)
                             if self._should_include_node(node_info):
@@ -415,18 +415,24 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                         except Exception as e:
                             logger.debug(f"Failed to process node in scan: {e}")
             
-            # Check for nodes that left
+            # Check for nodes that left - but be more conservative
             current_node_ids = set(self.active_nodes.keys())
-            missing_node_ids = current_node_ids - published_node_ids
+            potentially_missing = current_node_ids - published_node_ids
             
-            for node_id in missing_node_ids:
+            # Only consider nodes as "left" if they haven't been seen for a longer time
+            for node_id in potentially_missing:
                 if node_id in self.active_nodes:
                     node_info = self.active_nodes[node_id]
-                    await self._emit_event(NodeEvent(
-                        event_type=NodeEventType.NODE_LEFT,
-                        node_info=node_info,
-                        timestamp=time.time()
-                    ))
+                    # Only emit "left" if node hasn't been seen for 5 minutes
+                    if time.time() - node_info.last_seen > 300:  # 5 minutes
+                        # Verify the node is actually down before emitting event
+                        if await self._verify_node_actually_down(node_info):
+                            await self._emit_event(NodeEvent(
+                                event_type=NodeEventType.NODE_LEFT,
+                                node_info=node_info,
+                                timestamp=time.time(),
+                                metadata={"reason": "not_in_published_data_verified"}
+                            ))
             
         except Exception as e:
             logger.error(f"Error in network scan: {e}")
@@ -434,7 +440,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
     async def _check_stale_nodes(self):
         """Check for and remove stale nodes"""
         current_time = time.time()
-        stale_threshold = 120  # 2 minutes
+        stale_threshold = 300  # Increased from 120 to 300 seconds (5 minutes)
         
         stale_nodes = []
         for node_id, node_info in self.active_nodes.items():
@@ -442,12 +448,14 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 stale_nodes.append((node_id, node_info))
         
         for node_id, node_info in stale_nodes:
-            await self._emit_event(NodeEvent(
-                event_type=NodeEventType.NODE_LEFT,
-                node_info=node_info,
-                timestamp=current_time,
-                metadata={"reason": "stale"}
-            ))
+            # Before emitting "left" event, try to verify the node is actually down
+            if await self._verify_node_actually_down(node_info):
+                await self._emit_event(NodeEvent(
+                    event_type=NodeEventType.NODE_LEFT,
+                    node_info=node_info,
+                    timestamp=current_time,
+                    metadata={"reason": "stale_verified"}
+                ))
     
     # DiscoveryInterface implementation
     async def get_nodes(self, model: Optional[str] = None, force_refresh: bool = False) -> List[NodeInfo]:
@@ -486,6 +494,22 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         
         # Re-evaluate all current nodes
         asyncio.create_task(self._reevaluate_all_nodes())
+    
+    async def _verify_node_actually_down(self, node_info: NodeInfo) -> bool:
+        """Verify that a node is actually down before emitting 'left' event"""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(f"http://{node_info.ip}:{node_info.port}/health") as response:
+                    if response.status == 200:
+                        logger.info(f"Node {node_info.node_id[:8]}... is actually still alive, updating last_seen")
+                        # Update the node's last_seen time
+                        node_info.last_seen = int(time.time())
+                        return False  # Node is alive
+        except Exception as e:
+            logger.debug(f"Health check failed for {node_info.node_id[:8]}...: {e}")
+        
+        return True  # Node is confirmed down
     
     async def _reevaluate_all_nodes(self):
         """Re-evaluate all current nodes against new filtering rules"""

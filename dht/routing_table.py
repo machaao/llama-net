@@ -45,7 +45,7 @@ class RoutingTable:
         self.node_id = node_id
         self.k = k
         self.buckets: Dict[int, KBucket] = {}
-        self.contact_timeout = 60  # Remove contacts not seen for 60 seconds
+        self.contact_timeout = 180  # Increased from 60 to 180 seconds (3 minutes)
     
     def add_contact(self, contact: 'Contact'):
         """Add a contact to the appropriate bucket"""

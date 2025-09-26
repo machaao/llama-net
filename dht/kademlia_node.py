@@ -60,8 +60,8 @@ class KademliaNode:
         self.alpha = 3  # concurrency parameter
         self.ttl = 86400  # 24 hours in seconds
         
-        # Cleanup parameters
-        self.cleanup_interval = 30  # Cleanup every 30 seconds
+        # Cleanup parameters - INCREASED INTERVALS
+        self.cleanup_interval = 90  # Increased from 30 to 90 seconds
         self.cleanup_task = None
         self.last_cleanup = 0
         
@@ -198,10 +198,10 @@ class KademliaNode:
         all_contacts = self.routing_table.get_all_contacts()
         current_time = time.time()
         
-        # Check contacts that haven't been seen recently (30+ seconds)
+        # Check contacts that haven't been seen recently (120+ seconds instead of 30)
         stale_contacts = [
             contact for contact in all_contacts
-            if current_time - contact.last_seen > 30
+            if current_time - contact.last_seen > 120  # Increased from 30 to 120
         ]
         
         if not stale_contacts:
@@ -210,32 +210,55 @@ class KademliaNode:
         
         logger.info(f"🔍 Verifying {len(stale_contacts)} potentially stale contacts")
         
-        # Ping stale contacts concurrently (limit to 5 at a time)
-        semaphore = asyncio.Semaphore(5)
-        tasks = [self._verify_contact(contact, semaphore) for contact in stale_contacts]
+        # Reduce concurrency and add retry logic
+        semaphore = asyncio.Semaphore(3)  # Reduced from 5 to 3
+        tasks = [self._verify_contact_with_retry(contact, semaphore) for contact in stale_contacts]
         
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             alive_count = sum(1 for result in results if result is True)
             logger.info(f"🔍 Contact verification: {alive_count}/{len(stale_contacts)} contacts are alive")
     
-    async def _verify_contact(self, contact, semaphore):
-        """Verify a single contact is still alive"""
+    async def _verify_contact_with_retry(self, contact, semaphore):
+        """Verify a single contact with retry and HTTP fallback"""
         async with semaphore:
+            # Try DHT ping with retry
+            for attempt in range(2):
+                try:
+                    verified_contact = await self._ping_node(contact.ip, contact.port)
+                    if verified_contact:
+                        self.routing_table.update_contact_seen(contact.node_id)
+                        logger.debug(f"✅ DHT ping successful for {contact.node_id[:8]}... (attempt {attempt + 1})")
+                        return True
+                    
+                    if attempt == 0:
+                        await asyncio.sleep(3)  # Wait longer between attempts
+                        
+                except Exception as e:
+                    logger.debug(f"DHT ping failed for {contact.node_id[:8]}... (attempt {attempt + 1}): {e}")
+                    if attempt == 0:
+                        await asyncio.sleep(3)
+            
+            # DHT ping failed - try HTTP health check as fallback
             try:
-                verified_contact = await self._ping_node(contact.ip, contact.port)
-                if verified_contact:
-                    # Contact is alive, update last_seen
-                    self.routing_table.update_contact_seen(contact.node_id)
-                    logger.debug(f"✅ Contact {contact.node_id[:8]}... is alive")
-                    return True
-                else:
-                    # Contact is dead, will be removed by cleanup
-                    logger.info(f"💀 Contact {contact.node_id[:8]}... is unreachable")
-                    return False
+                import aiohttp
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                    # Try to find the HTTP port for this node
+                    for http_port in [8000, 8002, 8004, 8006, 8008, 8010]:
+                        try:
+                            async with session.get(f"http://{contact.ip}:{http_port}/health") as response:
+                                if response.status == 200:
+                                    logger.info(f"✅ HTTP health check successful for {contact.node_id[:8]}... on port {http_port}")
+                                    # Update last_seen since node is actually alive
+                                    self.routing_table.update_contact_seen(contact.node_id)
+                                    return True
+                        except:
+                            continue
             except Exception as e:
-                logger.debug(f"Error verifying contact {contact.node_id[:8]}...: {e}")
-                return False
+                logger.debug(f"HTTP health check failed for {contact.node_id[:8]}...: {e}")
+            
+            logger.info(f"💀 Contact {contact.node_id[:8]}... confirmed unreachable after all verification attempts")
+            return False
     
     async def _cleanup_storage(self):
         """Clean up expired storage entries"""
