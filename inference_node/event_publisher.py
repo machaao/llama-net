@@ -332,6 +332,21 @@ class EventBasedDHTPublisher:
             
         except Exception as e:
             logger.error(f"Error publishing node info: {e}")
+
+    async def _broadcast_node_event(self, event_type: str, node_info: Dict[str, Any]):
+        """Broadcast node events via SSE (if available)"""
+        try:
+            # Import here to avoid circular imports
+            from inference_node.server import sse_handler
+            
+            if sse_handler:
+                await sse_handler.broadcast_event(event_type, {
+                    'node_info': node_info,
+                    'timestamp': time.time()
+                })
+                logger.debug(f"Broadcasted {event_type} event via SSE")
+        except Exception as e:
+            logger.debug(f"SSE broadcast not available: {e}")
     
     async def _update_all_nodes_registry(self, node_info):
         """Update the all_nodes registry with proper aggregation"""

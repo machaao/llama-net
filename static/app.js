@@ -556,26 +556,16 @@ class LlamaNetUI {
     }
     
     async refreshNetworkStatus() {
+        """Manual refresh - no automatic polling"""
         try {
-            // Get network models and statistics
-            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/dht/status`),
-                fetch(`${this.baseUrl}/v1/models/network`),
-                fetch(`${this.baseUrl}/models/statistics`)
-            ]);
-            
-            if (dhtResponse.ok && modelsResponse.ok && statsResponse.ok) {
-                const dhtStatus = await dhtResponse.json();
-                const modelsData = await modelsResponse.json();
-                const statsData = await statsResponse.json();
-                
-                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
-            } else {
-                this.showNetworkError('Unable to connect to LlamaNet node');
-            }
+            this.showUpdateIndicator(true);
+            await this.loadInitialNetworkStatus();
+            this.showToast('success', 'Network status refreshed');
         } catch (error) {
             console.error('Error refreshing network status:', error);
-            this.showNetworkError('Network discovery failed');
+            this.showToast('error', 'Failed to refresh network status');
+        } finally {
+            this.showUpdateIndicator(false);
         }
     }
     

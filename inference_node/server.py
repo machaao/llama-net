@@ -1554,6 +1554,29 @@ async def validate_hardware_consistency():
         logger.error(f"Error validating hardware consistency: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/sse/status")
+async def sse_status():
+    """Get SSE handler status and connection information"""
+    if not sse_handler:
+        raise HTTPException(status_code=503, detail="SSE handler not initialized")
+    
+    return {
+        "sse_enabled": True,
+        "active_connections": len(sse_handler.active_connections),
+        "event_listeners": len(sse_handler.event_listeners),
+        "network_monitor_running": sse_network_monitor.running if sse_network_monitor else False,
+        "endpoint": "/events/network",
+        "polling_disabled": True,  # Confirm no polling
+        "features": [
+            "real_time_node_discovery",
+            "network_topology_changes", 
+            "connection_heartbeats",
+            "error_handling",
+            "no_polling"
+        ],
+        "timestamp": time.time()
+    }
+
 @app.post("/hardware/update")
 async def update_hardware_node_id():
     """Force update node ID based on current hardware"""
