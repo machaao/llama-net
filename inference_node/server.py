@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from typing import Dict, Any, Union, List, Optional
 from contextlib import asynccontextmanager
 import json
+from concurrent.futures import ProcessPoolExecutor
 
 from common.models import (
     OpenAIModel, OpenAIModelList,
@@ -51,6 +52,7 @@ discovery_bridge = None
 shutdown_handler = None
 signal_handler = None
 round_robin_state = {"index": 0}  # Global round robin state
+executor = None  # ProcessPoolExecutor for clean shutdown
 
 class DiscoverySSEBridge(NodeEventListener):
     """Bridge discovery events to SSE broadcasting"""
@@ -107,7 +109,16 @@ REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
 async def graceful_shutdown():
     """Graceful shutdown using the enhanced shutdown handler"""
-    global shutdown_handler
+    global shutdown_handler, executor
+    
+    # Clean up executor first
+    if executor:
+        try:
+            logger.info("🧹 Final ProcessPoolExecutor cleanup...")
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: executor.shutdown(wait=False))
+        except Exception as e:
+            logger.debug(f"Error in final executor cleanup: {e}")
     
     if shutdown_handler:
         try:
@@ -156,13 +167,17 @@ async def basic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge, shutdown_handler, signal_handler
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge, shutdown_handler, signal_handler, executor
     
     # Store shutdown event for coordination
     shutdown_event = asyncio.Event()
     app.state.shutdown_event = shutdown_event
     
     try:
+        # Initialize ProcessPoolExecutor early to prevent semaphore issues
+        executor = ProcessPoolExecutor()
+        logger.info("ProcessPoolExecutor initialized")
+        
         # Initialize shutdown handler early
         shutdown_handler = DHTPublisherShutdownHandler(max_shutdown_time=8.0)
         
@@ -276,6 +291,17 @@ async def lifespan(app: FastAPI):
     # Shutdown - Signal shutdown event first
     logger.info("🛑 Lifespan shutdown initiated")
     shutdown_event.set()
+    
+    # Clean up ProcessPoolExecutor first to prevent semaphore warnings
+    if executor:
+        try:
+            logger.info("🧹 Cleaning up ProcessPoolExecutor...")
+            loop = asyncio.get_event_loop()
+            # Use run_in_executor to properly shutdown the executor
+            await loop.run_in_executor(None, lambda: executor.shutdown(wait=True))
+            logger.info("✅ ProcessPoolExecutor cleaned up")
+        except Exception as e:
+            logger.warning(f"Error cleaning up ProcessPoolExecutor: {e}")
     
     # Use graceful shutdown with enhanced handler
     await graceful_shutdown()
@@ -1716,6 +1742,10 @@ def start_server():
     global config
     if config is None:
         config = InferenceConfig()  # Will parse command line args
+    
+    # Suppress Python semaphore warnings for cleaner output
+    import os
+    os.environ['PYTHONWARNINGS'] = "ignore:semaphore:UserWarning:multiprocessing.resource_tracker"
     
     # Configure uvicorn with optimized shutdown settings
     uvicorn_config = uvicorn.Config(
