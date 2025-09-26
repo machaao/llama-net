@@ -156,11 +156,14 @@ git lfs pull --include="*.Q4_K_M.gguf"
 
 #### 🚀 Getting Started (Small & Fast)
 ```bash
+# Llama 3.2 3B (3B parameters) - Latest Meta model, excellent for testing
+huggingface-cli download bartowski/Llama-3.2-3B-Instruct-GGUF Llama-3.2-3B-Instruct-Q4_K_M.gguf --local-dir ./models
+
+# Gemma 3 4B (4B parameters) - Latest Google model, great performance
+huggingface-cli download MaziyarPanahi/gemma-3-4b-it-GGUF gemma-3-4b-it-Q4_K_M.gguf --local-dir ./models
+
 # Phi-3.5 Mini (3.8B parameters) - Latest Microsoft model, great for testing
 huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir ./models
-
-# Qwen 2.5 3B (3B parameters) - Excellent small model with strong performance
-huggingface-cli download bartowski/Qwen2.5-3B-Instruct-GGUF Qwen2.5-3B-Instruct-Q4_K_M.gguf --local-dir ./models
 ```
 
 #### 💼 Production Use (Balanced Performance) - **RECOMMENDED**
@@ -168,8 +171,11 @@ huggingface-cli download bartowski/Qwen2.5-3B-Instruct-GGUF Qwen2.5-3B-Instruct-
 # Llama 3.1 8B Instruct - Latest Meta model, excellent general purpose (RECOMMENDED)
 huggingface-cli download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Qwen 2.5 7B Instruct - Outstanding performance, multilingual
-huggingface-cli download bartowski/Qwen2.5-7B-Instruct-GGUF Qwen2.5-7B-Instruct-Q4_K_M.gguf --local-dir ./models
+# Qwen3 7B Instruct - Latest Qwen model, outstanding performance
+huggingface-cli download unsloth/Qwen3-7B-Instruct-GGUF Qwen3-7B-Instruct-Q4_K_M.gguf --local-dir ./models
+
+# DeepSeek-R1 Distill 7B - Latest breakthrough model, excellent reasoning
+huggingface-cli download bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf --local-dir ./models
 
 # Mistral 7B v0.3 - Latest Mistral model, high quality
 huggingface-cli download bartowski/Mistral-7B-Instruct-v0.3-GGUF Mistral-7B-Instruct-v0.3-Q4_K_M.gguf --local-dir ./models
@@ -180,14 +186,17 @@ huggingface-cli download bartowski/CodeQwen1.5-7B-Chat-GGUF CodeQwen1.5-7B-Chat-
 
 #### 🎯 High Performance (Larger Models)
 ```bash
+# Qwen3 30B Instruct - Most popular large model, exceptional performance
+huggingface-cli download unsloth/Qwen3-30B-A3B-GGUF Qwen3-30B-A3B-Q4_K_M.gguf --local-dir ./models
+
+# DeepSeek-R1 Distill 32B - Latest breakthrough model, top reasoning
+huggingface-cli download bartowski/DeepSeek-R1-Distill-Qwen-32B-abliterated-GGUF DeepSeek-R1-Distill-Qwen-32B-abliterated-Q4_K_M.gguf --local-dir ./models
+
 # Llama 3.1 70B Instruct - Top-tier reasoning and knowledge
 huggingface-cli download bartowski/Meta-Llama-3.1-70B-Instruct-GGUF Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Qwen 2.5 14B Instruct - Excellent balance of size and capability
-huggingface-cli download bartowski/Qwen2.5-14B-Instruct-GGUF Qwen2.5-14B-Instruct-Q4_K_M.gguf --local-dir ./models
-
-# Mixtral 8x7B v0.1 - Mixture of experts, very capable
-huggingface-cli download bartowski/Mixtral-8x7B-Instruct-v0.1-GGUF Mixtral-8x7B-Instruct-v0.1-Q4_K_M.gguf --local-dir ./models
+# GPT-OSS 20B - Popular open-source alternative
+huggingface-cli download unsloth/gpt-oss-20b-GGUF gpt-oss-20b-Q4_K_M.gguf --local-dir ./models
 ```
 
 #### 🧠 Maximum Capability (Frontier Models)
@@ -195,10 +204,13 @@ huggingface-cli download bartowski/Mixtral-8x7B-Instruct-v0.1-GGUF Mixtral-8x7B-
 # Llama 3.1 405B Instruct - Frontier model capability (requires massive resources)
 huggingface-cli download bartowski/Meta-Llama-3.1-405B-Instruct-GGUF Meta-Llama-3.1-405B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Qwen 2.5 32B Instruct - Excellent large model performance
-huggingface-cli download bartowski/Qwen2.5-32B-Instruct-GGUF Qwen2.5-32B-Instruct-Q4_K_M.gguf --local-dir ./models
+# Qwen3 72B Instruct - Latest large Qwen model, exceptional capability
+huggingface-cli download unsloth/Qwen3-72B-Instruct-GGUF Qwen3-72B-Instruct-Q4_K_M.gguf --local-dir ./models
 
-# Qwen 2.5 72B Instruct - Top performance for most tasks
+# DeepSeek-R1 Distill 70B - Largest breakthrough model variant
+huggingface-cli download bartowski/DeepSeek-R1-Distill-Qwen-70B-GGUF DeepSeek-R1-Distill-Qwen-70B-Q4_K_M.gguf --local-dir ./models
+
+# Qwen 2.5 72B Instruct - Proven high performance for complex tasks
 huggingface-cli download bartowski/Qwen2.5-72B-Instruct-GGUF Qwen2.5-72B-Instruct-Q4_K_M.gguf --local-dir ./models
 ```
 
