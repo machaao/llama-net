@@ -4,6 +4,8 @@ import uuid
 import uvicorn
 import os
 import aiohttp
+import signal
+import sys
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
@@ -101,58 +103,85 @@ class DiscoverySSEBridge(NodeEventListener):
 REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
 async def cleanup_services():
-    """Clean up all services with proper departure notification"""
+    """Clean up all services with proper departure notification and timeout"""
     global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, discovery_bridge
     
     logger.info("Shutting down services...")
     
-    # Send departure notification FIRST while services are still running
-    if dht_publisher and sse_handler:
-        try:
-            await dht_publisher._broadcast_node_event("node_left", {
-                'node_id': config.node_id if config else 'unknown',
-                'reason': 'server_shutdown',
-                'timestamp': time.time()
-            })
-            # Give time for event to propagate
-            await asyncio.sleep(1)
-        except Exception as e:
-            logger.error(f"Error broadcasting shutdown event: {e}")
+    # Set a maximum cleanup time
+    cleanup_start = time.time()
+    max_cleanup_time = 25  # Leave 5 seconds buffer from uvicorn's 30s timeout
     
-    # Stop services in reverse order
-    if heartbeat_manager:
-        try:
-            await heartbeat_manager.stop()
-        except Exception as e:
-            logger.error(f"Error stopping heartbeat manager: {e}")
-    
-    if p2p_handler:
-        try:
-            await p2p_handler.close()
-        except Exception as e:
-            logger.error(f"Error stopping P2P handler: {e}")
-    
-    if dht_publisher:
-        try:
-            await dht_publisher.stop()
-        except Exception as e:
-            logger.error(f"Error stopping DHT publisher: {e}")
-    
-    if dht_discovery:
-        try:
-            await dht_discovery.stop()
-        except Exception as e:
-            logger.error(f"Error stopping DHT discovery: {e}")
-    
-    # Stop the shared DHT service last
     try:
-        from common.dht_service import SharedDHTService
-        dht_service = SharedDHTService()
-        await dht_service.stop()
+        # Send departure notification FIRST while services are still running
+        if dht_publisher and sse_handler:
+            try:
+                await asyncio.wait_for(
+                    dht_publisher._broadcast_node_event("node_left", {
+                        'node_id': config.node_id if config else 'unknown',
+                        'reason': 'server_shutdown',
+                        'timestamp': time.time()
+                    }),
+                    timeout=3.0  # Quick departure notification
+                )
+                logger.info("Departure notification sent")
+            except asyncio.TimeoutError:
+                logger.warning("Departure notification timed out")
+            except Exception as e:
+                logger.error(f"Error broadcasting shutdown event: {e}")
+        
+        # Stop services in parallel with timeouts
+        cleanup_tasks = []
+        
+        if heartbeat_manager:
+            cleanup_tasks.append(("heartbeat", heartbeat_manager.stop()))
+        
+        if p2p_handler:
+            cleanup_tasks.append(("p2p", p2p_handler.close()))
+        
+        if dht_publisher:
+            cleanup_tasks.append(("dht_publisher", dht_publisher.stop()))
+        
+        if dht_discovery:
+            cleanup_tasks.append(("dht_discovery", dht_discovery.stop()))
+        
+        # Execute cleanup tasks with individual timeouts
+        for name, task in cleanup_tasks:
+            if time.time() - cleanup_start > max_cleanup_time:
+                logger.warning(f"Cleanup timeout reached, skipping {name}")
+                break
+                
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+                logger.debug(f"✅ {name} stopped")
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ {name} stop timed out")
+            except Exception as e:
+                logger.error(f"❌ Error stopping {name}: {e}")
+        
+        # Stop the shared DHT service last
+        try:
+            from common.dht_service import SharedDHTService
+            dht_service = SharedDHTService()
+            await asyncio.wait_for(dht_service.stop(), timeout=3.0)
+            logger.debug("✅ Shared DHT service stopped")
+        except asyncio.TimeoutError:
+            logger.warning("⏰ Shared DHT service stop timed out")
+        except Exception as e:
+            logger.error(f"❌ Error stopping shared DHT service: {e}")
+        
+        total_cleanup_time = time.time() - cleanup_start
+        logger.info(f"All services shut down in {total_cleanup_time:.2f}s")
+        
     except Exception as e:
-        logger.error(f"Error stopping shared DHT service: {e}")
-    
-    logger.info("All services shut down")
+        logger.error(f"Error during cleanup: {e}")
+    finally:
+        # Ensure we don't exceed the timeout
+        remaining_time = max_cleanup_time - (time.time() - cleanup_start)
+        if remaining_time > 0:
+            logger.info(f"Cleanup completed with {remaining_time:.2f}s remaining")
+        else:
+            logger.warning("Cleanup exceeded allocated time")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1676,17 +1705,40 @@ async def update_hardware_node_id():
         raise HTTPException(status_code=500, detail=str(e))
 
 def start_server():
-    """Start the inference server"""
+    """Start the inference server with graceful shutdown handling"""
     global config
     if config is None:
         config = InferenceConfig()  # Will parse command line args
     
-    uvicorn.run(
+    # Set up signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Configure uvicorn with graceful shutdown settings
+    uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host,
         port=config.port,
-        log_level="info"
+        log_level="info",
+        # Graceful shutdown configuration
+        timeout_keep_alive=5,
+        timeout_graceful_shutdown=30,  # Give 30 seconds for cleanup
+        access_log=False  # Reduce log noise during shutdown
     )
+    
+    server = uvicorn.Server(uvicorn_config)
+    
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received, shutting down...")
+    except Exception as e:
+        logger.error(f"Server error: {e}")
+        raise
 
 def show_help():
     """Show help information"""

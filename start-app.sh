@@ -73,6 +73,33 @@ health_check() {
     return 1
 }
 
+# Signal handler for graceful shutdown
+cleanup() {
+    echo "🛑 Received shutdown signal, stopping LlamaNet node..."
+    if [ ! -z "$SERVER_PID" ]; then
+        echo "📤 Sending SIGTERM to server process $SERVER_PID..."
+        kill -TERM $SERVER_PID 2>/dev/null || true
+        
+        # Wait for graceful shutdown
+        echo "⏳ Waiting for graceful shutdown (max 35 seconds)..."
+        for i in $(seq 1 35); do
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+                echo "✅ Server shut down gracefully"
+                exit 0
+            fi
+            sleep 1
+        done
+        
+        # Force kill if still running
+        echo "⚠️ Forcing server shutdown..."
+        kill -KILL $SERVER_PID 2>/dev/null || true
+    fi
+    exit 0
+}
+
+# Set up signal traps
+trap cleanup SIGINT SIGTERM
+
 # Build command line arguments
 ARGS="--model-path $DEFAULT_MODEL_PATH"
 ARGS="$ARGS --host $DEFAULT_HOST"
@@ -113,9 +140,19 @@ if health_check $DEFAULT_PORT; then
     echo "🎉 LlamaNet OpenAI-Compatible Inference Node is running!"
     echo "📊 Monitor network status: python -m tools.monitor"
     echo "🔍 Quick network check: python -m tools.quick_check"
+    echo "🛑 Press Ctrl+C for graceful shutdown"
     
-    # Keep the server running in foreground
+    # Keep the server running in foreground with proper signal handling
     wait $SERVER_PID
+    exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        echo "✅ Server exited gracefully"
+    else
+        echo "❌ Server exited with code $exit_code"
+    fi
+    
+    exit $exit_code
 else
     echo "❌ Failed to start service"
     kill $SERVER_PID 2>/dev/null || true

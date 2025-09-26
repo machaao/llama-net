@@ -157,46 +157,52 @@ class EventBasedDHTPublisher:
     
     async def stop(self):
         """Stop the event-based publisher with enhanced departure broadcasting"""
-        # Broadcast node leave event with retry mechanism
-        departure_attempts = 3
-        for attempt in range(departure_attempts):
-            try:
-                await self._broadcast_node_event("node_left", {
+        logger.info("Stopping event-based DHT publisher...")
+        
+        # Quick departure broadcast (don't retry on failure during shutdown)
+        try:
+            await asyncio.wait_for(
+                self._broadcast_node_event("node_left", {
                     'node_id': self.config.node_id,
                     'ip': get_host_ip(),
                     'port': self.config.port,
                     'model': self.config.model_name,
-                    'reason': 'graceful_shutdown',
-                    'shutdown_attempt': attempt + 1
-                })
-                
-                # Give time for the event to propagate
-                await asyncio.sleep(1)
-                break
-                
-            except Exception as e:
-                logger.debug(f"Departure broadcast attempt {attempt + 1} failed: {e}")
-                if attempt < departure_attempts - 1:
-                    await asyncio.sleep(0.5)
+                    'reason': 'graceful_shutdown'
+                }),
+                timeout=2.0  # Quick timeout during shutdown
+            )
+            logger.info("✅ Departure event broadcasted")
+        except asyncio.TimeoutError:
+            logger.warning("⏰ Departure broadcast timed out during shutdown")
+        except Exception as e:
+            logger.debug(f"Departure broadcast failed during shutdown: {e}")
         
         self.running = False
         
-        if self.monitor_task:
-            self.monitor_task.cancel()
-            try:
-                await self.monitor_task
-            except asyncio.CancelledError:
-                pass
+        # Cancel tasks quickly
+        tasks_to_cancel = [self.monitor_task]
+        for task in tasks_to_cancel:
+            if task and not task.done():
+                task.cancel()
         
-        # Remove our node from DHT with retry
-        for attempt in range(2):
+        # Wait briefly for task cancellation
+        if tasks_to_cancel:
             try:
-                await self._unpublish_node_info()
-                break
-            except Exception as e:
-                logger.error(f"Error unpublishing node info (attempt {attempt + 1}): {e}")
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
+                await asyncio.wait_for(
+                    asyncio.gather(*[t for t in tasks_to_cancel if t], return_exceptions=True),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("⏰ Task cancellation timed out")
+        
+        # Quick unpublish attempt
+        try:
+            await asyncio.wait_for(self._unpublish_node_info(), timeout=2.0)
+            logger.debug("✅ Node info unpublished")
+        except asyncio.TimeoutError:
+            logger.warning("⏰ Unpublish timed out during shutdown")
+        except Exception as e:
+            logger.debug(f"Unpublish failed during shutdown: {e}")
         
         self.kademlia_node = None
         logger.info("Event-based DHT publisher stopped")
