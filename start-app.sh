@@ -82,10 +82,23 @@ cleanup() {
         kill -TERM $SERVER_PID 2>/dev/null || true
         
         # Wait for graceful shutdown with shorter timeout
-        echo "⏳ Waiting for graceful shutdown (max 35 seconds)..."
-        for i in $(seq 1 35); do
+        echo "⏳ Waiting for graceful shutdown (max 15 seconds)..."
+        for i in $(seq 1 15); do
             if ! kill -0 $SERVER_PID 2>/dev/null; then
                 echo "✅ Server shut down gracefully"
+                exit 0
+            fi
+            sleep 1
+        done
+        
+        # Send SIGINT if still running
+        echo "⚠️ Sending SIGINT..."
+        kill -INT $SERVER_PID 2>/dev/null || true
+        
+        # Wait a bit more
+        for i in $(seq 1 5); do
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+                echo "✅ Server shut down after SIGINT"
                 exit 0
             fi
             sleep 1

@@ -161,6 +161,30 @@ class SharedDHTService:
                 await self._stop_internal()
                 logger.info("Shared DHT service stopped")
     
+    async def fast_stop(self):
+        """Fast stop for uvicorn compatibility - don't wait for cleanup"""
+        async with self._lock:
+            if self._kademlia_node:
+                try:
+                    # Set running to False immediately
+                    self._kademlia_node.running = False
+                    
+                    # Cancel any running tasks without waiting
+                    if hasattr(self._kademlia_node, 'server_task'):
+                        if self._kademlia_node.server_task and not self._kademlia_node.server_task.done():
+                            self._kademlia_node.server_task.cancel()
+                    
+                    # Don't wait for socket cleanup - let OS handle it
+                    logger.debug("DHT fast stop completed")
+                    
+                except Exception as e:
+                    logger.debug(f"Error in DHT fast stop: {e}")
+                finally:
+                    self._kademlia_node = None
+            
+            self._initialized = False
+            self._initializing = False
+    
     def is_initialized(self) -> bool:
         """Check if the DHT service is properly initialized"""
         return self._initialized and self._kademlia_node is not None

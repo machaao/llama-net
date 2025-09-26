@@ -102,94 +102,145 @@ class DiscoverySSEBridge(NodeEventListener):
 # Request concurrency limiting
 REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
-async def cleanup_services():
-    """Clean up all services with proper departure notification and timeout"""
-    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, discovery_bridge
+async def cleanup_services_fast():
+    """Fast cleanup optimized for uvicorn shutdown compatibility"""
+    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, discovery_bridge, sse_network_monitor
     
-    logger.info("Shutting down services...")
+    logger.info("🚀 Fast shutdown initiated...")
+    start_time = time.time()
     
-    # Set a maximum cleanup time
-    cleanup_start = time.time()
-    max_cleanup_time = 25  # Leave 5 seconds buffer from uvicorn's 30s timeout
+    # Set maximum cleanup time (much shorter for uvicorn)
+    max_cleanup_time = 8.0  # 8 seconds max
     
     try:
-        # Send departure notification FIRST while services are still running
+        # Step 1: Stop accepting new requests immediately
+        if sse_handler:
+            sse_handler.running = False
+        
+        # Step 2: Send quick departure notification (non-blocking)
+        departure_task = None
         if dht_publisher and sse_handler:
             try:
-                await asyncio.wait_for(
+                departure_task = asyncio.create_task(
                     dht_publisher._broadcast_node_event("node_left", {
                         'node_id': config.node_id if config else 'unknown',
-                        'reason': 'server_shutdown',
+                        'reason': 'fast_shutdown',
                         'timestamp': time.time()
-                    }),
-                    timeout=3.0  # Quick departure notification
+                    })
                 )
-                logger.info("Departure notification sent")
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                logger.warning("Departure notification timed out or cancelled")
+                # Don't wait for it, let it run in background
+                logger.debug("Departure notification started (background)")
             except Exception as e:
-                logger.error(f"Error broadcasting shutdown event: {e}")
+                logger.debug(f"Could not start departure notification: {e}")
         
-        # Stop services in parallel with timeouts
-        cleanup_tasks = []
+        # Step 3: Cancel all background tasks quickly
+        tasks_to_cancel = []
+        
+        # Collect cancellable tasks
+        if heartbeat_manager and hasattr(heartbeat_manager, 'heartbeat_task'):
+            tasks_to_cancel.append(heartbeat_manager.heartbeat_task)
+        
+        if dht_publisher and hasattr(dht_publisher, 'monitor_task'):
+            tasks_to_cancel.append(dht_publisher.monitor_task)
+        
+        if dht_discovery and hasattr(dht_discovery, 'event_processor_task'):
+            tasks_to_cancel.append(dht_discovery.event_processor_task)
+            if hasattr(dht_discovery, 'dht_monitor_task'):
+                tasks_to_cancel.append(dht_discovery.dht_monitor_task)
+            if hasattr(dht_discovery, 'unknown_nodes_task'):
+                tasks_to_cancel.append(dht_discovery.unknown_nodes_task)
+        
+        if sse_network_monitor and hasattr(sse_network_monitor, 'monitor_task'):
+            tasks_to_cancel.append(sse_network_monitor.monitor_task)
+        
+        # Cancel all tasks immediately
+        for task in tasks_to_cancel:
+            if task and not task.done():
+                task.cancel()
+        
+        logger.debug(f"Cancelled {len(tasks_to_cancel)} background tasks")
+        
+        # Step 4: Quick service stops (with very short timeouts)
+        cleanup_operations = []
         
         if heartbeat_manager:
-            cleanup_tasks.append(("heartbeat", heartbeat_manager.stop()))
+            cleanup_operations.append(("heartbeat", heartbeat_manager.stop()))
+        
+        if sse_network_monitor:
+            cleanup_operations.append(("sse_monitor", sse_network_monitor.stop()))
         
         if p2p_handler:
-            cleanup_tasks.append(("p2p", p2p_handler.close()))
+            cleanup_operations.append(("p2p", p2p_handler.close()))
         
-        if dht_publisher:
-            cleanup_tasks.append(("dht_publisher", dht_publisher.stop()))
-        
-        if dht_discovery:
-            cleanup_tasks.append(("dht_discovery", dht_discovery.stop()))
-        
-        # Execute cleanup tasks with individual timeouts
-        for name, task in cleanup_tasks:
-            if time.time() - cleanup_start > max_cleanup_time:
-                logger.warning(f"Cleanup timeout reached, skipping {name}")
+        # Execute with very short timeouts
+        for name, operation in cleanup_operations:
+            if time.time() - start_time > max_cleanup_time:
+                logger.warning(f"⏰ Cleanup timeout, skipping {name}")
                 break
-                
+            
             try:
-                await asyncio.wait_for(task, timeout=5.0)
+                await asyncio.wait_for(operation, timeout=1.0)  # 1 second max per operation
                 logger.debug(f"✅ {name} stopped")
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                logger.warning(f"⏰ {name} stop timed out or cancelled")
+            except asyncio.TimeoutError:
+                logger.debug(f"⏰ {name} stop timed out (continuing)")
             except Exception as e:
-                logger.error(f"❌ Error stopping {name}: {e}")
+                logger.debug(f"❌ Error stopping {name}: {e}")
         
-        # Stop the shared DHT service last
+        # Step 5: DHT cleanup (fastest possible)
         try:
+            if dht_publisher:
+                dht_publisher.running = False
+            
+            if dht_discovery:
+                dht_discovery.running = False
+            
+            # Quick DHT service stop
             from common.dht_service import SharedDHTService
             dht_service = SharedDHTService()
-            await asyncio.wait_for(dht_service.stop(), timeout=3.0)
-            logger.debug("✅ Shared DHT service stopped")
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            logger.warning("⏰ Shared DHT service stop timed out or cancelled")
+            
+            # Force immediate stop without waiting
+            if dht_service._kademlia_node:
+                dht_service._kademlia_node.running = False
+            
+            # Don't wait for DHT cleanup - let it happen in background
+            asyncio.create_task(dht_service.stop())
+            logger.debug("✅ DHT cleanup initiated (background)")
+            
         except Exception as e:
-            logger.error(f"❌ Error stopping shared DHT service: {e}")
+            logger.debug(f"DHT cleanup error (non-blocking): {e}")
         
-        total_cleanup_time = time.time() - cleanup_start
-        logger.info(f"All services shut down in {total_cleanup_time:.2f}s")
+        # Step 6: Wait briefly for departure notification if it's still running
+        if departure_task and not departure_task.done():
+            try:
+                await asyncio.wait_for(departure_task, timeout=0.5)
+                logger.debug("✅ Departure notification completed")
+            except asyncio.TimeoutError:
+                departure_task.cancel()
+                logger.debug("⏰ Departure notification cancelled")
+            except Exception as e:
+                logger.debug(f"Departure notification error: {e}")
         
-    except asyncio.CancelledError:
-        logger.warning("Cleanup was cancelled, forcing immediate shutdown")
-        # Don't re-raise CancelledError during shutdown
+        total_time = time.time() - start_time
+        logger.info(f"🚀 Fast shutdown completed in {total_time:.2f}s")
+        
     except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
-    finally:
-        # Ensure we don't exceed the timeout
-        remaining_time = max_cleanup_time - (time.time() - cleanup_start)
-        if remaining_time > 0:
-            logger.info(f"Cleanup completed with {remaining_time:.2f}s remaining")
-        else:
-            logger.warning("Cleanup exceeded allocated time")
+        logger.error(f"Error during fast cleanup: {e}")
+    
+    # Ensure we don't exceed time limit
+    total_time = time.time() - start_time
+    if total_time > max_cleanup_time:
+        logger.warning(f"⚠️ Cleanup took {total_time:.2f}s (exceeded {max_cleanup_time}s limit)")
+    else:
+        logger.info(f"✅ Cleanup completed in {total_time:.2f}s")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge
+    
+    # Store shutdown event for coordination
+    shutdown_event = asyncio.Event()
+    app.state.shutdown_event = shutdown_event
     
     try:
         # Load configuration
@@ -275,15 +326,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
         # Cleanup any partially started services
-        await cleanup_services()
+        await cleanup_services_fast()
         raise
     
     yield
     
-    # Shutdown
-    if sse_network_monitor:
-        await sse_network_monitor.stop()
-    await cleanup_services()
+    # Shutdown - Signal shutdown event first
+    logger.info("🛑 Lifespan shutdown initiated")
+    shutdown_event.set()
+    
+    # Fast cleanup for uvicorn compatibility
+    await cleanup_services_fast()
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
@@ -1714,33 +1767,54 @@ async def update_hardware_node_id():
         raise HTTPException(status_code=500, detail=str(e))
 
 def start_server():
-    """Start the inference server with graceful shutdown handling"""
+    """Start the inference server with optimized graceful shutdown"""
     global config
     if config is None:
         config = InferenceConfig()  # Will parse command line args
     
-    # Configure uvicorn with graceful shutdown settings
-    # Let uvicorn handle signals - don't add our own signal handlers
+    # Configure uvicorn with optimized shutdown settings
     uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host,
         port=config.port,
         log_level="info",
-        # Graceful shutdown configuration
-        timeout_keep_alive=5,
-        timeout_graceful_shutdown=30,  # Give 30 seconds for cleanup
-        access_log=False  # Reduce log noise during shutdown
+        # Optimized shutdown configuration
+        timeout_keep_alive=2,
+        timeout_graceful_shutdown=10,  # Reduced from 30 to 10 seconds
+        access_log=False,
+        # Additional uvicorn optimizations
+        loop="asyncio",
+        http="httptools",
+        lifespan="on"
     )
     
     server = uvicorn.Server(uvicorn_config)
     
+    # Install custom signal handler that works with uvicorn
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, initiating shutdown...")
+        # Don't call sys.exit() - let uvicorn handle it
+        if hasattr(server, 'should_exit'):
+            server.should_exit = True
+        # Trigger the shutdown event if app is available
+        if hasattr(server, 'config') and hasattr(server.config, 'app'):
+            app = server.config.app
+            if hasattr(app, 'state') and hasattr(app.state, 'shutdown_event'):
+                app.state.shutdown_event.set()
+    
+    import signal
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
         server.run()
     except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received, shutting down...")
+        logger.info("Keyboard interrupt received")
     except Exception as e:
         logger.error(f"Server error: {e}")
         raise
+    finally:
+        logger.info("Server shutdown complete")
 
 def show_help():
     """Show help information"""
