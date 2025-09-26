@@ -102,9 +102,6 @@ class DHTPublisherShutdownHandler:
             logger.info(f"✅ Graceful shutdown completed in {total_time:.2f}s")
             self._log_shutdown_stats()
         
-            # NEW: Signal that uvicorn should exit
-            await self._signal_uvicorn_shutdown()
-        
         except Exception as e:
             self.shutdown_phase = ShutdownPhase.FAILED
             total_time = time.time() - self.shutdown_start_time
@@ -448,23 +445,6 @@ class DHTPublisherShutdownHandler:
             'force_shutdown': self.force_shutdown,
             'stats': self.shutdown_stats.copy()
         }
-    
-    async def _signal_uvicorn_shutdown(self):
-        """Signal uvicorn to shutdown gracefully"""
-        try:
-            # Try to get the current event loop and signal shutdown
-            loop = asyncio.get_running_loop()
-            
-            # Create a task to stop the loop after a brief delay
-            async def stop_loop():
-                await asyncio.sleep(0.1)  # Brief delay to allow cleanup
-                loop.stop()
-            
-            asyncio.create_task(stop_loop())
-            logger.info("🔄 Signaled uvicorn shutdown")
-            
-        except Exception as e:
-            logger.debug(f"Could not signal uvicorn shutdown: {e}")
 
 
 class SignalHandler:
