@@ -1,7 +1,8 @@
 import asyncio
 import json
 import logging
-from typing import AsyncGenerator, Dict, Any, Optional, Callable, List
+import time
+from typing import AsyncGenerator, Dict, Any, Optional, Callable, List, Set
 import aiohttp
 from dataclasses import dataclass
 
@@ -14,6 +15,108 @@ class SSEChunk:
     event: Optional[str] = None
     id: Optional[str] = None
     retry: Optional[int] = None
+
+class SSEHandler:
+    """Server-side SSE connection and event management"""
+    
+    def __init__(self):
+        self.active_connections: Dict[str, asyncio.Queue] = {}
+        self.event_listeners: List[Callable] = []
+        self.running = False
+        
+    async def add_connection(self, connection_id: str) -> asyncio.Queue:
+        """Add a new SSE connection"""
+        event_queue = asyncio.Queue(maxsize=100)
+        self.active_connections[connection_id] = event_queue
+        logger.info(f"SSE connection added: {connection_id} (total: {len(self.active_connections)})")
+        return event_queue
+    
+    async def remove_connection(self, connection_id: str):
+        """Remove an SSE connection"""
+        if connection_id in self.active_connections:
+            del self.active_connections[connection_id]
+            logger.info(f"SSE connection removed: {connection_id} (remaining: {len(self.active_connections)})")
+    
+    def add_event_listener(self, listener: Callable):
+        """Add an event listener function"""
+        self.event_listeners.append(listener)
+    
+    def remove_event_listener(self, listener: Callable):
+        """Remove an event listener function"""
+        if listener in self.event_listeners:
+            self.event_listeners.remove(listener)
+    
+    async def broadcast_event(self, event_type: str, event_data: Dict[str, Any]):
+        """Broadcast an event to all active connections"""
+        if not self.active_connections:
+            return
+        
+        event_payload = {
+            "type": event_type,
+            "timestamp": time.time(),
+            **event_data
+        }
+        
+        # Send to all active connections
+        disconnected_connections = []
+        for connection_id, queue in self.active_connections.items():
+            try:
+                await asyncio.wait_for(queue.put(event_payload), timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"SSE queue full for connection {connection_id}")
+            except Exception as e:
+                logger.error(f"Error broadcasting to connection {connection_id}: {e}")
+                disconnected_connections.append(connection_id)
+        
+        # Clean up disconnected connections
+        for connection_id in disconnected_connections:
+            await self.remove_connection(connection_id)
+        
+        # Notify event listeners
+        for listener in self.event_listeners:
+            try:
+                await listener(event_payload)
+            except Exception as e:
+                logger.error(f"Error in event listener: {e}")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get SSE handler status"""
+        return {
+            "active_connections": len(self.active_connections),
+            "event_listeners": len(self.event_listeners),
+            "running": self.running,
+            "connection_ids": list(self.active_connections.keys())
+        }
+
+class SSENetworkMonitor:
+    """Monitor network changes and broadcast via SSE"""
+    
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.running = False
+        self.monitor_task = None
+        self.sse_handler = None
+        
+    async def start(self):
+        """Start the network monitor"""
+        self.running = True
+        # Monitor task can be added here if needed for periodic checks
+        logger.info("SSE Network Monitor started")
+    
+    async def stop(self):
+        """Stop the network monitor"""
+        self.running = False
+        if self.monitor_task:
+            self.monitor_task.cancel()
+            try:
+                await self.monitor_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("SSE Network Monitor stopped")
+    
+    def set_sse_handler(self, sse_handler: SSEHandler):
+        """Set the SSE handler for broadcasting events"""
+        self.sse_handler = sse_handler
 
 class SSEParser:
     """Parse Server-Sent Events from a stream"""
