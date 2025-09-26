@@ -142,6 +142,18 @@ class EventBasedDHTPublisher:
         # Publish initial state
         await self._publish_node_info()
         
+        # Broadcast initial node join event
+        try:
+            await self._broadcast_node_event("node_joined", {
+                'node_id': self.config.node_id,
+                'ip': get_host_ip(),
+                'port': self.config.port,
+                'model': self.config.model_name,
+                'dht_port': self.config.dht_port
+            })
+        except Exception as e:
+            logger.debug(f"Could not broadcast initial node join: {e}")
+        
         logger.info(f"Event-based DHT publisher started with hardware-based node ID: {self.config.node_id[:16]}...")
         
         # Log hardware fingerprint details for debugging
@@ -151,6 +163,17 @@ class EventBasedDHTPublisher:
     
     async def stop(self):
         """Stop the event-based publisher"""
+        # Broadcast node leave event before stopping
+        try:
+            await self._broadcast_node_event("node_left", {
+                'node_id': self.config.node_id,
+                'ip': get_host_ip(),
+                'port': self.config.port,
+                'model': self.config.model_name
+            })
+        except Exception as e:
+            logger.debug(f"Could not broadcast node leave: {e}")
+        
         self.running = False
         
         if self.monitor_task:
@@ -301,7 +324,10 @@ class EventBasedDHTPublisher:
             
             # Update all_nodes registry
             await self._update_all_nodes_registry(node_info)
-            
+        
+            # NEW: Broadcast node update via SSE
+            await self._broadcast_node_event("node_updated", node_info)
+        
             logger.debug(f"Published hardware-based node info: load={metrics['load']:.3f}, tps={metrics['tps']:.2f}")
             
         except Exception as e:

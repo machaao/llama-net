@@ -92,33 +92,32 @@ class LlamaNetUI {
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
         
-        // Real-time event handling
+        // SSE-only properties (NO POLLING)
         this.eventSource = null;
         this.isConnected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000; // Start with 1 second
+        this.reconnectDelay = 1000;
         
         // Node tracking
-        this.activeNodes = new Map(); // node_id -> NodeInfo
+        this.activeNodes = new Map();
         this.nodeStats = {
             totalNodes: 0,
             modelsAvailable: new Set(),
             networkHealth: 'unknown'
         };
         
-        // Add debouncing for node events
-        this.nodeEventDebouncer = new Map();
-        this.recentNodeActivity = new Map();
-        this.nodeLeftDebounceTime = 15000; // 15 seconds
-        
-        // SSE-based update properties
+        // SSE connection info
+        this.connectionInfo = null;
         this.lastUpdateTime = 0;
         this.connectionStatus = 'connecting';
-        this.previousModelStats = null;
-        this.previousNodeStates = null;
-        this.currentNodeStates = null;
         this.errorCount = 0;
+        
+        // Remove ALL polling-related properties
+        // NO: this.updateInterval
+        // NO: this.isUpdating
+        // NO: this.updateFrequency
+        // NO: this.periodicUpdateTimer
         
         // Restore selected model from localStorage
         this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
@@ -127,14 +126,15 @@ class LlamaNetUI {
     }
     
     init() {
-        // Start real-time network monitoring with SSE
-        this.startRealTimeNetworkMonitoring();
+        // Start ONLY SSE-based network monitoring
+        this.startSSENetworkMonitoring();
         
-        // Initial network status load
-        this.refreshNetworkStatus();
+        // ONE-TIME initial network status load (not polling)
+        this.loadInitialNetworkStatus();
+        
         this.setupEventListeners();
         
-        // No polling needed - SSE handles real-time updates
+        // NO POLLING - All updates via SSE
         
         // Restore selected model UI if available
         if (this.selectedModel) {
@@ -152,17 +152,16 @@ class LlamaNetUI {
             this.updateClearHistoryButton();
         }, 100);
         
-        // Handle page visibility changes
+        // Handle page visibility changes - SSE only
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                // Keep SSE running but reduce activity
+                // Keep SSE running
                 console.log('Page hidden - SSE continues running');
             } else {
-                // Ensure SSE is still connected
+                // Reconnect SSE if needed
                 if (!this.isConnected) {
-                    this.startRealTimeNetworkMonitoring();
+                    this.startSSENetworkMonitoring();
                 }
-                this.refreshNetworkStatus();
             }
         });
     }
@@ -171,126 +170,116 @@ class LlamaNetUI {
         // No API mode selector needed - OpenAI only
     }
     
-    startRealTimeNetworkMonitoring() {
+    async loadInitialNetworkStatus() {
+        """Load initial network status once, then rely on SSE for all updates"""
+        try {
+            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
+                fetch(`${this.baseUrl}/dht/status`),
+                fetch(`${this.baseUrl}/v1/models/network`),
+                fetch(`${this.baseUrl}/models/statistics`)
+            ]);
+            
+            if (dhtResponse.ok && modelsResponse.ok && statsResponse.ok) {
+                const dhtStatus = await dhtResponse.json();
+                const modelsData = await modelsResponse.json();
+                const statsData = await statsResponse.json();
+                
+                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
+            } else {
+                this.showNetworkError('Unable to connect to LlamaNet node');
+            }
+        } catch (error) {
+            console.error('Error loading initial network status:', error);
+            this.showNetworkError('Network discovery failed');
+        }
+    }
+    
+    startSSENetworkMonitoring() {
         if (this.eventSource) {
             this.eventSource.close();
         }
         
-        console.log('🔗 Connecting to real-time network events...');
+        console.log('🔗 Starting SSE-only network monitoring (no polling)...');
         this.eventSource = new EventSource(`${this.baseUrl}/events/network`);
         
         this.eventSource.onopen = () => {
-            console.log('✅ Connected to real-time network events');
+            console.log('✅ SSE connected - polling disabled');
             this.isConnected = true;
             this.reconnectAttempts = 0;
             this.reconnectDelay = 1000;
             this.updateConnectionIndicator(true);
+            this.connectionStatus = 'connected';
+            this.errorCount = 0;
+            this.updateSSEStatus('connected', 'Real-time updates active');
         };
         
         this.eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                this.handleNetworkEvent(data);
+                this.handleSSENetworkEvent(data);
             } catch (e) {
-                console.error('Error parsing network event:', e);
+                console.error('Error parsing SSE event:', e);
             }
         };
         
         this.eventSource.onerror = (error) => {
-            console.warn('❌ Network events connection error:', error);
+            console.warn('❌ SSE connection error:', error);
             this.isConnected = false;
             this.updateConnectionIndicator(false);
+            this.connectionStatus = 'error';
+            this.updateSSEStatus('error', 'Connection lost, attempting to reconnect...');
             
             // Implement exponential backoff for reconnection
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.reconnectAttempts++;
                 const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
                 
-                console.log(`🔄 Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                console.log(`🔄 Reconnecting SSE in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
                 
                 setTimeout(() => {
                     if (!this.isConnected) {
-                        this.startRealTimeNetworkMonitoring();
+                        this.startSSENetworkMonitoring();
                     }
                 }, delay);
             } else {
-                console.error('❌ Max reconnection attempts reached, SSE unavailable');
+                console.error('❌ Max SSE reconnection attempts reached');
                 this.showToast('error', 'Lost connection to real-time updates. Please refresh the page.');
-                this.updateConnectionStatus('error');
+                this.connectionStatus = 'failed';
+                this.updateSSEStatus('failed', 'Connection failed - please refresh');
             }
         };
     }
     
-    handleNetworkEvent(data) {
-        // Add debouncing for node_left events
-        if (data.type === 'node_left') {
-            const nodeId = data.node_info?.node_id;
-            if (nodeId) {
-                // Check if we recently saw this node as active
-                const recentActivity = this.recentNodeActivity.get(nodeId);
-                if (recentActivity && (Date.now() - recentActivity) < 60000) { // 1 minute
-                    console.log(`🔄 Ignoring premature 'node_left' for ${nodeId.substring(0, 8)}... (recently active)`);
-                    return;
-                }
-                
-                // Debounce the node_left event
-                const debounceKey = `${nodeId}_left`;
-                if (this.nodeEventDebouncer.has(debounceKey)) {
-                    clearTimeout(this.nodeEventDebouncer.get(debounceKey));
-                }
-                
-                this.nodeEventDebouncer.set(debounceKey, setTimeout(() => {
-                    this._processNodeLeftEvent(data);
-                    this.nodeEventDebouncer.delete(debounceKey);
-                }, this.nodeLeftDebounceTime));
-                
-                return; // Don't process immediately
-            }
-        }
-        
-        // Track node activity for joined/updated events
-        if (data.type === 'node_joined' || data.type === 'node_updated') {
-            const nodeId = data.node_info?.node_id;
-            if (nodeId) {
-                this.recentNodeActivity.set(nodeId, Date.now());
-                
-                // Cancel any pending node_left events for this node
-                const debounceKey = `${nodeId}_left`;
-                if (this.nodeEventDebouncer.has(debounceKey)) {
-                    clearTimeout(this.nodeEventDebouncer.get(debounceKey));
-                    this.nodeEventDebouncer.delete(debounceKey);
-                    console.log(`🔄 Cancelled pending 'node_left' for ${nodeId.substring(0, 8)}... (node is active)`);
-                }
-            }
-        }
-        
-        // Process other events immediately
-        this._processNetworkEvent(data);
-    }
-    
-    _processNodeLeftEvent(data) {
-        console.log(`👋 Processing delayed node_left: ${data.node_info.node_id.substring(0, 8)}...`);
-        this._processNetworkEvent(data);
-    }
-    
-    _processNetworkEvent(data) {
-        // Original handleNetworkEvent logic
+    handleSSENetworkEvent(data) {
+        // Process SSE events only - no polling
         switch (data.type) {
             case 'connected':
-                console.log('📡 Real-time network monitoring connected');
+                console.log('📡 SSE network monitoring connected', data.server_info);
                 this.showToast('success', 'Connected to real-time network updates');
+                
+                // Store connection info
+                this.connectionInfo = {
+                    id: data.connection_id,
+                    serverInfo: data.server_info,
+                    connectedAt: data.timestamp
+                };
                 break;
                 
             case 'node_joined':
             case 'node_updated':
                 if (data.node_info) {
-                    // Normalize the node data structure
                     const normalizedNode = this.normalizeNodeData(data.node_info);
                     this.activeNodes.set(normalizedNode.node_id, normalizedNode);
-                    console.log(`${data.type === 'node_joined' ? '🆕' : '🔄'} Node ${data.type.split('_')[1]}: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                    
+                    const eventIcon = data.type === 'node_joined' ? '🆕' : '🔄';
+                    const eventAction = data.type.split('_')[1];
+                    
+                    console.log(`${eventIcon} Node ${eventAction} (SSE): ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                    
                     if (data.type === 'node_joined') {
                         this.showToast('success', `🆕 Node joined: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
                     }
+                    
                     this.updateNetworkDisplayRealTime();
                 }
                 break;
@@ -298,29 +287,43 @@ class LlamaNetUI {
             case 'node_left':
                 if (data.node_info) {
                     this.activeNodes.delete(data.node_info.node_id);
-                    console.log(`👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
+                    console.log(`👋 Node left (SSE): ${data.node_info.node_id.substring(0, 8)}...`);
                     this.showToast('warning', `👋 Node left: ${data.node_info.node_id.substring(0, 8)}...`);
                     this.updateNetworkDisplayRealTime();
                 }
                 break;
                 
             case 'network_changed':
-                console.log('🌐 Network topology changed');
+                console.log('🌐 Network topology changed (SSE)');
                 this.updateNetworkDisplayRealTime();
                 break;
                 
             case 'heartbeat':
-                // Keep connection alive, update last seen time
+                // SSE heartbeat - keep connection alive
                 this.lastUpdateTime = Date.now();
+                this.connectionStatus = 'connected';
+                
+                // Update connection info
+                if (data.active_connections !== undefined) {
+                    this.connectionInfo = {
+                        ...this.connectionInfo,
+                        activeConnections: data.active_connections,
+                        uptime: data.uptime,
+                        lastHeartbeat: data.timestamp
+                    };
+                }
+                
+                this.updateConnectionIndicatorWithHeartbeat(data);
                 break;
                 
             case 'error':
-                console.error('Network event error:', data.message);
+                console.error('SSE network event error:', data.message);
                 this.showToast('error', `Network error: ${data.message}`);
+                this.connectionStatus = 'error';
                 break;
                 
             default:
-                console.log('Unknown network event:', data);
+                console.log('Unknown SSE network event:', data);
         }
     }
     
@@ -489,13 +492,67 @@ class LlamaNetUI {
         });
     }
     
-    stopRealTimeNetworkMonitoring() {
+    updateSSEStatus(status, details = '') {
+        const statusElement = document.getElementById('sse-status');
+        if (statusElement) {
+            let statusText = '';
+            let statusClass = '';
+            
+            switch (status) {
+                case 'connected':
+                    statusText = 'Live Updates';
+                    statusClass = 'text-success';
+                    break;
+                case 'connecting':
+                    statusText = 'Connecting...';
+                    statusClass = 'text-warning';
+                    break;
+                case 'error':
+                    statusText = 'Disconnected';
+                    statusClass = 'text-danger';
+                    break;
+                case 'failed':
+                    statusText = 'Failed';
+                    statusClass = 'text-danger';
+                    break;
+                default:
+                    statusText = 'Unknown';
+                    statusClass = 'text-muted';
+            }
+            
+            statusElement.textContent = statusText;
+            statusElement.className = `text-muted ms-2 ${statusClass}`;
+            
+            if (details) {
+                statusElement.title = details;
+            }
+        }
+    }
+    
+    updateConnectionIndicatorWithHeartbeat(heartbeatData) {
+        const indicators = document.querySelectorAll('.live-indicator');
+        indicators.forEach(indicator => {
+            if (this.isConnected) {
+                const uptime = heartbeatData.uptime ? Math.floor(heartbeatData.uptime / 60) : 0;
+                const connections = heartbeatData.active_connections || 1;
+                
+                indicator.innerHTML = '<i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i>';
+                indicator.title = `SSE connected (${uptime}m uptime, ${connections} active connections)`;
+            } else {
+                indicator.innerHTML = '<i class="fas fa-circle text-danger" style="font-size: 0.5rem;"></i>';
+                indicator.title = 'SSE disconnected';
+            }
+        });
+    }
+    
+    stopSSENetworkMonitoring() {
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
         }
         this.isConnected = false;
         this.updateConnectionIndicator(false);
+        this.updateSSEStatus('disconnected', 'SSE connection closed');
     }
     
     async refreshNetworkStatus() {
@@ -1959,19 +2016,16 @@ class LlamaNetUI {
         });
     }
     
-    // Add cleanup method
+    // Update cleanup method to only handle SSE (no polling cleanup)
     cleanup() {
-        this.stopRealTimeNetworkMonitoring();
+        this.stopSSENetworkMonitoring();
         
-        // Clear any remaining timers
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-            this.updateInterval = null;
+        // NO POLLING CLEANUP NEEDED
+        // Clear any remaining timers (non-polling)
+        if (this.debounceTimers) {
+            this.debounceTimers.forEach(timer => clearTimeout(timer));
+            this.debounceTimers.clear();
         }
-        
-        // Clear debounce timers
-        this.nodeEventDebouncer.forEach(timer => clearTimeout(timer));
-        this.nodeEventDebouncer.clear();
     }
     
     clearChatHistory() {
