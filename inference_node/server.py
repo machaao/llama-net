@@ -1,8 +1,10 @@
+import os
+os.environ['PYTHONWARNINGS'] = 'ignore:semaphore'
+
 import asyncio
 import time
 import uuid
 import uvicorn
-import os
 import aiohttp
 import signal
 import sys
