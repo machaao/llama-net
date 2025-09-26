@@ -338,7 +338,7 @@ class EventBasedDHTPublisher:
             # Import here to avoid circular imports
             from inference_node.server import sse_handler
             
-            if sse_handler:
+            if sse_handler and hasattr(sse_handler, 'broadcast_event'):
                 # Add event-driven metadata
                 event_data = {
                     'node_info': node_info,
@@ -348,9 +348,11 @@ class EventBasedDHTPublisher:
                 }
                 
                 await sse_handler.broadcast_event(event_type, event_data)
-                logger.debug(f"Broadcasted event-driven {event_type} via SSE")
+                logger.info(f"✅ Broadcasted event-driven {event_type} via SSE: {node_info.get('node_id', 'unknown')[:12]}...")
+            else:
+                logger.debug(f"SSE handler not available for {event_type}")
         except Exception as e:
-            logger.debug(f"SSE broadcast not available: {e}")
+            logger.debug(f"SSE broadcast not available for {event_type}: {e}")
     
     def _is_significant_update(self, node_info: Dict[str, Any]) -> bool:
         """Check if this update represents a significant change"""

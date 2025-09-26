@@ -28,6 +28,7 @@ from inference_node.heartbeat import HeartbeatManager
 from inference_node.p2p_handler import P2PRequestHandler
 from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
+from client.event_discovery import NodeEventType, NodeEvent, NodeEventListener
 from common.utils import get_logger, get_host_ip
 
 logger = get_logger(__name__)
@@ -43,14 +44,65 @@ node_selector = None
 p2p_handler = None
 sse_handler = None
 sse_network_monitor = None
+discovery_bridge = None
 round_robin_state = {"index": 0}  # Global round robin state
+
+class DiscoverySSEBridge(NodeEventListener):
+    """Bridge discovery events to SSE broadcasting"""
+    
+    def __init__(self, sse_handler):
+        self.sse_handler = sse_handler
+        logger.info("Discovery-to-SSE bridge initialized")
+    
+    async def on_node_event(self, event: NodeEvent):
+        """Handle discovery events and broadcast via SSE"""
+        try:
+            # Convert discovery events to SSE events
+            if event.event_type == NodeEventType.NODE_JOINED:
+                await self.sse_handler.broadcast_event("node_joined", {
+                    "node_info": event.node_info.dict() if event.node_info else None,
+                    "timestamp": event.timestamp,
+                    "source": "discovery_bridge",
+                    "event_driven": True
+                })
+                logger.info(f"🔗 Bridged NODE_JOINED event to SSE: {event.node_info.node_id[:8]}..." if event.node_info else "unknown")
+                
+            elif event.event_type == NodeEventType.NODE_LEFT:
+                await self.sse_handler.broadcast_event("node_left", {
+                    "node_info": event.node_info.dict() if event.node_info else None,
+                    "timestamp": event.timestamp,
+                    "source": "discovery_bridge",
+                    "event_driven": True
+                })
+                logger.info(f"🔗 Bridged NODE_LEFT event to SSE: {event.node_info.node_id[:8]}..." if event.node_info else "unknown")
+                
+            elif event.event_type == NodeEventType.NODE_UPDATED:
+                await self.sse_handler.broadcast_event("node_updated", {
+                    "node_info": event.node_info.dict() if event.node_info else None,
+                    "timestamp": event.timestamp,
+                    "source": "discovery_bridge",
+                    "event_driven": True
+                })
+                logger.debug(f"🔗 Bridged NODE_UPDATED event to SSE: {event.node_info.node_id[:8]}..." if event.node_info else "unknown")
+                
+            elif event.event_type == NodeEventType.NETWORK_CHANGED:
+                await self.sse_handler.broadcast_event("network_changed", {
+                    "timestamp": event.timestamp,
+                    "metadata": event.metadata,
+                    "source": "discovery_bridge",
+                    "event_driven": True
+                })
+                logger.debug("🔗 Bridged NETWORK_CHANGED event to SSE")
+                
+        except Exception as e:
+            logger.error(f"Error bridging discovery event to SSE: {e}")
 
 # Request concurrency limiting
 REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
 
 async def cleanup_services():
     """Clean up all services in reverse order"""
-    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery
+    global heartbeat_manager, p2p_handler, dht_publisher, dht_discovery, discovery_bridge
     
     logger.info("Shutting down services...")
     
@@ -149,6 +201,12 @@ async def lifespan(app: FastAPI):
         sse_network_monitor = SSENetworkMonitor(base_url)
         sse_network_monitor.set_sse_handler(sse_handler)
         await sse_network_monitor.start()
+        
+        # Bridge discovery events to SSE
+        if dht_discovery and sse_handler:
+            discovery_bridge = DiscoverySSEBridge(sse_handler)
+            dht_discovery.add_event_listener(discovery_bridge)
+            logger.info("✅ Discovery-to-SSE bridge established - real-time events enabled")
         
         logger.info("SSE handler initialized successfully")
         

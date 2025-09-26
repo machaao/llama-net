@@ -154,6 +154,17 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
     async def _emit_event(self, event: NodeEvent):
         """Emit an event to all listeners"""
         await self.event_queue.put(event)
+        
+        # Also notify listeners directly for immediate processing
+        for listener in self.event_listeners:
+            try:
+                if hasattr(listener, 'on_node_event'):
+                    await listener.on_node_event(event)
+                else:
+                    # Handle function-based listeners
+                    await listener(event)
+            except Exception as e:
+                logger.error(f"Error in direct event listener {type(listener).__name__}: {e}")
     
     async def _process_events(self):
         """Process events from the queue"""
