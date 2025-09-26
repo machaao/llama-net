@@ -4,10 +4,23 @@ import uuid
 import psutil
 import socket
 import os
+import atexit
+import threading
 from typing import Dict, List, Optional
 from common.utils import get_logger
 
 logger = get_logger(__name__)
+
+# Global cleanup for hardware fingerprint
+_fingerprint_cache = {}
+_cache_lock = threading.Lock()
+
+def _cleanup_fingerprint_cache():
+    """Clean up fingerprint cache"""
+    with _cache_lock:
+        _fingerprint_cache.clear()
+
+atexit.register(_cleanup_fingerprint_cache)
 
 class HardwareFingerprint:
     """Generate consistent hardware-based fingerprints for node identification"""
@@ -50,7 +63,13 @@ class HardwareFingerprint:
             }
     
     def _get_mac_addresses(self) -> List[str]:
-        """Get MAC addresses from network interfaces"""
+        """Get MAC addresses from network interfaces with caching"""
+        cache_key = 'mac_addresses'
+        
+        with _cache_lock:
+            if cache_key in _fingerprint_cache:
+                return _fingerprint_cache[cache_key]
+        
         mac_addresses = []
         try:
             import psutil
@@ -66,7 +85,12 @@ class HardwareFingerprint:
             logger.debug(f"Error getting MAC addresses: {e}")
         
         # Sort for consistency
-        return sorted(list(set(mac_addresses)))
+        result = sorted(list(set(mac_addresses)))
+        
+        with _cache_lock:
+            _fingerprint_cache[cache_key] = result
+        
+        return result
     
     def _get_system_uuid(self) -> Optional[str]:
         """Get system UUID if available"""

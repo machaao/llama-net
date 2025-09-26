@@ -25,7 +25,8 @@ DEFAULT_NODE_ID="${NODE_ID:-}"
 DEFAULT_BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-}"
 
 # Suppress Python semaphore warnings for cleaner output
-export PYTHONWARNINGS="ignore:semaphore"
+export PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tracker,ignore:resource_tracker"
+export PYTHONDONTWRITEBYTECODE=1
 
 # Validate model file exists
 if [ ! -f "$DEFAULT_MODEL_PATH" ]; then

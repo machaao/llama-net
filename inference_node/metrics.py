@@ -3,8 +3,32 @@ import psutil
 import platform
 from typing import Dict, Any, Optional
 from common.utils import get_logger
+import atexit
+import threading
 
 logger = get_logger(__name__)
+
+# Global cleanup registry
+_cleanup_registry = []
+_cleanup_lock = threading.Lock()
+
+def register_cleanup(cleanup_func):
+    """Register a cleanup function to be called at exit"""
+    with _cleanup_lock:
+        _cleanup_registry.append(cleanup_func)
+
+def _cleanup_all():
+    """Clean up all registered resources"""
+    with _cleanup_lock:
+        for cleanup_func in _cleanup_registry:
+            try:
+                cleanup_func()
+            except Exception as e:
+                logger.debug(f"Cleanup error: {e}")
+        _cleanup_registry.clear()
+
+# Register cleanup at module import
+atexit.register(_cleanup_all)
 
 class RequestTracker:
     """Track active requests for overload detection"""
@@ -13,70 +37,125 @@ class RequestTracker:
         self.active_requests = 0
         self.total_requests = 0
         self.start_time = time.time()
+        self._lock = threading.Lock()
+        
+        # Register cleanup
+        register_cleanup(self._cleanup)
+    
+    def _cleanup(self):
+        """Cleanup method for proper resource disposal"""
+        try:
+            self.active_requests = 0
+            self.total_requests = 0
+        except Exception:
+            pass
     
     def request_started(self):
         """Mark request as started"""
-        self.active_requests += 1
-        self.total_requests += 1
+        with self._lock:
+            self.active_requests += 1
+            self.total_requests += 1
     
     def request_completed(self):
         """Mark request as completed"""
-        self.active_requests = max(0, self.active_requests - 1)
+        with self._lock:
+            self.active_requests = max(0, self.active_requests - 1)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get request statistics"""
-        uptime = time.time() - self.start_time
-        return {
-            "active_requests": self.active_requests,
-            "total_requests": self.total_requests,
-            "requests_per_second": self.total_requests / uptime if uptime > 0 else 0,
-            "uptime": uptime
-        }
+        with self._lock:
+            uptime = time.time() - self.start_time
+            return {
+                "active_requests": self.active_requests,
+                "total_requests": self.total_requests,
+                "requests_per_second": self.total_requests / uptime if uptime > 0 else 0,
+                "uptime": uptime
+            }
 
 class SystemInfo:
-    """Collect system information"""
+    """Collect system information with proper resource management"""
+    
+    # Cache system info to avoid repeated psutil calls
+    _cpu_info_cache = None
+    _ram_info_cache = None
+    _gpu_info_cache = None
+    _cache_time = 0
+    _cache_ttl = 300  # 5 minutes
     
     @staticmethod
     def get_cpu_info() -> str:
-        """Get CPU information with fallback methods"""
+        """Get CPU information with caching and fallback methods"""
+        current_time = time.time()
+        
+        # Use cache if available and fresh
+        if (SystemInfo._cpu_info_cache and 
+            current_time - SystemInfo._cache_time < SystemInfo._cache_ttl):
+            return SystemInfo._cpu_info_cache
+        
         try:
             # Try multiple methods to get CPU info
             cpu_info = platform.processor()
             if cpu_info and cpu_info.strip():
-                return cpu_info.strip()
+                SystemInfo._cpu_info_cache = cpu_info.strip()
+                SystemInfo._cache_time = current_time
+                return SystemInfo._cpu_info_cache
             
             # Fallback to machine type
             machine = platform.machine()
             system = platform.system()
-            return f"{system} {machine}"
+            cpu_info = f"{system} {machine}"
+            SystemInfo._cpu_info_cache = cpu_info
+            SystemInfo._cache_time = current_time
+            return cpu_info
         except Exception:
-            return "Unknown CPU"
+            fallback = "Unknown CPU"
+            SystemInfo._cpu_info_cache = fallback
+            return fallback
     
     @staticmethod
     def get_ram_info() -> Dict[str, Any]:
-        """Get RAM information with better formatting"""
+        """Get RAM information with better error handling and caching"""
+        current_time = time.time()
+        
+        # Use cache if available and fresh
+        if (SystemInfo._ram_info_cache and 
+            current_time - SystemInfo._cache_time < SystemInfo._cache_ttl):
+            return SystemInfo._ram_info_cache
+        
         try:
             mem = psutil.virtual_memory()
-            return {
+            ram_info = {
                 "total": mem.total,
                 "available": mem.available,
                 "total_gb": round(mem.total / (1024**3), 2),
                 "available_gb": round(mem.available / (1024**3), 2),
                 "used_percent": mem.percent
             }
+            SystemInfo._ram_info_cache = ram_info
+            SystemInfo._cache_time = current_time
+            return ram_info
         except Exception as e:
             logger.error(f"Error getting RAM info: {e}")
-            return {
+            fallback = {
                 "total": 0,
                 "available": 0,
                 "total_gb": 0.0,
                 "available_gb": 0.0,
                 "used_percent": 0.0
             }
+            SystemInfo._ram_info_cache = fallback
+            return fallback
     
     @staticmethod
     def get_gpu_info() -> Optional[str]:
-        """Get GPU information - NVIDIA GPUs only with improved error handling"""
+        """Get GPU information with caching and improved error handling"""
+        current_time = time.time()
+        
+        # Use cache if available and fresh
+        if (SystemInfo._gpu_info_cache is not None and 
+            current_time - SystemInfo._cache_time < SystemInfo._cache_ttl):
+            return SystemInfo._gpu_info_cache
+        
         try:
             # First check if we have NVIDIA GPUs using nvidia-smi (most reliable)
             import subprocess
@@ -94,7 +173,11 @@ class SystemInfo:
                                 name = parts[0].strip()
                                 memory_mb = parts[1].strip()
                                 gpu_info.append(f"{name} ({memory_mb}MB)")
-                    return ", ".join(gpu_info) if gpu_info else None
+                    
+                    gpu_result = ", ".join(gpu_info) if gpu_info else None
+                    SystemInfo._gpu_info_cache = gpu_result
+                    SystemInfo._cache_time = current_time
+                    return gpu_result
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
                 # nvidia-smi not available, continue to pynvml
                 pass
@@ -105,6 +188,8 @@ class SystemInfo:
             device_count = pynvml.nvmlDeviceGetCount()
             
             if device_count == 0:
+                SystemInfo._gpu_info_cache = None
+                SystemInfo._cache_time = current_time
                 return None
             
             # Return info for all GPUs
@@ -121,10 +206,15 @@ class SystemInfo:
                 
                 gpu_info.append(f"{name} ({memory_mb}MB)")
             
-            return ", ".join(gpu_info)
+            gpu_result = ", ".join(gpu_info)
+            SystemInfo._gpu_info_cache = gpu_result
+            SystemInfo._cache_time = current_time
+            return gpu_result
             
         except ImportError:
             logger.debug("pynvml not available - install with: pip install pynvml")
+            SystemInfo._gpu_info_cache = None
+            SystemInfo._cache_time = current_time
             return None
         except Exception as e:
             # Only log as debug for common "no NVIDIA GPU" scenarios
@@ -133,6 +223,8 @@ class SystemInfo:
                 logger.debug(f"No NVIDIA GPUs detected: {e}")
             else:
                 logger.warning(f"Could not get GPU info: {e}")
+            SystemInfo._gpu_info_cache = None
+            SystemInfo._cache_time = current_time
             return None
     
     @staticmethod
@@ -202,10 +294,19 @@ class SystemInfo:
 
     @staticmethod
     def get_all_info() -> Dict[str, Any]:
-        """Get all system information"""
+        """Get all system information with caching"""
         return {
             "cpu": SystemInfo.get_cpu_info(),
             "ram": SystemInfo.get_ram_info(),
             "gpu": SystemInfo.get_gpu_info(),
             "platform": platform.platform()
         }
+
+# Module cleanup
+def cleanup_system_info():
+    """Clean up SystemInfo caches"""
+    SystemInfo._cpu_info_cache = None
+    SystemInfo._ram_info_cache = None
+    SystemInfo._gpu_info_cache = None
+
+register_cleanup(cleanup_system_info)
