@@ -199,11 +199,13 @@ class LlamaNetUI {
             this.eventSource.close();
         }
         
-        console.log('🔗 Starting SSE-only network monitoring (no polling)...');
+        console.log('🔗 Starting SSE network monitoring...');
+        this.updateSSEStatus('connecting', 'Establishing connection...');
+        
         this.eventSource = new EventSource(`${this.baseUrl}/events/network`);
         
         this.eventSource.onopen = () => {
-            console.log('✅ SSE connected - polling disabled');
+            console.log('✅ SSE connected');
             this.isConnected = true;
             this.reconnectAttempts = 0;
             this.reconnectDelay = 1000;
@@ -226,11 +228,11 @@ class LlamaNetUI {
             console.warn('❌ SSE connection error:', error);
             this.isConnected = false;
             this.updateConnectionIndicator(false);
-            this.connectionStatus = 'error';
-            this.updateSSEStatus('error', 'Connection lost, attempting to reconnect...');
             
-            // Implement exponential backoff for reconnection
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                this.connectionStatus = 'error';
+                this.updateSSEStatus('error', `Reconnecting... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+                
                 this.reconnectAttempts++;
                 const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
                 
@@ -242,10 +244,10 @@ class LlamaNetUI {
                     }
                 }, delay);
             } else {
+                this.connectionStatus = 'failed';
+                this.updateSSEStatus('failed', 'Connection failed - please refresh page');
                 console.error('❌ Max SSE reconnection attempts reached');
                 this.showToast('error', 'Lost connection to real-time updates. Please refresh the page.');
-                this.connectionStatus = 'failed';
-                this.updateSSEStatus('failed', 'Connection failed - please refresh');
             }
         };
     }
@@ -434,17 +436,33 @@ class LlamaNetUI {
     
     renderModelNodesRealTime(nodes) {
         return nodes.map(node => {
-            const isRecent = (Date.now() / 1000) - node.last_seen < 60;
-            const statusClass = isRecent ? 'online' : 'warning';
-            const lastSeenText = this.formatLastSeen(node.last_seen);
+            const currentTime = Date.now() / 1000;
+            const timeSinceLastSeen = currentTime - node.last_seen;
             
-            // Calculate uptime display
+            let statusClass = 'offline';
+            let statusTitle = 'Offline';
+            
+            if (timeSinceLastSeen < 30) {
+                statusClass = 'online';
+                statusTitle = 'Online (active)';
+            } else if (timeSinceLastSeen < 60) {
+                statusClass = 'online';
+                statusTitle = 'Online';
+            } else if (timeSinceLastSeen < 120) {
+                statusClass = 'warning';
+                statusTitle = 'Stale (may be offline)';
+            } else {
+                statusClass = 'offline';
+                statusTitle = 'Offline';
+            }
+            
+            const lastSeenText = this.formatLastSeen(node.last_seen);
             const uptimeText = node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown';
             
             return `
                 <div class="node-item small ms-2 clickable-node" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
                     <div class="d-flex align-items-center">
-                        <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
+                        <span class="node-status ${statusClass}" title="${statusTitle} - Last seen: ${lastSeenText}"></span>
                         <div class="flex-grow-1">
                             <div class="fw-bold">
                                 ${node.node_id.substring(0, 8)}... 
@@ -500,7 +518,7 @@ class LlamaNetUI {
             
             switch (status) {
                 case 'connected':
-                    statusText = 'Live Updates';
+                    statusText = 'Live';
                     statusClass = 'text-success';
                     break;
                 case 'connecting':
@@ -508,11 +526,15 @@ class LlamaNetUI {
                     statusClass = 'text-warning';
                     break;
                 case 'error':
-                    statusText = 'Disconnected';
-                    statusClass = 'text-danger';
+                    statusText = 'Reconnecting...';
+                    statusClass = 'text-warning';
                     break;
                 case 'failed':
                     statusText = 'Failed';
+                    statusClass = 'text-danger';
+                    break;
+                case 'disconnected':
+                    statusText = 'Disconnected';
                     statusClass = 'text-danger';
                     break;
                 default:
@@ -520,8 +542,9 @@ class LlamaNetUI {
                     statusClass = 'text-muted';
             }
             
-            statusElement.textContent = statusText;
+            // Clear existing classes and apply new ones
             statusElement.className = `text-muted ms-2 ${statusClass}`;
+            statusElement.textContent = statusText;
             
             if (details) {
                 statusElement.title = details;
@@ -536,11 +559,11 @@ class LlamaNetUI {
                 const uptime = heartbeatData.uptime ? Math.floor(heartbeatData.uptime / 60) : 0;
                 const connections = heartbeatData.active_connections || 1;
                 
-                indicator.innerHTML = '<i class="fas fa-circle text-success" style="font-size: 0.5rem;"></i>';
-                indicator.title = `SSE connected (${uptime}m uptime, ${connections} active connections)`;
+                indicator.innerHTML = '<i class="fas fa-circle text-success live-pulse" style="font-size: 0.5rem;"></i>';
+                indicator.title = `Live updates active (${uptime}m uptime, ${connections} connections)`;
             } else {
                 indicator.innerHTML = '<i class="fas fa-circle text-danger" style="font-size: 0.5rem;"></i>';
-                indicator.title = 'SSE disconnected';
+                indicator.title = 'Real-time updates disconnected';
             }
         });
     }
@@ -552,7 +575,7 @@ class LlamaNetUI {
         }
         this.isConnected = false;
         this.updateConnectionIndicator(false);
-        this.updateSSEStatus('disconnected', 'SSE connection closed');
+        this.updateSSEStatus('disconnected', 'Connection closed');
     }
     
     async refreshNetworkStatus() {
