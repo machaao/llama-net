@@ -279,6 +279,9 @@ async def lifespan(app: FastAPI):
     
     # Use graceful shutdown with enhanced handler
     await graceful_shutdown()
+    
+    # IMPORTANT: Give uvicorn time to process the shutdown
+    await asyncio.sleep(0.5)
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
@@ -1722,7 +1725,7 @@ def start_server():
         log_level="info",
         # Optimized shutdown configuration
         timeout_keep_alive=2,
-        timeout_graceful_shutdown=10,  # Matches our shutdown handler timeout
+        timeout_graceful_shutdown=5,  # Reduced from 10 to 5 seconds
         access_log=False,
         # Additional uvicorn optimizations
         loop="asyncio",
@@ -1732,9 +1735,6 @@ def start_server():
     
     server = uvicorn.Server(uvicorn_config)
     
-    # The signal handling is now managed by the SignalHandler class
-    # in the lifespan function, so we don't need custom signal handlers here
-    
     try:
         server.run()
     except KeyboardInterrupt:
@@ -1743,6 +1743,9 @@ def start_server():
         logger.error(f"Server error: {e}")
         raise
     finally:
+        # Ensure server is properly shut down
+        if hasattr(server, 'should_exit'):
+            server.should_exit = True
         logger.info("Server shutdown complete")
 
 def show_help():

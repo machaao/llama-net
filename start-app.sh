@@ -78,12 +78,12 @@ cleanup() {
     echo "🛑 Received shutdown signal, stopping LlamaNet node..."
     if [ ! -z "$SERVER_PID" ]; then
         echo "📤 Sending SIGTERM to server process $SERVER_PID..."
-        # Send SIGTERM and let uvicorn handle graceful shutdown
+        # Send SIGTERM and let the application handle graceful shutdown
         kill -TERM $SERVER_PID 2>/dev/null || true
         
-        # Wait for graceful shutdown with shorter timeout
-        echo "⏳ Waiting for graceful shutdown (max 15 seconds)..."
-        for i in $(seq 1 15); do
+        # Wait for graceful shutdown with appropriate timeout
+        echo "⏳ Waiting for graceful shutdown (max 10 seconds)..."
+        for i in $(seq 1 10); do
             if ! kill -0 $SERVER_PID 2>/dev/null; then
                 echo "✅ Server shut down gracefully"
                 exit 0
@@ -92,11 +92,11 @@ cleanup() {
         done
         
         # Send SIGINT if still running
-        echo "⚠️ Sending SIGINT..."
+        echo "⚠️ Sending SIGINT for faster shutdown..."
         kill -INT $SERVER_PID 2>/dev/null || true
         
         # Wait a bit more
-        for i in $(seq 1 5); do
+        for i in $(seq 1 3); do
             if ! kill -0 $SERVER_PID 2>/dev/null; then
                 echo "✅ Server shut down after SIGINT"
                 exit 0
