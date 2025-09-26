@@ -95,7 +95,7 @@ LlamaNet requires models in **GGUF format** (GGML Universal Format). GGUF is the
 #### 1. Hugging Face Hub
 The largest collection of GGUF models is available on Hugging Face:
 
-**Current Active Publishers (2024):**
+**Current Active Publishers**
 - [bartowski](https://huggingface.co/bartowski) - Most active, high-quality quantizations (DeepSeek-R1, Llama 3.1/3.2, Qwen 2.5/3)
 - [unsloth](https://huggingface.co/unsloth) - Extremely popular, performance-optimized models (Qwen3, GPT-OSS series)
 - [MaziyarPanahi](https://huggingface.co/MaziyarPanahi) - Very active with comprehensive coverage (Gemma 3, Llama, Qwen)
