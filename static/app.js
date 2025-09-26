@@ -950,39 +950,59 @@ class LlamaNetUI {
         }
         
         return nodes.map(node => {
-            const currentTime = Date.now() / 1000;
-            const isRecent = currentTime - node.last_seen < 60;
-            const isVeryRecent = currentTime - node.last_seen < 30;
+            // Use event-driven status instead of time-based calculation
+            const eventStatus = this.nodeStatuses.get(node.node_id) || 'unknown';
+            const lastEventTime = this.nodeLastEvent.get(node.node_id) || 0;
+            const lastEventType = this.nodeEventTypes.get(node.node_id) || '';
             
-            let statusClass = 'offline';
-            let statusTitle = 'Offline';
+            let statusClass, statusTitle;
             
-            if (isVeryRecent) {
-                statusClass = 'online';
-                statusTitle = 'Online (very recent)';
-            } else if (isRecent) {
-                statusClass = 'online';
-                statusTitle = 'Online';
-            } else if (currentTime - node.last_seen < 120) {
-                statusClass = 'warning';
-                statusTitle = 'Stale';
+            switch (eventStatus) {
+                case 'online':
+                    statusClass = 'online';
+                    statusTitle = lastEventType === 'node_joined' ? 'Online (joined)' : 'Online (active)';
+                    break;
+                case 'offline':
+                    statusClass = 'offline';
+                    statusTitle = 'Offline (left network)';
+                    break;
+                case 'unknown':
+                default:
+                    // Fallback for nodes discovered before events started
+                    const timeSinceLastSeen = (Date.now() / 1000) - node.last_seen;
+                    if (timeSinceLastSeen < 60) {
+                        statusClass = 'online';
+                        statusTitle = 'Online (discovered)';
+                        // Set status for future updates
+                        this.nodeStatuses.set(node.node_id, 'online');
+                        this.nodeLastEvent.set(node.node_id, Date.now());
+                    } else {
+                        statusClass = 'warning';
+                        statusTitle = 'Status unknown';
+                    }
+                    break;
             }
             
             const lastSeenText = this.formatLastSeen(node.last_seen);
             const nodeChangeClass = this.isNodeUpdated(node.node_id) ? 'node-updated' : '';
+            const eventAge = lastEventTime ? this.formatEventAge(lastEventTime) : '';
             
             return `
                 <div class="node-item small ms-2 clickable-node ${nodeChangeClass}" data-node-id="${node.node_id}" onclick="llamaNetUI.showNodeInfo('${node.node_id}')" style="cursor: pointer;">
                     <div class="d-flex align-items-center">
-                        <span class="node-status ${statusClass}" title="${statusTitle} - Last seen: ${lastSeenText}"></span>
+                        <span class="node-status ${statusClass}" title="${statusTitle}${eventAge ? ` - Event: ${eventAge}` : ''}"></span>
                         <div class="flex-grow-1">
                             <div class="fw-bold">
                                 ${node.node_id.substring(0, 8)}... 
-                                <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i>
-                                ${this.getNodeChangeIndicator(node.node_id)}
+                                <i class="fas fa-info-circle text-primary ms-1 node-info-icon" title="Click for details"></i>
+                                ${eventStatus === 'offline' ? '<i class="fas fa-times-circle text-danger ms-1" title="Node left network"></i>' : ''}
+                                ${lastEventType === 'node_joined' ? '<i class="fas fa-plus-circle text-success ms-1" title="Recently joined"></i>' : ''}
                             </div>
-                            <div class="text-muted">${node.ip}:${node.port}</div>
-                            <div class="text-muted small">${lastSeenText}</div>
+                            <div class="text-muted small">
+                                <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
+                                <div><i class="fas fa-clock"></i> Up: ${node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown'} | ${lastSeenText}</div>
+                                ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
+                            </div>
                         </div>
                     </div>
                 </div>
