@@ -67,9 +67,9 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.dht_monitor_task = None
         self.running = False
         
-        # Performance tracking - INCREASED INTERVALS
-        self.last_network_scan = 0
-        self.scan_interval = 60  # Increased from 30 to 60 seconds as fallback
+        # Pure event-driven - NO POLLING
+        self.last_dht_change = 0
+        self.change_detection_threshold = 0.15  # 15% change threshold
         
         logger.info("Event-based DHT Discovery initialized")
     
@@ -216,16 +216,8 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                         await self._handle_routing_table_change()
                         last_routing_table_size = current_size
                 
-                # Periodic full scan as fallback
-                current_time = time.time()
-                if current_time - self.last_network_scan > self.scan_interval:
-                    await self._perform_network_scan()
-                    self.last_network_scan = current_time
-                
-                # Check for stale nodes
-                await self._check_stale_nodes()
-                
-                await asyncio.sleep(5)  # Increased from 2 to 5 seconds
+                # Pure event-driven monitoring - only respond to actual DHT changes
+                await asyncio.sleep(30)  # Minimal sleep for graceful shutdown only
                 
             except asyncio.CancelledError:
                 break
@@ -384,78 +376,38 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         
         return nodes
     
-    async def _perform_network_scan(self):
-        """Perform a full network scan as fallback"""
+    async def _handle_significant_change_detection(self):
+        """Handle significant changes in DHT state - event-driven only"""
         try:
-            logger.debug("Performing fallback network scan")
+            # Only check for changes when DHT routing table actually changes
+            if not self.kademlia_node or not self.kademlia_node.routing_table:
+                return
             
-            # Get fresh data from DHT
-            published_nodes = await self._get_published_nodes()
-            published_node_ids = {node.get('node_id') for node in published_nodes if node.get('node_id')}
+            current_contacts = self.kademlia_node.routing_table.get_all_contacts()
+            current_time = time.time()
             
-            # Check for new nodes
-            for node_data in published_nodes:
-                if isinstance(node_data, dict) and node_data.get('node_id'):
-                    node_id = node_data['node_id']
-                    
-                    # Skip if we already know about this node
-                    if node_id in self.active_nodes:
-                        continue
-                    
-                    # Check if node is fresh - increased from 120 to 180 seconds
-                    if time.time() - node_data.get('last_seen', 0) < 180:
-                        try:
-                            node_info = NodeInfo(**node_data)
-                            if self._should_include_node(node_info):
-                                await self._emit_event(NodeEvent(
-                                    event_type=NodeEventType.NODE_JOINED,
-                                    node_info=node_info,
-                                    timestamp=time.time()
-                                ))
-                        except Exception as e:
-                            logger.debug(f"Failed to process node in scan: {e}")
-            
-            # Check for nodes that left - but be more conservative
-            current_node_ids = set(self.active_nodes.keys())
-            potentially_missing = current_node_ids - published_node_ids
-            
-            # Only consider nodes as "left" if they haven't been seen for a longer time
-            for node_id in potentially_missing:
-                if node_id in self.active_nodes:
-                    node_info = self.active_nodes[node_id]
-                    # Only emit "left" if node hasn't been seen for 5 minutes
-                    if time.time() - node_info.last_seen > 300:  # 5 minutes
-                        # Verify the node is actually down before emitting event
-                        if await self._verify_node_actually_down(node_info):
-                            await self._emit_event(NodeEvent(
-                                event_type=NodeEventType.NODE_LEFT,
-                                node_info=node_info,
-                                timestamp=time.time(),
-                                metadata={"reason": "not_in_published_data_verified"}
-                            ))
+            # Only process if there's been a significant change in routing table
+            if abs(len(current_contacts) - len(self.known_node_ids)) > 0:
+                logger.info(f"Significant DHT change detected: {len(self.known_node_ids)} -> {len(current_contacts)} contacts")
+                await self._handle_routing_table_change()
+                self.last_dht_change = current_time
             
         except Exception as e:
-            logger.error(f"Error in network scan: {e}")
+            logger.error(f"Error in change detection: {e}")
     
-    async def _check_stale_nodes(self):
-        """Check for and remove stale nodes"""
-        current_time = time.time()
-        stale_threshold = 300  # Increased from 120 to 300 seconds (5 minutes)
-        
-        stale_nodes = []
-        for node_id, node_info in self.active_nodes.items():
-            if current_time - node_info.last_seen > stale_threshold:
-                stale_nodes.append((node_id, node_info))
-        
-        for node_id, node_info in stale_nodes:
-            # Before emitting "left" event, try to verify the node is actually down
-            if await self._verify_node_actually_down(node_info):
-                await self._emit_event(NodeEvent(
-                    event_type=NodeEventType.NODE_LEFT,
-                    node_info=node_info,
-                    timestamp=current_time,
-                    metadata={"reason": "stale_verified"}
-                ))
+    async def _handle_node_departure_event(self, node_id: str, reason: str = "dht_removal"):
+        """Handle node departure events - only when explicitly detected"""
+        if node_id in self.active_nodes:
+            node_info = self.active_nodes[node_id]
+            
+            await self._emit_event(NodeEvent(
+                event_type=NodeEventType.NODE_LEFT,
+                node_info=node_info,
+                timestamp=time.time(),
+                metadata={"reason": reason, "event_driven": True}
+            ))
+            
+            logger.info(f"Node departure event: {node_id[:8]}... (reason: {reason})")
     
     # DiscoveryInterface implementation
     async def get_nodes(self, model: Optional[str] = None, force_refresh: bool = False) -> List[NodeInfo]:

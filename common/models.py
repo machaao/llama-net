@@ -16,6 +16,11 @@ class NodeInfo(BaseModel):
     uptime: int = 0
     last_seen: int = Field(default_factory=lambda: int(time.time()))
     
+    # Event-driven metadata
+    event_driven: bool = True  # Mark as event-driven update
+    last_significant_change: Optional[int] = None  # When metrics last changed significantly
+    change_reason: Optional[str] = None  # Why this update was triggered
+    
     # Multi-IP support for auto IP selection
     available_ips: Optional[List[str]] = None  # All available IP addresses
     ip_types: Optional[Dict[str, str]] = None  # IP classification (public/private/loopback)

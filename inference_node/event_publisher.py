@@ -16,11 +16,11 @@ class EventBasedDHTPublisher:
         self.kademlia_node = None
         self.running = False
         
-        # Event-driven state
+        # Pure event-driven state - NO PERIODIC UPDATES
         self.last_published_metrics = {}
-        self.metrics_change_threshold = 0.05  # 5% change triggers update
-        self.forced_update_interval = 60  # Force update every 60 seconds
-        self.last_forced_update = 0
+        self.metrics_change_threshold = 0.15  # 15% change triggers update (increased threshold)
+        self.significant_change_only = True  # Only update on significant changes
+        self.last_significant_change = 0
         
         # Monitoring task
         self.monitor_task = None
@@ -190,8 +190,8 @@ class EventBasedDHTPublisher:
         logger.info("Event-based DHT publisher stopped")
     
     async def _monitor_changes(self):
-        """Monitor for changes that should trigger updates"""
-        hardware_check_interval = 300  # Check hardware every 5 minutes
+        """Monitor for SIGNIFICANT changes only - pure event-driven"""
+        hardware_check_interval = 600  # Check hardware every 10 minutes (reduced frequency)
         last_hardware_check = 0
         
         while self.running:
@@ -199,31 +199,29 @@ class EventBasedDHTPublisher:
                 current_metrics = self.metrics_callback()
                 current_time = time.time()
                 
-                # Check if metrics changed significantly
+                # Only check if metrics changed significantly (NO PERIODIC UPDATES)
                 should_update = self._should_update_metrics(current_metrics)
                 
-                # Force update periodically
-                if current_time - self.last_forced_update > self.forced_update_interval:
-                    should_update = True
-                    self.last_forced_update = current_time
-                    logger.debug("Forcing periodic DHT update")
-                
-                # Periodic hardware consistency check
+                # Hardware consistency check (less frequent)
                 if current_time - last_hardware_check > hardware_check_interval:
                     await self.handle_hardware_change()
                     last_hardware_check = current_time
                 
+                # Only update on significant changes
                 if should_update:
                     await self._publish_node_info()
                     self.last_published_metrics = current_metrics.copy()
+                    self.last_significant_change = current_time
+                    logger.info(f"Published update due to significant metric change")
                 
-                await asyncio.sleep(5)  # Check every 5 seconds
+                # Much longer sleep - we're not polling, just checking for significant changes
+                await asyncio.sleep(30)  # Reduced from 5 to 30 seconds
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error monitoring changes: {e}")
-                await asyncio.sleep(10)
+                await asyncio.sleep(60)  # Longer wait on errors
     
     def _should_update_metrics(self, current_metrics: Dict[str, Any]) -> bool:
         """Check if metrics changed enough to warrant an update"""
@@ -325,8 +323,9 @@ class EventBasedDHTPublisher:
             # Update all_nodes registry
             await self._update_all_nodes_registry(node_info)
         
-            # NEW: Broadcast node update via SSE
-            await self._broadcast_node_event("node_updated", node_info)
+            # Broadcast node update via SSE only on significant changes
+            if self._is_significant_update(node_info):
+                await self._broadcast_node_event("node_updated", node_info)
         
             logger.debug(f"Published hardware-based node info: load={metrics['load']:.3f}, tps={metrics['tps']:.2f}")
             
@@ -334,19 +333,41 @@ class EventBasedDHTPublisher:
             logger.error(f"Error publishing node info: {e}")
 
     async def _broadcast_node_event(self, event_type: str, node_info: Dict[str, Any]):
-        """Broadcast node events via SSE (if available)"""
+        """Broadcast node events via SSE (if available) - event-driven only"""
         try:
             # Import here to avoid circular imports
             from inference_node.server import sse_handler
             
             if sse_handler:
-                await sse_handler.broadcast_event(event_type, {
+                # Add event-driven metadata
+                event_data = {
                     'node_info': node_info,
-                    'timestamp': time.time()
-                })
-                logger.debug(f"Broadcasted {event_type} event via SSE")
+                    'timestamp': time.time(),
+                    'event_driven': True,
+                    'source': 'dht_publisher'
+                }
+                
+                await sse_handler.broadcast_event(event_type, event_data)
+                logger.debug(f"Broadcasted event-driven {event_type} via SSE")
         except Exception as e:
             logger.debug(f"SSE broadcast not available: {e}")
+    
+    def _is_significant_update(self, node_info: Dict[str, Any]) -> bool:
+        """Check if this update represents a significant change"""
+        if not self.last_published_metrics:
+            return True  # First update is always significant
+        
+        current_load = node_info.get('load', 0)
+        current_tps = node_info.get('tps', 0)
+        
+        last_load = self.last_published_metrics.get('load', 0)
+        last_tps = self.last_published_metrics.get('tps', 0)
+        
+        # Check for significant changes (15% threshold)
+        load_change = abs(current_load - last_load) / max(last_load, 0.01)
+        tps_change = abs(current_tps - last_tps) / max(last_tps, 0.01)
+        
+        return load_change > self.metrics_change_threshold or tps_change > self.metrics_change_threshold
     
     async def _update_all_nodes_registry(self, node_info):
         """Update the all_nodes registry with proper aggregation"""

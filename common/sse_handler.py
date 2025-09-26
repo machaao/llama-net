@@ -47,13 +47,15 @@ class SSEHandler:
             self.event_listeners.remove(listener)
     
     async def broadcast_event(self, event_type: str, event_data: Dict[str, Any]):
-        """Broadcast an event to all active connections"""
+        """Broadcast an event to all active connections - event-driven only"""
         if not self.active_connections:
             return
         
         event_payload = {
             "type": event_type,
             "timestamp": time.time(),
+            "event_driven": True,  # Mark as event-driven
+            "polling_disabled": True,  # Confirm no polling
             **event_data
         }
         
