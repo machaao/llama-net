@@ -49,11 +49,6 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
    pip3 install -r requirements.txt
    ```
    
-3. Install the package:
-   ```bash
-   pip3 install --editable . --use-pep517
-   ```
-   
 ## Quick Start
 
 ### 1. Start a Bootstrap Node
