@@ -151,6 +151,11 @@ class LlamaNetUI {
             }, 1000);
         }
         
+        // Initialize clear history button state
+        setTimeout(() => {
+            this.updateClearHistoryButton();
+        }, 100);
+        
         // Handle page visibility changes
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
@@ -1289,6 +1294,9 @@ class LlamaNetUI {
         if (welcomeMsg) {
             welcomeMsg.remove();
         }
+        
+        // Update clear history button state
+        this.updateClearHistoryButton();
     }
 
     handleOpenAIToken(data, streamState) {
@@ -1948,6 +1956,111 @@ class LlamaNetUI {
         this.stopRealTimeUpdates();
         this.stopRealTimeNetworkMonitoring();
     }
+    
+    clearChatHistory() {
+        try {
+            // Validate that we have chat history to clear
+            if (!this.hasChatHistory()) {
+                this.showToast('info', 'No chat history to clear');
+                return;
+            }
+            
+            const historyCount = this.getChatHistoryCount();
+            
+            // Clear the chat messages container
+            const chatContainer = document.getElementById('chat-messages');
+            if (chatContainer) {
+                // Add fade-out animation
+                chatContainer.style.transition = 'opacity 0.3s ease';
+                chatContainer.style.opacity = '0.5';
+                
+                setTimeout(() => {
+                    // Clear all messages
+                    chatContainer.innerHTML = '';
+                    
+                    // Restore welcome message with current model info
+                    const welcomeMessage = this.selectedModel ? 
+                        `Welcome to LlamaNet! Using model: <strong>${this.selectedModel}</strong>` :
+                        'Welcome to LlamaNet! Distributed AI inference network.';
+                    
+                    chatContainer.innerHTML = `
+                        <div class="text-center text-muted">
+                            <i class="fas fa-robot fa-2x mb-2"></i>
+                            <p>${welcomeMessage}</p>
+                            <p class="small">Start a conversation below.</p>
+                        </div>
+                    `;
+                    
+                    // Restore opacity
+                    chatContainer.style.opacity = '1';
+                }, 150);
+            }
+            
+            // Clear internal chat history
+            this.chatHistory = [];
+            
+            // Clear any stored chat history in localStorage (future-proofing)
+            try {
+                localStorage.removeItem('llamanet_chat_history');
+                localStorage.removeItem('llamanet_chat_timestamp');
+            } catch (e) {
+                // Ignore localStorage errors (private browsing, etc.)
+                console.debug('Could not clear localStorage chat history:', e);
+            }
+            
+            // Update clear history button state
+            this.updateClearHistoryButton();
+            
+            // Show success notification with count
+            this.showToast('success', `Chat history cleared (${historyCount} messages removed)`);
+            
+            // Log the action for debugging
+            console.log(`🗑️ Chat history cleared by user (${historyCount} messages removed)`);
+            
+            // Focus back to input for better UX
+            setTimeout(() => {
+                const messageInput = document.getElementById('message-input');
+                if (messageInput) {
+                    messageInput.focus();
+                }
+            }, 200);
+            
+        } catch (error) {
+            console.error('Error clearing chat history:', error);
+            this.showToast('error', 'Failed to clear chat history: ' + error.message);
+        }
+    }
+    
+    getChatHistoryCount() {
+        return this.chatHistory ? this.chatHistory.length : 0;
+    }
+    
+    hasChatHistory() {
+        return this.getChatHistoryCount() > 0;
+    }
+    
+    updateClearHistoryButton() {
+        const clearButton = document.getElementById('clear-history-btn');
+        if (clearButton) {
+            const hasHistory = this.hasChatHistory();
+            
+            // Update button state
+            clearButton.disabled = !hasHistory;
+            
+            // Update button text and icon based on state
+            if (hasHistory) {
+                clearButton.innerHTML = '<i class="fas fa-trash-alt"></i> Clear History';
+                clearButton.title = `Clear all chat messages (${this.getChatHistoryCount()} messages)`;
+                clearButton.classList.remove('btn-outline-secondary');
+                clearButton.classList.add('btn-outline-warning');
+            } else {
+                clearButton.innerHTML = '<i class="fas fa-trash-alt"></i> No History';
+                clearButton.title = 'No chat messages to clear';
+                clearButton.classList.remove('btn-outline-warning');
+                clearButton.classList.add('btn-outline-secondary');
+            }
+        }
+    }
 }
 
 // Global functions for HTML event handlers
@@ -1967,6 +2080,24 @@ function refreshNetworkStatus() {
 
 function showNetworkModal() {
     llamaNetUI.showNetworkModal();
+}
+
+function clearChatHistory() {
+    // Check if there's actually history to clear
+    if (llamaNetUI && !llamaNetUI.hasChatHistory()) {
+        llamaNetUI.showToast('info', 'No chat history to clear');
+        return;
+    }
+    
+    // Show confirmation modal
+    const modal = new bootstrap.Modal(document.getElementById('clearHistoryModal'));
+    modal.show();
+}
+
+function confirmClearHistory() {
+    if (llamaNetUI) {
+        llamaNetUI.clearChatHistory();
+    }
 }
 
 // Initialize when DOM is loaded
