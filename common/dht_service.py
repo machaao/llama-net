@@ -13,6 +13,7 @@ class SharedDHTService:
     _initialized = False
     _initializing = False
     _lock = asyncio.Lock()
+    _event_publisher = None  # Reference to event publisher
     
     # Store initialization parameters for validation
     _node_id: Optional[str] = None
@@ -27,6 +28,11 @@ class SharedDHTService:
     @property
     def kademlia_node(self) -> Optional[KademliaNode]:
         return self._kademlia_node
+    
+    def set_event_publisher(self, event_publisher):
+        """Set the event publisher for broadcasting DHT events"""
+        self._event_publisher = event_publisher
+        logger.debug("Event publisher registered with DHT service")
     
     async def initialize(self, node_id: str, port: int, bootstrap_nodes: List[Tuple[str, int]] = None):
         """Thread-safe initialization of the shared DHT node with hardware-based node ID validation"""
@@ -86,8 +92,8 @@ class SharedDHTService:
                     
                     logger.info("KademliaNode corrected to use hardware-based node ID")
                 
-                # Start the Kademlia node
-                await self._kademlia_node.start(self._bootstrap_nodes)
+                # Start with enhanced bootstrap event handling
+                await self._start_with_bootstrap_events()
                 
                 # Final validation after startup
                 if self._kademlia_node.node_id != node_id:
@@ -138,6 +144,50 @@ class SharedDHTService:
         except (ValueError, TypeError) as e:
             logger.warning(f"Node ID validation failed: {e}")
             return False
+    
+    async def _start_with_bootstrap_events(self):
+        """Start Kademlia node with enhanced bootstrap event handling"""
+        if not self._bootstrap_nodes:
+            # Starting as bootstrap node
+            await self._kademlia_node.start([])
+            
+            if self._event_publisher:
+                await self._event_publisher._broadcast_node_event("bootstrap_node_started", {
+                    'node_id': self._node_id,
+                    'port': self._port,
+                    'dht_port': self._kademlia_node.port,
+                    'role': 'bootstrap_node'
+                })
+            
+            logger.info("🌟 Started as bootstrap node")
+        else:
+            # Joining existing network
+            logger.info(f"🔗 Joining network via {len(self._bootstrap_nodes)} bootstrap nodes")
+            
+            if self._event_publisher:
+                await self._event_publisher._broadcast_node_event("bootstrap_join_initiated", {
+                    'node_id': self._node_id,
+                    'bootstrap_nodes': self._bootstrap_nodes,
+                    'join_method': 'enhanced_bootstrap'
+                })
+            
+            await self._kademlia_node.start(self._bootstrap_nodes)
+            
+            # Verify bootstrap success
+            contacts = self._kademlia_node.routing_table.get_all_contacts()
+            
+            if self._event_publisher:
+                await self._event_publisher._broadcast_node_event("bootstrap_join_completed", {
+                    'node_id': self._node_id,
+                    'successful_connections': len(contacts),
+                    'bootstrap_nodes': self._bootstrap_nodes,
+                    'join_success': len(contacts) > 0
+                })
+            
+            if len(contacts) > 0:
+                logger.info(f"✅ Successfully joined network with {len(contacts)} initial contacts")
+            else:
+                logger.warning("⚠️ Joined network but no contacts established")
     
     async def _stop_internal(self):
         """Internal stop method without lock (called from within locked context)"""

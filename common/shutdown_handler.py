@@ -206,6 +206,41 @@ class DHTPublisherShutdownHandler:
             total_time = time.time() - self.shutdown_start_time
             logger.error(f"❌ Shutdown failed after {total_time:.2f}s: {e}")
             raise
+
+    async def _get_node_info_for_recovery(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Get node info for recovery events"""
+        try:
+            # Check cache first
+            cached_info = self._get_cached_node_info(node_id)
+            if cached_info:
+                return cached_info
+            
+            # Try to find in published nodes
+            all_nodes_data = await self._get_published_nodes_with_retry()
+            for node_data in all_nodes_data:
+                if isinstance(node_data, dict) and node_data.get('node_id') == node_id:
+                    self._cache_node_info(node_id, node_data)
+                    return node_data
+            
+            # Try to find in DHT contacts
+            if self.kademlia_node and self.kademlia_node.routing_table:
+                contacts = self.kademlia_node.routing_table.get_all_contacts()
+                for contact in contacts:
+                    if contact.node_id == node_id:
+                        node_info = {
+                            'node_id': contact.node_id,
+                            'ip': contact.ip,
+                            'port': getattr(contact, 'port', None),
+                            'last_seen': getattr(contact, 'last_seen', time.time())
+                        }
+                        self._cache_node_info(node_id, node_info)
+                        return node_info
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error getting node info for recovery: {e}")
+            return None
     
     async def _send_departure_notifications(self, reason: str):
         """Send departure notifications to the network"""

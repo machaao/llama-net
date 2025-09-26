@@ -393,7 +393,7 @@ class KademliaNode:
                                 'port': port,
                                 'node_id': contact.node_id
                             },
-                            'local_node_id': self.config.node_id,
+                            'local_node_id': self.node_id,
                             'connection_method': 'bootstrap_ping'
                         })
                         
@@ -414,7 +414,7 @@ class KademliaNode:
             'successful_connections': len(successful_connections),
             'failed_connections': len(failed_connections),
             'bootstrap_nodes': successful_connections,
-            'local_node_id': self.config.node_id
+            'local_node_id': self.node_id
         })
         
         if successful_connections:
@@ -508,6 +508,35 @@ class KademliaNode:
             closest = closest[:self.k]
         
         return closest
+    
+    async def _broadcast_node_event(self, event_type: str, event_data: Dict[str, Any]):
+        """Broadcast node events via the event publisher if available"""
+        try:
+            # Try to get the event publisher from the DHT service or parent
+            from common.dht_service import SharedDHTService
+            dht_service = SharedDHTService()
+            
+            # Check if we have access to an event publisher through the service
+            if hasattr(dht_service, '_event_publisher') and dht_service._event_publisher:
+                await dht_service._event_publisher._broadcast_node_event(event_type, event_data)
+            else:
+                # Try to broadcast via SSE handler directly
+                try:
+                    from inference_node.server import sse_handler
+                    if sse_handler and hasattr(sse_handler, 'broadcast_event'):
+                        await sse_handler.broadcast_event(event_type, {
+                            'event_data': event_data,
+                            'timestamp': time.time(),
+                            'source': 'kademlia_node'
+                        })
+                except ImportError:
+                    # SSE handler not available (client-only mode)
+                    logger.debug(f"SSE handler not available for event: {event_type}")
+            
+            logger.debug(f"Broadcasted {event_type} event from KademliaNode")
+            
+        except Exception as e:
+            logger.debug(f"Could not broadcast {event_type} event: {e}")
     
     def _am_closest_to_key(self, key_hash: str) -> bool:
         """Check if we are among the closest nodes to a key"""

@@ -231,6 +231,11 @@ async def lifespan(app: FastAPI):
         # Register DHT publisher with shutdown handler
         shutdown_handler.register_component('dht_publisher', dht_publisher)
         
+        # Connect event publisher to DHT service for bootstrap event coordination
+        if dht_publisher and dht_service.is_initialized():
+            dht_service.set_event_publisher(dht_publisher)
+            logger.info("✅ Event publisher connected to DHT service for bootstrap events")
+        
         # Start DHT discovery (uses shared service)
         logger.info("Starting DHT discovery...")
         dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
