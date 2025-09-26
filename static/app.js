@@ -171,7 +171,7 @@ class LlamaNetUI {
     }
     
     async loadInitialNetworkStatus() {
-        """Load initial network status once, then rely on SSE for all updates"""
+        // Load initial network status once, then rely on SSE for all updates
         try {
             const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
                 fetch(`${this.baseUrl}/dht/status`),
@@ -556,7 +556,7 @@ class LlamaNetUI {
     }
     
     async refreshNetworkStatus() {
-        """Manual refresh - no automatic polling"""
+        // Manual refresh - no automatic polling
         try {
             this.showUpdateIndicator(true);
             await this.loadInitialNetworkStatus();
