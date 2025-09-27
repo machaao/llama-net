@@ -440,7 +440,7 @@ class LlamaNetUI {
             totalNodes,
             onlineNodes,
             modelsAvailable: new Set(Object.keys(modelGroups)),
-            networkHealth: this.calculateNetworkHealth(avgLoad, totalNodes)
+            networkHealth: this.calculateNetworkHealth(avgLoad, onlineNodes)
         };
         
         // Create enhanced content with refresh timestamp
@@ -457,7 +457,7 @@ class LlamaNetUI {
                 <div class="small mb-2">
                     <div><i class="fas fa-network-wired"></i> Total Nodes: <span class="metric-value">${totalNodes}</span> (${onlineNodes} online)</div>
                     <div><i class="fas fa-brain"></i> Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
-                    <div><i class="fas fa-heartbeat"></i> Network Health: <span class="network-health-badge">${this.getHealthBadge(this.nodeStats.networkHealth)}</span></div>
+                    <div><i class="fas fa-heartbeat"></i> Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
                     <div class="text-muted mt-1">
                         <i class="fas fa-clock"></i> Last refresh: ${refreshTime}
                         ${this.isConnected ? '<i class="fas fa-broadcast-tower ms-2 text-success" title="Real-time updates active"></i>' : ''}
@@ -599,8 +599,10 @@ class LlamaNetUI {
     
     calculateNetworkHealth(avgLoad, nodeCount) {
         if (nodeCount === 0) return 'no_nodes';
-        if (avgLoad < 0.3 && nodeCount >= 2) return 'excellent';
-        if (avgLoad < 0.7) return 'good';
+        if (nodeCount === 1) return 'limited';
+        if (avgLoad < 0.3 && nodeCount >= 3) return 'excellent';
+        if (avgLoad < 0.7 && nodeCount >= 2) return 'good';
+        if (nodeCount >= 2) return 'fair';
         return 'poor';
     }
     
@@ -1152,12 +1154,15 @@ class LlamaNetUI {
     getHealthBadge(networkHealth) {
         const healthConfig = {
             'excellent': { class: 'success', text: 'Excellent', icon: 'fas fa-check-circle' },
-            'good': { class: 'warning', text: 'Good', icon: 'fas fa-exclamation-circle' },
+            'good': { class: 'success', text: 'Good', icon: 'fas fa-check-circle' },
+            'fair': { class: 'warning', text: 'Fair', icon: 'fas fa-exclamation-circle' },
+            'limited': { class: 'warning', text: 'Limited', icon: 'fas fa-exclamation-triangle' },
             'poor': { class: 'danger', text: 'Poor', icon: 'fas fa-times-circle' },
-            'no_nodes': { class: 'secondary', text: 'No Nodes', icon: 'fas fa-question-circle' }
+            'no_nodes': { class: 'secondary', text: 'No Nodes', icon: 'fas fa-question-circle' },
+            'unknown': { class: 'secondary', text: 'Unknown', icon: 'fas fa-question-circle' }
         };
         
-        const config = healthConfig[networkHealth] || healthConfig['no_nodes'];
+        const config = healthConfig[networkHealth] || healthConfig['unknown'];
         
         return `<span class="badge bg-${config.class}"><i class="${config.icon} me-1"></i>${config.text}</span>`;
     }
@@ -2342,9 +2347,9 @@ class LlamaNetUI {
     
     updateHealthBadgeOnly(networkHealth) {
         // Update only the health badge without disrupting the node list
-        const healthBadges = document.querySelectorAll('.network-health-badge');
-        healthBadges.forEach(badge => {
-            badge.outerHTML = this.getHealthBadge(networkHealth);
+        const healthElements = document.querySelectorAll('[data-health-badge]');
+        healthElements.forEach(element => {
+            element.innerHTML = this.getHealthBadge(networkHealth);
         });
     }
     
@@ -2364,9 +2369,9 @@ class LlamaNetUI {
             };
             
             // Update any displayed network summary info
-            const networkHealthBadges = document.querySelectorAll('.network-health-badge');
-            networkHealthBadges.forEach(badge => {
-                badge.outerHTML = this.getHealthBadge(this.nodeStats.networkHealth);
+            const healthElements = document.querySelectorAll('[data-health-badge]');
+            healthElements.forEach(element => {
+                element.innerHTML = this.getHealthBadge(this.nodeStats.networkHealth);
             });
             
             console.log('📊 Network stats updated from API');
