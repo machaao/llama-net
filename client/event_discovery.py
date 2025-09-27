@@ -925,6 +925,49 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 metadata={"reason": "filtering_rule_change"}
             ))
     
+    async def refreshNetworkDataOnTopologyChange(self):
+        """Enhanced network data refresh with proper event emission"""
+        try:
+            # When network topology changes, we need to refresh our node data
+            # since individual node events might not capture all changes
+            logger.info("🔄 Network topology change detected, refreshing data...")
+            
+            # Store previous state for comparison
+            previous_nodes = dict(self.active_nodes)
+            previous_node_ids = set(self.active_nodes.keys())
+            
+            # Get fresh data from DHT
+            all_nodes_data = await self._get_published_nodes()
+            
+            if all_nodes_data:
+                # Update activeNodes from fresh data with events
+                await self._update_active_nodes_from_data_with_events(all_nodes_data, previous_nodes)
+                
+                # Check for nodes that disappeared
+                current_node_ids = set(self.active_nodes.keys())
+                disappeared_nodes = previous_node_ids - current_node_ids
+                
+                for node_id in disappeared_nodes:
+                    if node_id in previous_nodes:
+                        await self._emit_event(NodeEvent(
+                            event_type=NodeEventType.NODE_LEFT,
+                            node_info=previous_nodes[node_id],
+                            timestamp=time.time(),
+                            metadata={
+                                "reason": "topology_change_missing",
+                                "source": "network_refresh",
+                                "graceful": False
+                            }
+                        ))
+                        logger.info(f"✅ Emitted NODE_LEFT event for {node_id[:8]}... (disappeared in topology change)")
+                
+                logger.info(f"🔄 Network data refreshed: {len(self.active_nodes)} active nodes")
+            else:
+                logger.warning("⚠️ Could not refresh network data after topology change")
+                
+        except Exception as e:
+            logger.error(f"Error refreshing network data on topology change: {e}")
+    
     def _validate_contact(self, contact) -> bool:
         """Use centralized validation"""
         return NodeValidator.validate_contact(contact)
