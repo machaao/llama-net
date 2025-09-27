@@ -147,10 +147,8 @@ class EventBasedDHTPublisher:
         # Publish initial state WITHOUT join event
         await self._publish_node_info_without_join()
 
-        # Register callback for when all services are ready
-        from common.service_manager import get_service_manager
-        service_manager = get_service_manager()
-        service_manager.register_all_ready_callback(self._send_delayed_join_event)
+        # Note: Join event will be sent post-uvicorn initialization
+        # No longer registering callback here to avoid premature join event
 
         logger.info(f"Event-based DHT publisher started (join event delayed): {self.config.node_id[:16]}...")
         
@@ -517,22 +515,41 @@ class EventBasedDHTPublisher:
                 'model': self.config.model_name,
                 'dht_port': self.config.dht_port,
                 'available_ips': available_ips,
-                'join_reason': 'all_services_ready',
+                'join_reason': 'post_uvicorn_ready',
                 'timestamp': join_timestamp,
                 'delayed_join': True,
-                'services_ready': True
+                'services_ready': True,
+                'uvicorn_ready': True
             })
             
             self._join_event_sent = True
             self._has_published_before = True
             
-            logger.info(f"🎉 DHT join event sent after all services ready: {self.config.node_id[:12]}... (timestamp: {join_timestamp})")
+            logger.info(f"🎉 DHT join event sent post-uvicorn: {self.config.node_id[:12]}... (timestamp: {join_timestamp})")
             
             # Update node info to remove join_pending flag
             await self._update_node_info_post_join()
             
         except Exception as e:
             logger.error(f"Error sending delayed join event: {e}")
+
+    async def send_post_uvicorn_join_event(self):
+        """Send the DHT join event after uvicorn is fully initialized"""
+        if self._join_event_sent:
+            logger.debug("Join event already sent, skipping")
+            return
+        
+        if not self.running or not self.kademlia_node:
+            logger.warning("Cannot send join event - DHT not running")
+            return
+        
+        try:
+            logger.info("Sending post-uvicorn DHT join event...")
+            await self._send_delayed_join_event()
+            logger.info("✅ Post-uvicorn DHT join event sent successfully")
+        except Exception as e:
+            logger.error(f"Error sending post-uvicorn join event: {e}")
+            raise
 
     async def _update_node_info_post_join(self):
         """Update node info after join event is sent"""

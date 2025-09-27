@@ -129,12 +129,15 @@ class ServiceInitializationManager:
             
             logger.info(f"🎉 All services ready! Total initialization time: {total_time:.2f}s")
             
+            # DISABLED: Don't execute callbacks here - join event will be sent post-uvicorn
             # Execute all ready callbacks
-            for callback in self.all_ready_callbacks:
-                try:
-                    await callback()
-                except Exception as e:
-                    logger.error(f"Error in all-ready callback: {e}")
+            # for callback in self.all_ready_callbacks:
+            #     try:
+            #         await callback()
+            #     except Exception as e:
+            #         logger.error(f"Error in all-ready callback: {e}")
+            
+            logger.info("Join event will be sent after uvicorn initialization completes")
     
     def are_dependencies_ready(self, service_name: str) -> bool:
         """Check if all dependencies for a service are ready"""

@@ -301,12 +301,12 @@ async def lifespan(app: FastAPI):
             logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
             p2p_handler = None
         
-        # Wait for all services to be ready (this will trigger the DHT join event)
+        # Wait for all services to be ready (join event will be sent post-uvicorn)
         logger.info("⏳ Waiting for all services to be ready...")
         all_ready = await service_manager.wait_for_all_services(timeout=30.0)
         
         if all_ready:
-            logger.info("🚀 All services started successfully! DHT join event sent.")
+            logger.info("🚀 All services started successfully! Join event will be sent post-uvicorn.")
         else:
             logger.warning("⚠️ Some services may not be fully ready, but continuing...")
         
@@ -340,6 +340,23 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(0.5)
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
+
+@app.on_event("startup")
+async def on_startup():
+    """Send DHT join event after uvicorn is fully initialized"""
+    global dht_publisher
+    
+    # Wait a brief moment to ensure uvicorn is fully ready
+    await asyncio.sleep(1.0)
+    
+    if dht_publisher and hasattr(dht_publisher, 'send_post_uvicorn_join_event'):
+        try:
+            await dht_publisher.send_post_uvicorn_join_event()
+            logger.info("🚀 DHT join event sent post-uvicorn initialization")
+        except Exception as e:
+            logger.error(f"Failed to send post-uvicorn join event: {e}")
+    else:
+        logger.warning("DHT publisher not available for post-uvicorn join event")
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
