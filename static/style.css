@@ -699,6 +699,76 @@ pre {
 }
 
 /* Status indicators */
+/* Add styles for consolidated architecture indicators */
+.service-status-indicator {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.consolidated-indicator {
+    background-color: rgba(13, 110, 253, 0.1);
+    border: 1px solid rgba(13, 110, 253, 0.3);
+    color: var(--primary-color);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+}
+
+.validation-badge {
+    background-color: var(--success-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+}
+
+.unified-sse-indicator {
+    animation: unifiedPulse 2s infinite;
+}
+
+@keyframes unifiedPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Enhanced streaming styles for consolidated SSE */
+.message-bubble.streaming {
+    border-left: 3px solid var(--primary-color);
+    background-color: rgba(13, 110, 253, 0.02);
+}
+
+.streaming-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    transition: all 0.2s ease;
+}
+
+/* Consolidated error handling styles */
+.error-consolidated {
+    border-left: 3px solid var(--danger-color);
+    background-color: rgba(220, 53, 69, 0.05);
+}
+
+/* Validation indicator styles */
+.validated-content {
+    position: relative;
+}
+
+.validated-content::after {
+    content: "✓";
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    color: var(--success-color);
+    font-size: 0.7rem;
+    opacity: 0.7;
+}
+
 /* Connection status indicators */
 .connection-status {
     font-size: 0.7rem;

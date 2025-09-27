@@ -92,14 +92,14 @@ class LlamaNetUI {
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
         
-        // SSE-only properties (NO POLLING)
+        // SSE-only properties (NO POLLING) - Updated for unified SSE manager
         this.eventSource = null;
         this.isConnected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 1000;
         
-        // Node tracking
+        // Node tracking - Updated for consolidated validation
         this.activeNodes = new Map();
         this.nodeStats = {
             totalNodes: 0,
@@ -107,22 +107,16 @@ class LlamaNetUI {
             networkHealth: 'unknown'
         };
         
-        // Event-driven node status tracking (not time-based)
-        this.nodeStatuses = new Map(); // node_id -> 'online'|'offline'|'unknown'
-        this.nodeLastEvent = new Map(); // node_id -> timestamp of last event
-        this.nodeEventTypes = new Map(); // node_id -> last event type
+        // Event-driven node status tracking (using consolidated event manager)
+        this.nodeStatuses = new Map();
+        this.nodeLastEvent = new Map();
+        this.nodeEventTypes = new Map();
         
-        // SSE connection info
+        // SSE connection info - Updated for unified SSE manager
         this.connectionInfo = null;
         this.lastUpdateTime = 0;
         this.connectionStatus = 'connecting';
         this.errorCount = 0;
-        
-        // Remove ALL polling-related properties
-        // NO: this.updateInterval
-        // NO: this.isUpdating
-        // NO: this.updateFrequency
-        // NO: this.periodicUpdateTimer
         
         // Restore selected model from localStorage
         this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
@@ -131,15 +125,13 @@ class LlamaNetUI {
     }
     
     init() {
-        // Start ONLY SSE-based network monitoring
-        this.startSSENetworkMonitoring();
+        // Start ONLY SSE-based network monitoring using unified SSE manager
+        this.startUnifiedSSENetworkMonitoring();
         
         // ONE-TIME initial network status load (not polling)
         this.loadInitialNetworkStatus();
         
         this.setupEventListeners();
-        
-        // NO POLLING - All updates via SSE
         
         // Restore selected model UI if available
         if (this.selectedModel) {
@@ -160,12 +152,11 @@ class LlamaNetUI {
         // Handle page visibility changes - SSE only
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                // Keep SSE running
                 console.log('Page hidden - SSE continues running');
             } else {
                 // Reconnect SSE if needed
                 if (!this.isConnected) {
-                    this.startSSENetworkMonitoring();
+                    this.startUnifiedSSENetworkMonitoring();
                 }
             }
         });
@@ -176,7 +167,7 @@ class LlamaNetUI {
     }
     
     async loadInitialNetworkStatus() {
-        // Load initial network status once, then rely on SSE for all updates
+        // Load initial network status using consolidated endpoints
         try {
             const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
                 fetch(`${this.baseUrl}/dht/status`),
@@ -189,7 +180,7 @@ class LlamaNetUI {
                 const modelsData = await modelsResponse.json();
                 const statsData = await statsResponse.json();
                 
-                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
+                await this.updateNetworkDisplayWithValidation(dhtStatus, modelsData, statsData);
             } else {
                 this.showNetworkError('Unable to connect to LlamaNet node');
             }
@@ -199,100 +190,104 @@ class LlamaNetUI {
         }
     }
     
-    startSSENetworkMonitoring() {
+    startUnifiedSSENetworkMonitoring() {
         if (this.eventSource) {
             this.eventSource.close();
         }
         
-        console.log('🔗 Starting SSE network monitoring...');
+        console.log('🔗 Starting unified SSE network monitoring...');
         this.updateSSEStatus('connecting', 'Establishing connection...');
         
         this.eventSource = new EventSource(`${this.baseUrl}/events/network`);
         
         this.eventSource.onopen = () => {
-            console.log('✅ SSE connected');
+            console.log('✅ Unified SSE connected');
             this.isConnected = true;
             this.reconnectAttempts = 0;
             this.reconnectDelay = 1000;
             this.updateConnectionIndicator(true);
             this.connectionStatus = 'connected';
             this.errorCount = 0;
-            this.updateSSEStatus('connected', 'Real-time updates active');
+            this.updateSSEStatus('connected', 'Real-time updates active via unified SSE');
         };
         
         this.eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                this.handleSSENetworkEvent(data);
+                this.handleUnifiedSSENetworkEvent(data);
             } catch (e) {
-                console.error('Error parsing SSE event:', e);
+                console.error('Error parsing unified SSE event:', e);
             }
         };
         
         this.eventSource.onerror = (error) => {
-            console.warn('❌ SSE connection error:', error);
+            console.warn('❌ Unified SSE connection error:', error);
             this.isConnected = false;
             this.updateConnectionIndicator(false);
             
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.connectionStatus = 'error';
-                this.updateSSEStatus('error', `Reconnecting... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+                this.updateSSEStatus('error', `Reconnecting to unified SSE... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
                 
                 this.reconnectAttempts++;
                 const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
                 
-                console.log(`🔄 Reconnecting SSE in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                console.log(`🔄 Reconnecting unified SSE in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
                 
                 setTimeout(() => {
                     if (!this.isConnected) {
-                        this.startSSENetworkMonitoring();
+                        this.startUnifiedSSENetworkMonitoring();
                     }
                 }, delay);
             } else {
                 this.connectionStatus = 'failed';
-                this.updateSSEStatus('failed', 'Connection failed - please refresh page');
-                console.error('❌ Max SSE reconnection attempts reached');
+                this.updateSSEStatus('failed', 'Unified SSE connection failed - please refresh page');
+                console.error('❌ Max unified SSE reconnection attempts reached');
                 this.showToast('error', 'Lost connection to real-time updates. Please refresh the page.');
             }
         };
     }
     
-    handleSSENetworkEvent(data) {
-        // Process SSE events only - no polling
+    handleUnifiedSSENetworkEvent(data) {
+        // Process unified SSE events with enhanced validation
         switch (data.type) {
             case 'connected':
-                console.log('📡 SSE network monitoring connected', data.server_info);
-                this.showToast('success', 'Connected to real-time network updates');
+                console.log('📡 Unified SSE network monitoring connected', data.server_info);
+                this.showToast('success', 'Connected to unified real-time network updates');
                 
-                // Store connection info
+                // Store connection info with unified SSE details
                 this.connectionInfo = {
                     id: data.connection_id,
                     serverInfo: data.server_info,
-                    connectedAt: data.timestamp
+                    connectedAt: data.timestamp,
+                    sseVersion: data.server_info?.sse_version || '2.0',
+                    features: data.server_info?.features || []
                 };
                 break;
                 
             case 'node_joined':
             case 'node_updated':
                 if (data.node_info) {
-                    const normalizedNode = this.normalizeNodeData(data.node_info);
-                    this.activeNodes.set(normalizedNode.node_id, normalizedNode);
-                    
-                    // Set status based on event (not time)
-                    this.nodeStatuses.set(normalizedNode.node_id, 'online');
-                    this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
-                    this.nodeEventTypes.set(normalizedNode.node_id, data.type);
-                    
-                    const eventIcon = data.type === 'node_joined' ? '🆕' : '🔄';
-                    const eventAction = data.type.split('_')[1];
-                    
-                    console.log(`${eventIcon} Node ${eventAction} (SSE): ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
-                    
-                    if (data.type === 'node_joined') {
-                        this.showToast('success', `🆕 Node joined: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                    const normalizedNode = this.normalizeNodeDataWithValidation(data.node_info);
+                    if (normalizedNode) {
+                        this.activeNodes.set(normalizedNode.node_id, normalizedNode);
+                        
+                        // Set status based on event (using consolidated validation)
+                        this.nodeStatuses.set(normalizedNode.node_id, 'online');
+                        this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
+                        this.nodeEventTypes.set(normalizedNode.node_id, data.type);
+                        
+                        const eventIcon = data.type === 'node_joined' ? '🆕' : '🔄';
+                        const eventAction = data.type.split('_')[1];
+                        
+                        console.log(`${eventIcon} Node ${eventAction} (Unified SSE): ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                        
+                        if (data.type === 'node_joined') {
+                            this.showToast('success', `🆕 Node joined: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                        }
+                        
+                        this.updateNetworkDisplayRealTime();
                     }
-                    
-                    this.updateNetworkDisplayRealTime();
                 }
                 break;
                 
@@ -300,13 +295,12 @@ class LlamaNetUI {
                 if (data.node_info) {
                     const nodeId = data.node_info.node_id;
                     
-                    // Mark as offline via event (not time)
+                    // Mark as offline via event (using consolidated validation)
                     this.nodeStatuses.set(nodeId, 'offline');
                     this.nodeLastEvent.set(nodeId, Date.now());
                     this.nodeEventTypes.set(nodeId, 'node_left');
                     
                     // Keep node in activeNodes for a short time to show "offline" status
-                    // Remove after 30 seconds
                     setTimeout(() => {
                         this.activeNodes.delete(nodeId);
                         this.nodeStatuses.delete(nodeId);
@@ -315,30 +309,31 @@ class LlamaNetUI {
                         this.updateNetworkDisplayRealTime();
                     }, 30000);
                     
-                    console.log(`👋 Node left (SSE): ${nodeId.substring(0, 8)}...`);
+                    console.log(`👋 Node left (Unified SSE): ${nodeId.substring(0, 8)}...`);
                     this.showToast('warning', `👋 Node left: ${nodeId.substring(0, 8)}...`);
                     this.updateNetworkDisplayRealTime();
                 }
                 break;
                 
             case 'network_changed':
-                console.log('🌐 Network topology changed (SSE)');
-                // Force refresh of network data when topology changes
+                console.log('🌐 Network topology changed (Unified SSE)');
+                // Force refresh using consolidated network utilities
                 this.refreshNetworkDataOnTopologyChange();
                 break;
                 
             case 'heartbeat':
-                // SSE heartbeat - keep connection alive
+                // Unified SSE heartbeat - keep connection alive
                 this.lastUpdateTime = Date.now();
                 this.connectionStatus = 'connected';
                 
-                // Update connection info
+                // Update connection info with unified SSE data
                 if (data.active_connections !== undefined) {
                     this.connectionInfo = {
                         ...this.connectionInfo,
                         activeConnections: data.active_connections,
                         uptime: data.uptime,
-                        lastHeartbeat: data.timestamp
+                        lastHeartbeat: data.timestamp,
+                        unifiedSSE: true
                     };
                 }
                 
@@ -346,29 +341,74 @@ class LlamaNetUI {
                 break;
                 
             case 'error':
-                console.error('SSE network event error:', data.message);
+                console.error('Unified SSE network event error:', data.message);
                 this.showToast('error', `Network error: ${data.message}`);
                 this.connectionStatus = 'error';
                 break;
                 
             default:
-                console.log('Unknown SSE network event:', data);
+                console.log('Unknown unified SSE network event:', data);
         }
     }
     
-    normalizeNodeData(nodeData) {
-        // Ensure consistent data structure
-        return {
-            node_id: nodeData.node_id || nodeData.id,
-            ip: nodeData.ip || 'unknown',
-            port: nodeData.port || nodeData.http_port || 8000,
-            model: nodeData.model || nodeData.model_name || nodeData.id || 'unknown', // Add fallback to id
-            load: nodeData.load || 0,
-            tps: nodeData.tps || 0,
-            uptime: nodeData.uptime || 0,
-            last_seen: nodeData.last_seen || Math.floor(Date.now() / 1000),
-            dht_port: nodeData.dht_port
-        };
+    normalizeNodeDataWithValidation(nodeData) {
+        // Use consolidated validation utilities
+        try {
+            // Basic structure validation
+            if (!nodeData || typeof nodeData !== 'object') {
+                console.warn('Invalid node data structure:', nodeData);
+                return null;
+            }
+            
+            // Ensure required fields exist
+            const requiredFields = ['node_id', 'ip', 'port'];
+            for (const field of requiredFields) {
+                if (!nodeData[field]) {
+                    console.warn(`Missing required field ${field} in node data:`, nodeData);
+                    return null;
+                }
+            }
+            
+            // Validate node ID format (should be 40-character hex)
+            const nodeId = nodeData.node_id;
+            if (typeof nodeId !== 'string' || nodeId.length !== 40) {
+                console.warn('Invalid node ID format:', nodeId);
+                return null;
+            }
+            
+            // Validate IP format
+            const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+            if (!ipRegex.test(nodeData.ip)) {
+                console.warn('Invalid IP format:', nodeData.ip);
+                return null;
+            }
+            
+            // Validate port range
+            const port = parseInt(nodeData.port);
+            if (isNaN(port) || port < 1024 || port > 65535) {
+                console.warn('Invalid port range:', nodeData.port);
+                return null;
+            }
+            
+            // Return normalized and validated data
+            return {
+                node_id: nodeData.node_id,
+                ip: nodeData.ip,
+                port: port,
+                model: nodeData.model || nodeData.model_name || nodeData.id || 'unknown',
+                load: parseFloat(nodeData.load) || 0,
+                tps: parseFloat(nodeData.tps) || 0,
+                uptime: parseInt(nodeData.uptime) || 0,
+                last_seen: parseInt(nodeData.last_seen) || Math.floor(Date.now() / 1000),
+                dht_port: parseInt(nodeData.dht_port) || null,
+                validated: true,
+                validation_timestamp: Date.now()
+            };
+            
+        } catch (error) {
+            console.error('Error validating node data:', error, nodeData);
+            return null;
+        }
     }
     
     updateNetworkDisplayRealTime() {
@@ -2332,13 +2372,125 @@ class LlamaNetUI {
     }
     
     cleanup() {
-        this.stopSSENetworkMonitoring();
+        this.stopUnifiedSSENetworkMonitoring();
         
-        // NO POLLING CLEANUP NEEDED
         // Clear any remaining timers (non-polling)
         if (this.debounceTimers) {
             this.debounceTimers.forEach(timer => clearTimeout(timer));
             this.debounceTimers.clear();
+        }
+        
+        console.log('🧹 UI cleanup completed (consolidated)');
+    }
+    
+    stopUnifiedSSENetworkMonitoring() {
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+        this.isConnected = false;
+        this.updateConnectionIndicator(false);
+        this.updateSSEStatus('disconnected', 'Unified SSE connection closed');
+    }
+    
+    updateServiceStatusIndicator(servicesData) {
+        // Update UI to show service initialization status
+        const serviceStatus = servicesData.service_initialization;
+        const dhtJoinStatus = servicesData.dht_join_status;
+        
+        // Add service status indicator to the UI
+        const statusContainer = document.querySelector('.navbar .d-flex');
+        if (statusContainer) {
+            // Remove existing service indicator
+            const existingIndicator = statusContainer.querySelector('.service-status-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+            
+            // Add new service status indicator
+            const allReady = serviceStatus.ready_count === serviceStatus.total_count;
+            const joinSent = dhtJoinStatus.join_event_sent;
+            
+            let statusClass = 'success';
+            let statusText = 'All Services Ready';
+            let statusIcon = 'fas fa-check-circle';
+            
+            if (!allReady) {
+                statusClass = 'warning';
+                statusText = `Services: ${serviceStatus.ready_count}/${serviceStatus.total_count}`;
+                statusIcon = 'fas fa-clock';
+            } else if (!joinSent) {
+                statusClass = 'info';
+                statusText = 'Join Pending';
+                statusIcon = 'fas fa-hourglass-half';
+            }
+            
+            const indicator = document.createElement('span');
+            indicator.className = `service-status-indicator badge bg-${statusClass} me-2`;
+            indicator.innerHTML = `<i class="${statusIcon} me-1"></i>${statusText}`;
+            indicator.title = `Service Status: ${statusText}${joinSent ? ' (DHT join sent)' : ' (DHT join pending)'}`;
+            
+            statusContainer.insertBefore(indicator, statusContainer.firstChild);
+        }
+    }
+    
+    validateNodeInfo(nodeInfo) {
+        // Validate node info structure using consolidated validation patterns
+        if (!nodeInfo || typeof nodeInfo !== 'object') {
+            return null;
+        }
+        
+        // Check required fields
+        const requiredFields = ['node_id', 'ip', 'port'];
+        for (const field of requiredFields) {
+            if (!nodeInfo[field]) {
+                console.warn(`Missing ${field} in node info:`, nodeInfo);
+                return null;
+            }
+        }
+        
+        return nodeInfo;
+    }
+    
+    updateSSEStatus(status, details = '') {
+        const statusElement = document.getElementById('sse-status');
+        if (statusElement) {
+            let statusText = '';
+            let statusClass = '';
+            
+            switch (status) {
+                case 'connected':
+                    statusText = 'Live (Unified)';
+                    statusClass = 'text-success';
+                    break;
+                case 'connecting':
+                    statusText = 'Connecting...';
+                    statusClass = 'text-warning';
+                    break;
+                case 'error':
+                    statusText = 'Reconnecting...';
+                    statusClass = 'text-warning';
+                    break;
+                case 'failed':
+                    statusText = 'Failed';
+                    statusClass = 'text-danger';
+                    break;
+                case 'disconnected':
+                    statusText = 'Disconnected';
+                    statusClass = 'text-danger';
+                    break;
+                default:
+                    statusText = 'Unknown';
+                    statusClass = 'text-muted';
+            }
+            
+            // Clear existing classes and apply new ones
+            statusElement.className = `text-muted ms-2 ${statusClass}`;
+            statusElement.textContent = statusText;
+            
+            if (details) {
+                statusElement.title = details;
+            }
         }
     }
     

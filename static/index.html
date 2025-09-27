@@ -17,9 +17,10 @@
         <div class="container-fluid">
             <span class="navbar-brand mb-0 h1">
                 <i class="fas fa-network-wired"></i> LlamaNet Web UI
+                <small class="text-light ms-2" style="font-size: 0.7rem;">Consolidated Architecture</small>
             </span>
             <div class="d-flex">
-                <button class="btn btn-outline-light me-2" onclick="refreshNetworkStatus()" title="Refresh network data (maintains real-time updates)">
+                <button class="btn btn-outline-light me-2" onclick="refreshNetworkStatus()" title="Refresh network data (maintains real-time updates via unified SSE)">
                     <i class="fas fa-sync-alt"></i> Refresh
                 </button>
                 <button class="btn btn-outline-light" onclick="showNetworkModal()">
@@ -37,7 +38,7 @@
                     <div class="card-header">
                         <h5>
                             <i class="fas fa-server"></i> Network Status
-                            <span class="live-indicator ms-2" title="Real-time via SSE">
+                            <span class="live-indicator ms-2" title="Real-time via Unified SSE Manager">
                                 <i class="fas fa-circle text-warning" style="font-size: 0.5rem;"></i>
                             </span>
                             <small class="text-muted ms-2" id="sse-status">Connecting...</small>
