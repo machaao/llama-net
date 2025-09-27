@@ -25,6 +25,7 @@ from common.sse_handler import SSEForwarder
 from common.unified_sse import UnifiedSSEManager
 from common.shutdown_handler import DHTPublisherShutdownHandler, SignalHandler
 from common.service_manager import get_service_manager
+from common.error_handler import ErrorHandler
 
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
@@ -1417,8 +1418,8 @@ async def network_events():
         connection_id = f"sse_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         
         try:
-            # Add connection to SSE handler
-            event_queue = await sse_handler.add_connection(connection_id)
+            # Add connection to unified SSE manager
+            event_queue = await sse_manager.add_connection(connection_id)
             logger.info(f"SSE connection established: {connection_id}")
             
             # Send initial connection event
@@ -1493,7 +1494,7 @@ async def network_events():
         finally:
             # Remove connection
             try:
-                await sse_handler.remove_connection(connection_id)
+                await sse_manager.remove_connection(connection_id)
                 logger.info(f"SSE connection cleaned up: {connection_id}")
             except:
                 pass  # Ignore cleanup errors during shutdown
@@ -1764,14 +1765,16 @@ async def get_services_status():
 @app.get("/sse/status")
 async def sse_status():
     """Get SSE handler status and connection information"""
-    if not sse_handler:
-        raise HTTPException(status_code=503, detail="SSE handler not initialized")
+    if not sse_manager:
+        raise HTTPException(status_code=503, detail="SSE manager not initialized")
+    
+    status = sse_manager.get_status()
     
     return {
         "sse_enabled": True,
-        "active_connections": len(sse_handler.active_connections),
-        "event_listeners": len(sse_handler.event_listeners),
-        "network_monitor_running": sse_network_monitor.running if sse_network_monitor else False,
+        "active_connections": status.get("active_connections", 0),
+        "event_listeners": status.get("event_listeners", 0),
+        "network_monitor_running": sse_manager.monitor.running if sse_manager.monitor else False,
         "endpoint": "/events/network",
         "polling_disabled": True,  # Confirm no polling
         "features": [
