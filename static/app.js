@@ -467,7 +467,7 @@ class LlamaNetUI {
             totalNodes,
             onlineNodes,
             modelsAvailable: new Set(Object.keys(modelGroups)),
-            networkHealth: this.calculateNetworkHealth(networkSummary),
+            networkHealth: this.calculateNetworkHealth(avgLoad, onlineNodes),
             networkSummary: networkSummary  // Store server-compatible summary
         };
         
@@ -625,25 +625,25 @@ class LlamaNetUI {
         return `${Math.floor(diff / 3600)}h ago`;
     }
     
-    calculateNetworkHealth(networkSummary) {
-        // Handle both old format (avgLoad, nodeCount) and new format (networkSummary object)
-        let avgLoad, nodeCount;
+    calculateNetworkHealth(avgLoadOrSummary, nodeCount) {
+        let avgLoad, totalNodes;
         
-        if (typeof networkSummary === 'object' && networkSummary !== null) {
-            // New format: networkSummary object from server
-            avgLoad = networkSummary.avg_network_load || 0;
-            nodeCount = networkSummary.total_nodes || 0;
+        // Handle both formats: (avgLoad, nodeCount) and (networkSummary object)
+        if (typeof avgLoadOrSummary === 'object' && avgLoadOrSummary !== null) {
+            // networkSummary object format
+            avgLoad = avgLoadOrSummary.avg_network_load || 0;
+            totalNodes = avgLoadOrSummary.total_nodes || 0;
         } else {
-            // Legacy format: direct parameters
-            avgLoad = arguments[0] || 0;
-            nodeCount = arguments[1] || 0;
+            // Direct parameters format
+            avgLoad = avgLoadOrSummary || 0;
+            totalNodes = nodeCount || 0;
         }
         
-        if (nodeCount === 0) return 'no_nodes';
-        if (nodeCount === 1) return 'limited';
-        if (avgLoad < 0.3 && nodeCount >= 3) return 'excellent';
-        if (avgLoad < 0.7 && nodeCount >= 2) return 'good';
-        if (nodeCount >= 2) return 'fair';
+        if (totalNodes === 0) return 'no_nodes';
+        if (totalNodes === 1) return 'limited';
+        if (avgLoad < 0.3 && totalNodes >= 3) return 'excellent';
+        if (avgLoad < 0.7 && totalNodes >= 2) return 'good';
+        if (totalNodes >= 2) return 'fair';
         return 'poor';
     }
     
