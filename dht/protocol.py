@@ -122,7 +122,7 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             if is_new_contact:
                 await self._emit_contact_joined_event(contact)
             
-            logger.debug(f"📡 Updated contact activity: {sender_id[:8]}... from {addr}")
+            logger.info(f"📡 Updated contact - {msg_type}: {sender_id[:8]}... from {addr}")
         
         # Handle specific message types
         if msg_type == 'ping':
@@ -272,19 +272,6 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         
         # Forward to event system for SSE broadcasting
         await self._forward_leave_to_event_system(sender_id, addr, leave_data, routing_updated)
-        
-        # Acknowledge the leave
-        response = {
-            'type': 'response',
-            'id': message.get('id'),
-            'sender_id': self.node.node_id,
-            'data': {
-                'leave_acknowledged': True,
-                'acknowledger_node_id': self.node.node_id,
-                'routing_table_updated': routing_updated
-            }
-        }
-        await self._send_message(response, addr)
     
     async def _forward_join_to_event_system(self, sender_id: str, addr: Tuple[str, int], join_data: Dict[str, Any], routing_updated: bool = False):
         """Forward join notification to event system for SSE broadcasting"""

@@ -211,17 +211,18 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         if event.event_type == NodeEventType.NODE_JOINED:
             self.active_nodes[node_id] = event.node_info
             self.known_node_ids.add(node_id)
-            logger.info(f"🆕 Node joined: {node_id[:12]}... at {event.node_info.ip}:{event.node_info.port}")
+            logger.info(f"🆕 Node joined: {node_id} at {event.node_info.ip}:{event.node_info.port}")
             
         elif event.event_type == NodeEventType.NODE_LEFT:
             if node_id in self.active_nodes:
                 del self.active_nodes[node_id]
-                logger.info(f"👋 Node left: {node_id[:12]}...")
+                self.known_node_ids.discard(node_id)
+                logger.info(f"👋 Node left: {node_id}")
             
         elif event.event_type == NodeEventType.NODE_UPDATED:
             if node_id in self.active_nodes:
                 self.active_nodes[node_id] = event.node_info
-                logger.debug(f"🔄 Node updated: {node_id[:12]}...")
+                logger.debug(f"🔄 Node updated: {node_id}")
     
     async def _monitor_dht_changes(self):
         """Monitor DHT for real-time changes with enhanced event sequencing"""
