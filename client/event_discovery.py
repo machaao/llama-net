@@ -240,23 +240,12 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             event_type_name = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
             self.event_metrics.record_event(event_type_name)
             
-            # Add to event queue for processing
+            # ONLY add to event queue - let _process_events handle listener notification
             await self.event_queue.put(event)
-            
-            # Also notify listeners directly for immediate processing
-            for listener in self.event_listeners:
-                try:
-                    if hasattr(listener, 'on_node_event'):
-                        await listener.on_node_event(event)
-                    else:
-                        # Handle function-based listeners
-                        await listener(event)
-                except Exception as e:
-                    logger.error(f"Error in direct event listener {type(listener).__name__}: {e}")
             
             # Log the event emission
             node_id = event.node_info.node_id if event.node_info else "N/A"
-            logger.info(f"📡 Emitted {event_type_name} event for node {node_id}")
+            logger.info(f"📡 Queued {event_type_name} event for node {node_id}")
             
         except Exception as e:
             logger.error(f"Error emitting event {event.event_type}: {e}")
@@ -274,10 +263,19 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 # Notify all listeners
                 for listener in self.event_listeners:
                     try:
-                        await listener.on_node_event(event)
+                        if hasattr(listener, 'on_node_event'):
+                            await listener.on_node_event(event)
+                        else:
+                            # Handle function-based listeners
+                            await listener(event)
+                        logger.debug(f"✅ Notified listener {type(listener).__name__} of {event.event_type.value}")
                     except Exception as e:
                         logger.error(f"Error in event listener {type(listener).__name__}: {e}")
                 
+                # Log successful processing
+                node_id = event.node_info.node_id if event.node_info else "N/A"
+                logger.info(f"✅ Processed {event.event_type.value} event for node {node_id}")
+                        
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
