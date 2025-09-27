@@ -209,6 +209,9 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             from dht.kademlia_node import Contact
             contact = Contact(sender_id, addr[0], addr[1])
             self.node.routing_table.add_contact(contact)
+            
+            # Forward to event system for SSE broadcasting
+            await self._forward_join_to_event_system(sender_id, addr, join_data)
         
         # Acknowledge the join
         response = {
@@ -244,6 +247,107 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             }
         }
         await self._send_message(response, addr)
+    
+    async def _forward_join_to_event_system(self, sender_id: str, addr: Tuple[str, int], join_data: Dict[str, Any]):
+        """Forward join notification to event system for SSE broadcasting"""
+        try:
+            # Don't broadcast our own joins
+            if sender_id == self.node.node_id:
+                return
+                
+            ip, port = addr
+            
+            # Try to forward via DHT service
+            try:
+                from common.dht_service import SharedDHTService
+                dht_service = SharedDHTService()
+                
+                if dht_service.is_initialized() and hasattr(dht_service, 'handle_join_notification'):
+                    await dht_service.handle_join_notification(sender_id, addr)
+                    logger.debug(f"✅ Forwarded join notification to DHT service for {sender_id[:8]}...")
+                    return
+            except Exception as e:
+                logger.debug(f"Could not forward via DHT service: {e}")
+            
+            # Fallback: Try to broadcast directly via SSE handler
+            try:
+                from inference_node.server import sse_handler
+                if sse_handler and hasattr(sse_handler, 'broadcast_event'):
+                    
+                    # Create node info from join notification
+                    node_info = {
+                        'node_id': sender_id,
+                        'ip': ip,
+                        'port': port,
+                        'model': 'unknown',  # Will be enriched later
+                        'load': 0.0,
+                        'tps': 0.0,
+                        'uptime': 0,
+                        'last_seen': int(time.time()),
+                        'join_source': 'dht_notification',
+                        'newly_discovered': True
+                    }
+                    
+                    await sse_handler.broadcast_event("node_joined", {
+                        'node_info': node_info,
+                        'timestamp': time.time(),
+                        'source': 'dht_protocol',
+                        'event_driven': True
+                    })
+                    
+                    logger.info(f"🎉 Broadcasted join event via SSE for {sender_id[:8]}...")
+                    
+                    # Try to enrich node info asynchronously
+                    asyncio.create_task(self._enrich_node_info(sender_id, ip, port))
+                    
+            except Exception as e:
+                logger.debug(f"Could not broadcast via SSE handler: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error forwarding join notification for {sender_id[:8]}...: {e}")
+    
+    async def _enrich_node_info(self, node_id: str, ip: str, port: int):
+        """Try to get detailed node information after join"""
+        try:
+            import aiohttp
+            
+            # Try to get node info from HTTP API
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                async with session.get(f"http://{ip}:{port}/info") as response:
+                    if response.status == 200:
+                        node_info = await response.json()
+                        
+                        # Create enriched node info
+                        enriched_info = {
+                            'node_id': node_id,
+                            'ip': ip,
+                            'port': port,
+                            'model': node_info.get('model', 'unknown'),
+                            'load': 0.0,
+                            'tps': 0.0,
+                            'uptime': 0,
+                            'last_seen': int(time.time()),
+                            'enriched': True,
+                            'system_info': node_info.get('system', {})
+                        }
+                        
+                        # Broadcast enriched info
+                        try:
+                            from inference_node.server import sse_handler
+                            if sse_handler:
+                                await sse_handler.broadcast_event("node_updated", {
+                                    'node_info': enriched_info,
+                                    'timestamp': time.time(),
+                                    'source': 'dht_enrichment',
+                                    'event_driven': True
+                                })
+                                
+                                logger.info(f"📊 Broadcasted enriched info for {node_id[:8]}... (model: {enriched_info['model']})")
+                        except Exception as e:
+                            logger.debug(f"Could not broadcast enriched info: {e}")
+                            
+        except Exception as e:
+            logger.debug(f"Could not enrich node info for {node_id[:8]}...: {e}")
     
     async def _handle_store(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle store message"""

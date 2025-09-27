@@ -862,6 +862,100 @@ class EventBasedDHTPublisher:
             logger.error(f"Error during hardware revalidation: {e}")
             return False
     
+    async def handle_join_notification(self, node_id: str, ip: str, port: int):
+        """Handle join notifications from DHT protocol and broadcast via SSE"""
+        try:
+            # Don't broadcast our own joins
+            if node_id == self.config.node_id:
+                logger.debug(f"Ignoring own join notification: {node_id[:8]}...")
+                return
+            
+            logger.info(f"🎉 Processing join notification from DHT: {node_id[:8]}... at {ip}:{port}")
+            
+            # Create basic node info from join notification
+            node_info = {
+                'node_id': node_id,
+                'ip': ip,
+                'port': port,
+                'model': 'unknown',  # Will be enriched
+                'load': 0.0,
+                'tps': 0.0,
+                'uptime': 0,
+                'last_seen': int(time.time()),
+                'join_source': 'dht_notification',
+                'newly_discovered': True
+            }
+            
+            # Broadcast join event via SSE
+            await self._broadcast_node_event("node_joined", node_info)
+            
+            # Try to enrich node info asynchronously
+            asyncio.create_task(self._enrich_joined_node_info(node_id, ip, port))
+            
+            logger.info(f"✅ Broadcasted join event for {node_id[:8]}... via SSE")
+            
+        except Exception as e:
+            logger.error(f"Error handling join notification for {node_id[:8]}...: {e}")
+    
+    async def _enrich_joined_node_info(self, node_id: str, ip: str, port: int):
+        """Enrich node info after join notification"""
+        try:
+            import aiohttp
+            
+            # Wait a moment for the node to be fully ready
+            await asyncio.sleep(2)
+            
+            # Try to get detailed node info
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                try:
+                    async with session.get(f"http://{ip}:{port}/info") as response:
+                        if response.status == 200:
+                            node_info = await response.json()
+                            
+                            # Create enriched node info
+                            enriched_info = {
+                                'node_id': node_id,
+                                'ip': ip,
+                                'port': port,
+                                'model': node_info.get('model', 'unknown'),
+                                'load': 0.0,
+                                'tps': 0.0,
+                                'uptime': 0,
+                                'last_seen': int(time.time()),
+                                'enriched': True,
+                                'system_info': node_info.get('system', {}),
+                                'dht_port': node_info.get('dht_port'),
+                                'openai_compatible': node_info.get('openai_compatible', True)
+                            }
+                            
+                            # Get current metrics if available
+                            try:
+                                async with session.get(f"http://{ip}:{port}/status") as status_response:
+                                    if status_response.status == 200:
+                                        status_data = await status_response.json()
+                                        enriched_info.update({
+                                            'load': status_data.get('load', 0.0),
+                                            'tps': status_data.get('tps', 0.0),
+                                            'uptime': status_data.get('uptime', 0),
+                                            'total_tokens': status_data.get('total_tokens', 0)
+                                        })
+                            except Exception as e:
+                                logger.debug(f"Could not get status for {node_id[:8]}...: {e}")
+                            
+                            # Broadcast enriched info
+                            await self._broadcast_node_event("node_updated", enriched_info)
+                            
+                            logger.info(f"📊 Enriched and updated info for {node_id[:8]}... (model: {enriched_info['model']})")
+                            
+                        else:
+                            logger.debug(f"Could not get info for {node_id[:8]}...: HTTP {response.status}")
+                            
+                except aiohttp.ClientError as e:
+                    logger.debug(f"Connection error enriching {node_id[:8]}...: {e}")
+                    
+        except Exception as e:
+            logger.debug(f"Error enriching joined node info for {node_id[:8]}...: {e}")
+    
     async def _active_departure_detection(self):
         """Actively detect departed nodes by health checking published nodes"""
         try:
