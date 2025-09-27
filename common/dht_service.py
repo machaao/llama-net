@@ -337,37 +337,6 @@ class SharedDHTService:
         except Exception as e:
             logger.error(f"Failed to coordinate routing table updates: {e}")
 
-    async def handle_external_join_event(self, node_id: str, ip: str, port: int):
-        """Handle join events from external sources (like SSE)"""
-        if self.is_initialized() and self._kademlia_node:
-            await self._kademlia_node.handle_network_join_event(node_id, ip, port, 'external_event')
-
-    async def handle_external_leave_event(self, node_id: str, reason: str = 'external_event'):
-        """Handle leave events from external sources (like SSE)"""
-        if self.is_initialized() and self._kademlia_node:
-            await self._kademlia_node.handle_network_leave_event(node_id, reason)
-
-    async def handle_join_notification(self, node_id: str, address: tuple):
-        """Handle join notifications and forward to event publisher"""
-        try:
-            ip, port = address
-            
-            logger.info(f"📥 Processing join notification from {node_id[:8]}... at {address}")
-            
-            # Forward to event publisher if available
-            if hasattr(self, '_event_publisher') and self._event_publisher:
-                # Check if the event publisher has the join notification handler
-                if hasattr(self._event_publisher, 'handle_join_notification'):
-                    await self._event_publisher.handle_join_notification(node_id, ip, port)
-                    logger.debug(f"✅ Forwarded join to event publisher")
-                else:
-                    logger.debug("Event publisher doesn't support join notifications")
-            else:
-                logger.debug(f"No event publisher available for join notification from {node_id[:8]}...")
-                
-        except Exception as e:
-            logger.error(f"Error processing join notification from {node_id[:8]}...: {e}")
-    
     async def force_node_id_correction(self, correct_node_id: str):
         """Force correction of node ID if there's a mismatch (emergency fix)"""
         async with self._lock:

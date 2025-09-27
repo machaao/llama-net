@@ -72,7 +72,7 @@ class RoutingTable:
         self.buckets[bucket_index].add_contact(contact)
         
         if is_new_contact:
-            logger.info(f"🔗 New DHT contact added: {contact.node_id}... ({contact.ip}:{contact.port})")
+            logger.info(f"🔗 New DHT contact added: {contact.node_id} ({contact.ip}:{contact.port})")
         else:
             logger.info(f"Updated contact {contact.node_id} in bucket {bucket_index} - new address: {contact.ip}:{contact.port}")
     

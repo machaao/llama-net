@@ -1,5 +1,6 @@
 import asyncio
 import time
+import traceback
 from typing import List, Optional, Dict, Any, Callable, Set
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -296,19 +297,21 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             logger.info(f"🆕 Node joined: {node_id} at {event.node_info.ip}:{event.node_info.port}")
             
         elif event.event_type == NodeEventType.NODE_LEFT:
-            if node_id in self.active_nodes:
-                del self.active_nodes[node_id]
-                self.known_node_ids.discard(node_id)
-                existing_contact = self.kademlia_node.get_contact(node_id)
-                if existing_contact:
-                    self.kademlia_node.routing_table.remove_contact(existing_contact)
+            try:
+                if node_id in self.active_nodes:
+                    del self.active_nodes[node_id]
 
+                self.known_node_ids.discard(node_id)
+                await self.kademlia_node.handle_network_leave_event(node_id, 'interrupted')
                 logger.info(f"👋 Node left: {node_id}")
-            
+            except Exception as e:
+                traceback.print_exc()
+                logger.error(e)
+
         elif event.event_type == NodeEventType.NODE_UPDATED:
             if node_id in self.active_nodes:
                 self.active_nodes[node_id] = event.node_info
-                logger.debug(f"🔄 Node updated: {node_id}")
+                logger.info(f"🔄 Node updated: {node_id}")
     
     async def _monitor_dht_changes(self):
         """Centralized DHT monitoring with event handling"""
