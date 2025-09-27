@@ -84,7 +84,7 @@ class EventBasedDHTPublisher:
             return True  # Assume consistent if validation fails
     
     async def start(self):
-        """Start the event-based publisher"""
+        """Start the event-based publisher with delayed join event"""
         if self.running:
             return
 
@@ -116,6 +116,7 @@ class EventBasedDHTPublisher:
         # Initialize known nodes tracking for periodic detection
         self._known_node_ids = set()
         self._has_published_before = False
+        self._join_event_sent = False  # NEW: Track if join event was sent
         
         # Use shared DHT service
         from common.dht_service import SharedDHTService
@@ -143,12 +144,15 @@ class EventBasedDHTPublisher:
         # Start monitoring for changes
         self.monitor_task = asyncio.create_task(self._monitor_changes())
         
-        # Publish initial state
-        await self._publish_node_info()
+        # Publish initial state WITHOUT join event
+        await self._publish_node_info_without_join()
 
-        # The initial publish will automatically broadcast node_joined event
+        # Register callback for when all services are ready
+        from common.service_manager import get_service_manager
+        service_manager = get_service_manager()
+        service_manager.register_all_ready_callback(self._send_delayed_join_event)
 
-        logger.info(f"Event-based DHT publisher started with periodic new node detection: {self.config.node_id[:16]}...")
+        logger.info(f"Event-based DHT publisher started (join event delayed): {self.config.node_id[:16]}...")
         
         # Log hardware fingerprint details for debugging
         if self.hardware_fingerprint:
@@ -311,6 +315,87 @@ class EventBasedDHTPublisher:
         
         return False
     
+    async def _publish_node_info_without_join(self):
+        """Publish node info without sending join event"""
+        try:
+            # Get current metrics
+            metrics = self.metrics_callback()
+
+            # Discover all available IP addresses
+            from common.network_utils import NetworkInterfaceDiscovery
+
+            available_ips = NetworkInterfaceDiscovery.get_advertisable_ips(
+                exclude_loopback=True,
+                exclude_link_local=True,
+                only_up_interfaces=True
+            )
+
+            # Get primary IP
+            if available_ips:
+                primary_ip = available_ips[0]
+            else:
+                from common.utils import get_host_ip
+                primary_ip = get_host_ip()
+                available_ips = [primary_ip]
+
+            # Classify IP types
+            ip_types = {}
+            interfaces = NetworkInterfaceDiscovery.discover_all_interfaces()
+            for interface in interfaces:
+                if interface.ip in available_ips:
+                    ip_types[interface.ip] = interface.classification
+
+            node_info = {
+                'node_id': self.config.node_id,
+                'ip': primary_ip,
+                'port': self.config.port,
+                'model': self.config.model_name,
+                'load': metrics['load'],
+                'tps': metrics['tps'],
+                'uptime': metrics['uptime'],
+                'last_seen': int(time.time()),
+                'dht_port': self.config.dht_port,
+                'available_ips': available_ips,
+                'ip_types': ip_types,
+                'multi_ip_enabled': True,
+                'hardware_based': True,
+                'hardware_fingerprint_version': '1.0',
+                'is_first_publish': False,  # Don't trigger join event yet
+                'join_pending': True  # Indicate join is pending
+            }
+
+            # Add hardware fingerprint summary for debugging and validation
+            if self.hardware_fingerprint:
+                node_info['hardware_summary'] = self.hardware_fingerprint.get_fingerprint_summary()
+                node_info['hardware_consistency'] = self.hardware_fingerprint.validate_consistency(
+                    self.config.node_id, self.config.port
+                )
+
+            # Store under multiple keys for different discovery patterns
+            keys = [
+                f"model:{self.config.model_name}",
+                f"node:{self.config.node_id}",
+                f"hardware:{self._get_hardware_key()}"
+            ]
+
+            for key in keys:
+                try:
+                    success = await self.kademlia_node.store(key, node_info)
+                    if success:
+                        logger.debug(f"Published node info under key: {key}")
+                    else:
+                        logger.warning(f"Failed to publish under key: {key}")
+                except Exception as e:
+                    logger.error(f"Error publishing to key {key}: {e}")
+
+            # Update all_nodes registry
+            await self._update_all_nodes_registry(node_info)
+
+            logger.info(f"Node info published (join event pending): {self.config.node_id[:12]}...")
+
+        except Exception as e:
+            logger.error(f"Error publishing node info: {e}")
+
     async def _publish_node_info(self):
         """Publish current node info to DHT with node join detection"""
         try:
@@ -318,7 +403,7 @@ class EventBasedDHTPublisher:
             metrics = self.metrics_callback()
 
             # Check if this is the first time we're publishing (node join)
-            is_first_publish = not hasattr(self, '_has_published_before')
+            is_first_publish = not hasattr(self, '_has_published_before') or not self._has_published_before
 
             # Discover all available IP addresses
             from common.network_utils import NetworkInterfaceDiscovery
@@ -359,7 +444,8 @@ class EventBasedDHTPublisher:
                 'multi_ip_enabled': True,
                 'hardware_based': True,  # Flag to indicate hardware-based node ID
                 'hardware_fingerprint_version': '1.0',  # Version for future compatibility
-                'is_first_publish': is_first_publish  # Flag for join detection
+                'is_first_publish': is_first_publish,  # Flag for join detection
+                'join_pending': False  # Join event already sent or not needed
             }
 
             # Add hardware fingerprint summary for debugging and validation
@@ -389,25 +475,67 @@ class EventBasedDHTPublisher:
             # Update all_nodes registry
             await self._update_all_nodes_registry(node_info)
 
-            # EMIT NODE JOIN EVENT on first publish
-            if is_first_publish:
-                await self._broadcast_node_event("node_joined", {
-                    'node_id': self.config.node_id,
-                    'ip': primary_ip,
-                    'port': self.config.port,
-                    'model': self.config.model_name,
-                    'dht_port': self.config.dht_port,
-                    'available_ips': available_ips,
-                    'join_reason': 'initial_publish',
-                    'timestamp': time.time()
-                })
-                logger.info(f"🆕 Broadcasted node_joined event for initial publish: {self.config.node_id[:12]}...")
-                
-                # Mark that we've published before
-                self._has_published_before = True
+            # Mark that we've published before
+            self._has_published_before = True
 
         except Exception as e:
             logger.error(f"Error publishing node info: {e}")
+
+    async def _send_delayed_join_event(self):
+        """Send the DHT join event after all services are ready"""
+        if self._join_event_sent:
+            return
+        
+        try:
+            from common.utils import get_host_ip
+            
+            # Get current network info
+            primary_ip = get_host_ip()
+            available_ips = [primary_ip]
+            
+            try:
+                from common.network_utils import NetworkInterfaceDiscovery
+                available_ips = NetworkInterfaceDiscovery.get_advertisable_ips(
+                    exclude_loopback=True,
+                    exclude_link_local=True,
+                    only_up_interfaces=True
+                )
+                if available_ips:
+                    primary_ip = available_ips[0]
+            except:
+                pass
+
+            # Send the delayed join event
+            await self._broadcast_node_event("node_joined", {
+                'node_id': self.config.node_id,
+                'ip': primary_ip,
+                'port': self.config.port,
+                'model': self.config.model_name,
+                'dht_port': self.config.dht_port,
+                'available_ips': available_ips,
+                'join_reason': 'all_services_ready',
+                'timestamp': time.time(),
+                'delayed_join': True
+            })
+            
+            self._join_event_sent = True
+            self._has_published_before = True
+            
+            logger.info(f"🎉 DHT join event sent after all services ready: {self.config.node_id[:12]}...")
+            
+            # Update node info to remove join_pending flag
+            await self._update_node_info_post_join()
+            
+        except Exception as e:
+            logger.error(f"Error sending delayed join event: {e}")
+
+    async def _update_node_info_post_join(self):
+        """Update node info after join event is sent"""
+        try:
+            # Republish with updated flags
+            await self._publish_node_info()
+        except Exception as e:
+            logger.error(f"Error updating node info post-join: {e}")
 
     async def _broadcast_node_event(self, event_type: str, node_info: Dict[str, Any]):
         """Broadcast node events via SSE with enhanced metadata"""

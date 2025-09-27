@@ -23,6 +23,7 @@ from common.models import (
 )
 from common.sse_handler import SSEForwarder, SSEHandler, SSENetworkMonitor
 from common.shutdown_handler import DHTPublisherShutdownHandler, SignalHandler
+from common.service_manager import get_service_manager
 
 from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
@@ -169,6 +170,9 @@ async def lifespan(app: FastAPI):
     # Startup
     global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge, shutdown_handler, signal_handler, executor
     
+    # Get service manager
+    service_manager = get_service_manager()
+    
     # Store shutdown event for coordination
     shutdown_event = asyncio.Event()
     app.state.shutdown_event = shutdown_event
@@ -185,27 +189,34 @@ async def lifespan(app: FastAPI):
         signal_handler = SignalHandler(shutdown_handler)
         signal_handler.register_signals()
         
-        # Load configuration
+        # 1. Load configuration
+        await service_manager.mark_service_initializing("config")
         config = InferenceConfig()
+        await service_manager.mark_service_ready("config")
         logger.info(f"Starting OpenAI-compatible inference node: {config}")
         
-        # Initialize LLM first (most likely to fail)
+        # 2. Initialize LLM first (most likely to fail)
+        await service_manager.mark_service_initializing("llm")
         logger.info("Initializing LLM...")
         llm = LlamaWrapper(config)
+        await service_manager.mark_service_ready("llm")
         logger.info("LLM initialized successfully")
         
-        # Get system info
+        # 3. Get system info
+        await service_manager.mark_service_initializing("system_info")
         system_info = SystemInfo.get_all_info()
+        await service_manager.mark_service_ready("system_info")
         
-        # Start heartbeat manager (lightweight)
+        # 4. Start heartbeat manager (lightweight)
+        await service_manager.mark_service_initializing("heartbeat_manager")
         logger.info("Starting heartbeat manager...")
         heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
         await heartbeat_manager.start()
-        
-        # Register heartbeat manager with shutdown handler
         shutdown_handler.register_component('heartbeat_manager', heartbeat_manager)
+        await service_manager.mark_service_ready("heartbeat_manager")
         
-        # Initialize shared DHT service FIRST
+        # 5. Initialize shared DHT service
+        await service_manager.mark_service_initializing("dht_service")
         logger.info("Initializing shared DHT service...")
         from common.dht_service import SharedDHTService
         dht_service = SharedDHTService()
@@ -222,13 +233,12 @@ async def lifespan(app: FastAPI):
         
         # Initialize the shared DHT service
         await dht_service.initialize(config.node_id, config.dht_port, bootstrap_nodes)
+        await service_manager.mark_service_ready("dht_service")
         
-        # Start DHT publisher (uses shared service)
+        # 6. Start DHT publisher (with delayed join)
         logger.info("Starting DHT publisher...")
         dht_publisher = DHTPublisher(config, llm.get_metrics)
-        await dht_publisher.start()
-        
-        # Register DHT publisher with shutdown handler
+        await dht_publisher.start()  # Join event will be delayed
         shutdown_handler.register_component('dht_publisher', dht_publisher)
         
         # Connect event publisher to DHT service for bootstrap event coordination
@@ -236,54 +246,67 @@ async def lifespan(app: FastAPI):
             dht_service.set_event_publisher(dht_publisher)
             logger.info("✅ Event publisher connected to DHT service for bootstrap events")
         
-        # Start DHT discovery (uses shared service)
+        # 7. Start DHT discovery
+        await service_manager.mark_service_initializing("dht_discovery")
         logger.info("Starting DHT discovery...")
         dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
         await dht_discovery.start()
-        
-        # Register DHT discovery with shutdown handler
         shutdown_handler.register_component('dht_discovery', dht_discovery)
+        await service_manager.mark_service_ready("dht_discovery")
         
-        # Initialize SSE handler AFTER DHT discovery
+        # 8. Initialize SSE handler
+        await service_manager.mark_service_initializing("sse_handler")
         logger.info("Initializing SSE handler...")
         sse_handler = SSEHandler()
+        shutdown_handler.register_component('sse_handler', sse_handler)
+        await service_manager.mark_service_ready("sse_handler")
         
-        # Initialize SSE network monitor
+        # 9. Initialize SSE network monitor
+        await service_manager.mark_service_initializing("sse_network_monitor")
         base_url = f"http://{config.host}:{config.port}"
         sse_network_monitor = SSENetworkMonitor(base_url)
         sse_network_monitor.set_sse_handler(sse_handler)
         await sse_network_monitor.start()
-        
-        # Register SSE components with shutdown handler
-        shutdown_handler.register_component('sse_handler', sse_handler)
         shutdown_handler.register_component('sse_network_monitor', sse_network_monitor)
+        await service_manager.mark_service_ready("sse_network_monitor")
         
-        # Bridge discovery events to SSE
+        # 10. Bridge discovery events to SSE
+        await service_manager.mark_service_initializing("discovery_bridge")
         if dht_discovery and sse_handler:
             discovery_bridge = DiscoverySSEBridge(sse_handler)
             dht_discovery.add_event_listener(discovery_bridge)
             logger.info("✅ Discovery-to-SSE bridge established - real-time events enabled")
+        await service_manager.mark_service_ready("discovery_bridge")
         
-        logger.info("SSE handler initialized successfully")
-        
-        # Initialize node selector
+        # 11. Initialize node selector
+        await service_manager.mark_service_initializing("node_selector")
         node_selector = NodeSelector(dht_discovery)
+        await service_manager.mark_service_ready("node_selector")
         
-        # Start P2P handler LAST (most likely to have conflicts)
+        # 12. Start P2P handler LAST (optional service)
+        await service_manager.mark_service_initializing("p2p_handler")
         try:
             logger.info("Starting P2P handler...")
             p2p_handler = P2PRequestHandler(config, llm)
             await p2p_handler.start()
             if p2p_handler:
                 dht_publisher.p2p_handler = p2p_handler
-                # Register P2P handler with shutdown handler
                 shutdown_handler.register_component('p2p_handler', p2p_handler)
+            await service_manager.mark_service_ready("p2p_handler")
             logger.info("P2P handler started successfully")
         except Exception as e:
+            await service_manager.mark_service_failed("p2p_handler", str(e))
             logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
             p2p_handler = None
         
-        logger.info("🚀 All services started successfully!")
+        # Wait for all services to be ready (this will trigger the DHT join event)
+        logger.info("⏳ Waiting for all services to be ready...")
+        all_ready = await service_manager.wait_for_all_services(timeout=30.0)
+        
+        if all_ready:
+            logger.info("🚀 All services started successfully! DHT join event sent.")
+        else:
+            logger.warning("⚠️ Some services may not be fully ready, but continuing...")
         
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
@@ -1691,6 +1714,17 @@ async def validate_hardware_consistency():
     except Exception as e:
         logger.error(f"Error validating hardware consistency: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/services/status")
+async def get_services_status():
+    """Get initialization status of all services"""
+    service_manager = get_service_manager()
+    
+    return {
+        "service_initialization": service_manager.get_initialization_status(),
+        "dht_join_sent": getattr(dht_publisher, '_join_event_sent', False) if dht_publisher else False,
+        "timestamp": time.time()
+    }
 
 @app.get("/sse/status")
 async def sse_status():
