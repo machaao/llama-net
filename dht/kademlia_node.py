@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from common.utils import get_logger
 from common.port_utils import PortManager
 from common.validation_utils import NodeValidator
+from common.error_handler import ErrorHandler
 from dht.routing_table import RoutingTable
 
 logger = get_logger(__name__)

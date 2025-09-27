@@ -6,6 +6,7 @@ import hashlib
 import uuid
 from typing import Dict, Any, Tuple, Optional
 from common.utils import get_logger
+from common.error_handler import ErrorHandler
 
 logger = get_logger(__name__)
 
@@ -20,8 +21,9 @@ class KademliaProtocol(asyncio.DatagramProtocol):
     def connection_made(self, transport):
         self.transport = transport
     
+    @ErrorHandler.safe_sync_call
     def error_received(self, exc):
-        """Handle transport errors gracefully"""
+        """Handle transport errors gracefully using consolidated error handling"""
         logger.error(f"UDP transport error: {exc}")
         
         # Handle specific error types without crashing
