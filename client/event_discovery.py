@@ -14,6 +14,65 @@ from client.discovery import DiscoveryInterface
 
 logger = get_logger(__name__)
 
+class EventMetrics:
+    """Track event metrics and rates for monitoring"""
+    
+    def __init__(self):
+        self.event_counts: Dict[str, int] = {}
+        self.event_rates: Dict[str, List[float]] = {}
+        self.last_event_times: Dict[str, float] = {}
+        self.rate_window = 300  # 5 minutes
+    
+    def record_event(self, event_type: str):
+        """Record an event occurrence"""
+        current_time = time.time()
+        
+        # Update counts
+        self.event_counts[event_type] = self.event_counts.get(event_type, 0) + 1
+        self.last_event_times[event_type] = current_time
+        
+        # Update rate tracking
+        if event_type not in self.event_rates:
+            self.event_rates[event_type] = []
+        
+        # Add current timestamp and clean old ones
+        self.event_rates[event_type].append(current_time)
+        cutoff_time = current_time - self.rate_window
+        self.event_rates[event_type] = [
+            t for t in self.event_rates[event_type] if t > cutoff_time
+        ]
+    
+    def get_event_rate(self, event_type: str, window: int = 60) -> float:
+        """Get events per minute for the specified window"""
+        if event_type not in self.event_rates:
+            return 0.0
+        
+        current_time = time.time()
+        cutoff_time = current_time - window
+        recent_events = [
+            t for t in self.event_rates[event_type] if t > cutoff_time
+        ]
+        
+        return len(recent_events) * (60.0 / window)  # Events per minute
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get comprehensive event statistics"""
+        current_time = time.time()
+        stats = {
+            "total_events": sum(self.event_counts.values()),
+            "event_counts": self.event_counts.copy(),
+            "event_rates_per_minute": {},
+            "last_event_times": {}
+        }
+        
+        for event_type in self.event_counts:
+            stats["event_rates_per_minute"][event_type] = self.get_event_rate(event_type)
+            if event_type in self.last_event_times:
+                time_ago = current_time - self.last_event_times[event_type]
+                stats["last_event_times"][event_type] = f"{time_ago:.1f}s ago"
+        
+        return stats
+
 class NodeEventType(Enum):
     NODE_JOINED = "node_joined"
     NODE_LEFT = "node_left"
@@ -53,6 +112,11 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.event_listeners: List[NodeEventListener] = []
         self.known_node_ids: Set[str] = set()
         
+        # Event deduplication and metrics
+        self.event_cache: Dict[str, float] = {}  # event_key -> timestamp
+        self.cache_ttl = 30  # 30 seconds for deduplication
+        self.event_metrics = EventMetrics()
+        
         # Network filtering configuration
         self.enable_subnet_filtering = enable_subnet_filtering
         self.connectivity_test = connectivity_test
@@ -67,13 +131,14 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.event_processor_task = None
         self.dht_monitor_task = None
         self.unknown_nodes_task = None
+        self.cache_cleanup_task = None
         self.running = False
         
         # Pure event-driven - NO POLLING
         self.last_dht_change = 0
         self.change_detection_threshold = 0.15  # 15% change threshold
         
-        logger.info("Event-based DHT Discovery initialized")
+        logger.info("Event-based DHT Discovery initialized with deduplication")
     
     def _parse_bootstrap_nodes(self, bootstrap_str: str) -> List[tuple]:
         """Parse bootstrap nodes from comma-separated string"""
@@ -115,17 +180,20 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         # Start background task to update unknown nodes
         self.unknown_nodes_task = asyncio.create_task(self._update_unknown_nodes())
         
+        # Start cache cleanup task
+        self.cache_cleanup_task = asyncio.create_task(self._cleanup_event_cache())
+        
         # Initial network discovery
         await self._perform_initial_discovery()
         
-        logger.info("Event-based discovery started with background node updates")
+        logger.info("Event-based discovery started with deduplication and background node updates")
     
     async def stop(self):
         """Stop the event-based discovery service"""
         self.running = False
         
         # Stop all tasks
-        tasks = [self.event_processor_task, self.dht_monitor_task, self.unknown_nodes_task]
+        tasks = [self.event_processor_task, self.dht_monitor_task, self.unknown_nodes_task, self.cache_cleanup_task]
         for task in tasks:
             if task:
                 task.cancel()
@@ -138,6 +206,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         self.active_nodes.clear()
         self.known_node_ids.clear()
         self.event_listeners.clear()
+        self.event_cache.clear()
         
         logger.info("Event-based discovery stopped")
     
@@ -153,8 +222,24 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             logger.debug(f"Removed event listener: {type(listener).__name__}")
     
     async def _emit_event(self, event: NodeEvent):
-        """Emit an event to all listeners with error handling"""
+        """Emit an event to all listeners with deduplication and error handling"""
         try:
+            # Create event key for deduplication
+            event_key = self._create_event_key(event)
+            current_time = time.time()
+            
+            # Check for duplicate events
+            if event_key in self.event_cache:
+                time_since_last = current_time - self.event_cache[event_key]
+                if time_since_last < self.cache_ttl:
+                    logger.debug(f"🔇 Skipping duplicate event: {event_key} (last seen {time_since_last:.1f}s ago)")
+                    return
+            
+            # Update cache and record metrics
+            self.event_cache[event_key] = current_time
+            event_type_name = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+            self.event_metrics.record_event(event_type_name)
+            
             # Add to event queue for processing
             await self.event_queue.put(event)
             
@@ -170,7 +255,6 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     logger.error(f"Error in direct event listener {type(listener).__name__}: {e}")
             
             # Log the event emission
-            event_type_name = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
             node_id = event.node_info.node_id[:8] + "..." if event.node_info else "N/A"
             logger.debug(f"📡 Emitted {event_type_name} event for node {node_id}")
             
@@ -673,6 +757,44 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             logger.debug(f"Error checking node update significance: {e}")
             return False
 
+    def _create_event_key(self, event: NodeEvent) -> str:
+        """Create a unique key for event deduplication"""
+        event_type = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+        
+        if event.node_info:
+            # Include node-specific information for node events
+            node_key = f"{event.node_info.node_id}:{event.node_info.ip}:{event.node_info.port}"
+            return f"{event_type}:{node_key}"
+        else:
+            # For network-wide events, use just the event type
+            return f"{event_type}:network"
+    
+    async def _cleanup_event_cache(self):
+        """Periodically clean up old entries from event cache"""
+        while self.running:
+            try:
+                current_time = time.time()
+                expired_keys = []
+                
+                for event_key, timestamp in self.event_cache.items():
+                    if current_time - timestamp > self.cache_ttl * 2:  # Clean up entries older than 2x TTL
+                        expired_keys.append(event_key)
+                
+                for key in expired_keys:
+                    del self.event_cache[key]
+                
+                if expired_keys:
+                    logger.debug(f"🧹 Cleaned up {len(expired_keys)} expired event cache entries")
+                
+                # Clean up every 60 seconds
+                await asyncio.sleep(60)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in event cache cleanup: {e}")
+                await asyncio.sleep(60)
+    
     def get_event_stats(self):
         """Get statistics about event emission for debugging"""
         return {
@@ -681,7 +803,10 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             "event_listeners": len(self.event_listeners),
             "event_queue_size": self.event_queue.qsize() if hasattr(self.event_queue, 'qsize') else 0,
             "last_dht_change": self.last_dht_change,
-            "running": self.running
+            "running": self.running,
+            "event_cache_size": len(self.event_cache),
+            "cache_ttl": self.cache_ttl,
+            "event_metrics": self.event_metrics.get_stats()
         }
 
     async def debug_emit_test_events(self):

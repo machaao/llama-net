@@ -1770,10 +1770,36 @@ async def sse_status():
             "network_topology_changes", 
             "connection_heartbeats",
             "error_handling",
-            "no_polling"
+            "no_polling",
+            "event_deduplication"
         ],
         "timestamp": time.time()
     }
+
+@app.get("/events/stats")
+async def get_event_stats():
+    """Get detailed event statistics and metrics"""
+    if not dht_discovery:
+        raise HTTPException(status_code=503, detail="DHT discovery not initialized")
+    
+    try:
+        stats = dht_discovery.get_event_stats()
+        
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": time.time(),
+            "deduplication_enabled": True,
+            "cache_info": {
+                "cache_size": stats.get("event_cache_size", 0),
+                "cache_ttl_seconds": stats.get("cache_ttl", 30),
+                "cleanup_interval": "60 seconds"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting event stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/hardware/update")
 async def update_hardware_node_id():
