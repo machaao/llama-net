@@ -500,7 +500,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     continue
         
         # STRICT: Don't create fallback nodes if we can't verify the port
-        logger.warning(f"❌ Could not verify HTTP port for {contact.node_id[:8]}... at {contact.ip}")
+        logger.warning(f"❌ Could not verify HTTP port for {contact.node_id}... at {contact.ip}:{http_port}")
         logger.warning(f"   Skipping fallback creation to prevent port misassociation")
         return None
     
