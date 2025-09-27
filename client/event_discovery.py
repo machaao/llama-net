@@ -230,7 +230,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     
                     if current_size != last_routing_table_size:
                         event_sequence_number += 1
-                        logger.debug(f"DHT routing table changed: {last_routing_table_size} -> {current_size} (seq: {event_sequence_number})")
+                        logger.info(f"DHT routing table changed: {last_routing_table_size} -> {current_size} (seq: {event_sequence_number})")
                         await self._handle_routing_table_change_sequenced(event_sequence_number)
                         last_routing_table_size = current_size
                 
