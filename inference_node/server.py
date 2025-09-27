@@ -166,7 +166,7 @@ async def basic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_handler, sse_network_monitor, discovery_bridge, shutdown_handler, signal_handler, executor
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_manager, discovery_bridge, shutdown_handler, signal_handler, executor
     
     # Get service manager
     service_manager = get_service_manager()
@@ -295,6 +295,11 @@ async def lifespan(app: FastAPI):
         # Wait for all services to be ready (join event will be sent post-uvicorn)
         logger.info("⏳ Waiting for all services to be ready...")
         all_ready = await service_manager.wait_for_all_services(timeout=30.0)
+        
+        # Validate all components are properly initialized
+        if not validate_global_components():
+            logger.error("❌ Component validation failed")
+            raise RuntimeError("Required components not properly initialized")
         
         if all_ready:
             logger.info("🚀 All services started successfully!")
@@ -1414,6 +1419,10 @@ async def p2p_status():
 @app.get("/events/network")
 async def network_events():
     """Server-Sent Events for real-time network updates - No Polling"""
+    # Check if sse_manager is initialized
+    if not sse_manager:
+        raise HTTPException(status_code=503, detail="SSE manager not initialized")
+    
     async def event_generator():
         connection_id = f"sse_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         
@@ -1471,7 +1480,7 @@ async def network_events():
                         "timestamp": current_time,
                         "connection_id": connection_id,
                         "uptime": current_time - connection_event["timestamp"],
-                        "active_connections": len(sse_handler.active_connections)
+                        "active_connections": len(sse_manager.handler.active_connections)
                     }
                     yield f"data: {json.dumps(heartbeat)}\n\n"
                     last_heartbeat = current_time
@@ -1813,6 +1822,28 @@ async def update_hardware_node_id():
     except Exception as e:
         logger.error(f"Error updating hardware node ID: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def validate_global_components():
+    """Validate that all required global components are initialized"""
+    required_components = {
+        'config': config,
+        'llm': llm,
+        'sse_manager': sse_manager,
+        'dht_discovery': dht_discovery,
+        'dht_publisher': dht_publisher
+    }
+    
+    missing_components = []
+    for name, component in required_components.items():
+        if component is None:
+            missing_components.append(name)
+    
+    if missing_components:
+        logger.error(f"Missing required components: {missing_components}")
+        return False
+    
+    logger.info("✅ All required global components are initialized")
+    return True
 
 def start_server():
     """Start the inference server with enhanced graceful shutdown"""
