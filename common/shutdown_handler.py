@@ -291,11 +291,12 @@ class DHTPublisherShutdownHandler:
         if self.sse_handler:
             try:
                 departure_task = asyncio.create_task(
-                    self.sse_handler.broadcast_event("node_shutdown", {
+                    self.sse_handler.broadcast_event("node_left", {  # ✅ Ensure "node_left" event type
                         'reason': reason,
                         'timestamp': time.time(),
                         'graceful': True,
-                        'node_id': getattr(self.dht_publisher.config, 'node_id', 'unknown') if self.dht_publisher else 'unknown'
+                        'node_id': getattr(self.dht_publisher.config, 'node_id', 'unknown') if self.dht_publisher else 'unknown',
+                        'shutdown_initiated': True
                     })
                 )
                 departure_tasks.append(("sse_departure", departure_task))
@@ -305,7 +306,7 @@ class DHTPublisherShutdownHandler:
         # Execute departure notifications with extended timeout
         for name, task in departure_tasks:
             try:
-                await asyncio.wait_for(task, timeout=4.0)  # Increased timeout
+                await asyncio.wait_for(task, timeout=5.0)  # Increased timeout to 5 seconds
                 logger.info(f"✅ {name} notification completed")
             except asyncio.TimeoutError:
                 logger.warning(f"⏰ {name} notification timed out")
@@ -313,9 +314,13 @@ class DHTPublisherShutdownHandler:
             except Exception as e:
                 logger.warning(f"❌ {name} notification failed: {e}")
         
-        # Additional wait for network propagation
+        # Extended wait for network propagation - INCREASED
         logger.info("⏳ Waiting for network event propagation...")
-        await asyncio.sleep(2.5)  # Extended wait for event propagation
+        await asyncio.sleep(3.0)  # Increased from 2.5 to 3.0 seconds
+        
+        # Additional verification wait
+        logger.info("⏳ Additional verification wait...")
+        await asyncio.sleep(1.0)  # Extra 1 second for verification
         
         logger.info("✅ Departure notification phase completed")
 
@@ -328,29 +333,29 @@ class DHTPublisherShutdownHandler:
             # Get node info for departure
             node_id = getattr(self.dht_publisher.config, 'node_id', 'unknown')
             
-            # Broadcast via event system
-            await self.dht_publisher._broadcast_node_event("node_left", {
+            # Create comprehensive departure info
+            departure_info = {
                 'node_id': node_id,
+                'ip': get_host_ip() if 'get_host_ip' in globals() else 'unknown',
+                'port': getattr(self.dht_publisher.config, 'port', 8000),
+                'model': getattr(self.dht_publisher.config, 'model_name', 'unknown'),
                 'reason': reason,
                 'timestamp': time.time(),
                 'graceful': True,
-                'shutdown_phase': 'departure_notification'
-            })
-            
-            # Send to DHT network
-            departure_info = {
-                'node_id': node_id,
-                'reason': reason,
-                'timestamp': time.time(),
-                'graceful': True
+                'shutdown_phase': 'departure_notification',
+                'departure_timestamp': time.time()
             }
             
+            # Broadcast via event system with "node_left" event type
+            await self.dht_publisher._broadcast_node_event("node_left", departure_info)
+            
+            # Send to DHT network
             await self.dht_publisher._publish_node_left_to_dht(departure_info)
             
             # Send direct notifications to contacts
             await self.dht_publisher._send_departure_to_contacts(departure_info)
             
-            logger.info("✅ Enhanced DHT departure notifications sent")
+            logger.info("✅ Enhanced DHT departure notifications sent with node_left events")
             
         except Exception as e:
             logger.error(f"Error in enhanced DHT departure: {e}")

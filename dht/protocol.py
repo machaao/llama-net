@@ -236,6 +236,26 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         if sender_id:
             self.node.routing_table.remove_contact(sender_id)
         
+        # Forward to event system as "node_left" event
+        try:
+            from inference_node.server import sse_handler
+            if sse_handler and hasattr(sse_handler, 'broadcast_event'):
+                await sse_handler.broadcast_event("node_left", {  # ✅ Ensure "node_left" event type
+                    'node_info': {
+                        'node_id': sender_id,
+                        'ip': addr[0],
+                        'port': addr[1],
+                        'reason': leave_data.get('reason', 'leave_notification'),
+                        'graceful': True
+                    },
+                    'timestamp': time.time(),
+                    'source': 'dht_protocol',
+                    'event_driven': True
+                })
+                logger.info(f"✅ Forwarded leave notification as node_left event for {sender_id[:8]}...")
+        except Exception as e:
+            logger.debug(f"Could not forward leave notification: {e}")
+        
         # Acknowledge the leave
         response = {
             'type': 'response',

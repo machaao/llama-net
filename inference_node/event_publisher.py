@@ -722,9 +722,9 @@ class EventBasedDHTPublisher:
                 logger.warning("Cannot publish node_left to DHT: Kademlia node not available")
                 return
             
-            # Create node_left event data
+            # Create node_left event data with consistent naming
             node_left_event = {
-                'event_type': 'node_left',
+                'event_type': 'node_left',  # ✅ Ensure this is "node_left"
                 'node_id': node_info.get('node_id'),
                 'ip': node_info.get('ip'),
                 'port': node_info.get('port'),
@@ -732,18 +732,27 @@ class EventBasedDHTPublisher:
                 'reason': node_info.get('reason', 'unknown'),
                 'timestamp': int(time.time()),
                 'detected_by': self.config.node_id,
-                'last_seen': node_info.get('last_seen')
+                'last_seen': node_info.get('last_seen'),
+                'graceful': node_info.get('graceful', True),  # Add graceful shutdown flag
+                'departure_timestamp': node_info.get('departure_timestamp', time.time())
             }
             
-            # Store under node_left events key
-            node_left_key = f"events:node_left:{node_info.get('node_id', 'unknown')}"
+            # Store under multiple keys for better discovery
+            keys = [
+                f"events:node_left:{node_info.get('node_id', 'unknown')}",
+                f"departures:{int(time.time())}:{node_info.get('node_id', 'unknown')[:8]}"
+            ]
             
-            success = await self.kademlia_node.store(node_left_key, node_left_event)
-            if success:
-                logger.info(f"📡 Published node_left to DHT: {node_info.get('node_id', 'unknown')[:8]}...")
-            else:
-                logger.warning(f"Failed to publish node_left to DHT for {node_info.get('node_id', 'unknown')[:8]}...")
-                
+            for key in keys:
+                try:
+                    success = await self.kademlia_node.store(key, node_left_event)
+                    if success:
+                        logger.info(f"📡 Published node_left event to DHT under key: {key}")
+                    else:
+                        logger.warning(f"Failed to publish node_left to DHT under key: {key}")
+                except Exception as e:
+                    logger.error(f"Error publishing node_left to DHT key {key}: {e}")
+                    
             # Also update the all_nodes registry to remove the departed node
             await self._remove_from_all_nodes_registry(node_info.get('node_id'))
             
