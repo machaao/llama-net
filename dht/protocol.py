@@ -98,11 +98,16 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         msg_type = message.get('type')
         sender_id = message.get('sender_id')
         
-        # Track if this is a new contact
+        # Handle leave notifications FIRST before any contact tracking
+        if msg_type == 'leave_notification':
+            await self._handle_leave_notification(message, addr)
+            return  # Exit early, don't add as contact
+        
+        # Track if this is a new contact (only for non-leave messages)
         is_new_contact = False
         
-        # Update contact activity for any message (except responses to avoid loops)
-        if sender_id and msg_type != 'response':
+        # Update contact activity for any message (except responses and leave notifications)
+        if sender_id and msg_type not in ['response', 'leave_notification']:
             from dht.kademlia_node import Contact
             
             # Check if this is a new contact
@@ -132,8 +137,7 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             await self._handle_response(message, addr)
         elif msg_type == 'join_notification':
             await self._handle_join_notification(message, addr)
-        elif msg_type == 'leave_notification':
-            await self._handle_leave_notification(message, addr)
+        # leave_notification already handled above
         else:
             logger.warning(f"Unknown message type: {msg_type}")
     
