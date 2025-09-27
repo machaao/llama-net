@@ -2701,8 +2701,15 @@ function refreshNodeInfo(nodeId) {
 }
 
 // Initialize when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     llamaNetUI = new LlamaNetUI();
+    
+    // Call refreshNetworkDataOnTopologyChange on document load
+    try {
+        await llamaNetUI.refreshNetworkDataOnTopologyChange();
+    } catch (error) {
+        console.warn('Initial network data refresh failed:', error);
+    }
 });
 
 // Update the window beforeunload handler
