@@ -738,17 +738,19 @@ class LlamaNetUI {
                             model_name: modelName // Add backup field
                         };
                         
-                        const normalizedNode = this.normalizeNodeData(nodeWithModel);
-                        this.activeNodes.set(normalizedNode.node_id, normalizedNode);
+                        const normalizedNode = this.normalizeNodeDataWithValidation(nodeWithModel);
+                        if (normalizedNode) {
+                            this.activeNodes.set(normalizedNode.node_id, normalizedNode);
                         
-                        // Set status based on last_seen time since we don't have event data
-                        const timeSinceLastSeen = (Date.now() / 1000) - normalizedNode.last_seen;
-                        if (timeSinceLastSeen < 60) {
-                            this.nodeStatuses.set(normalizedNode.node_id, 'online');
-                            this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
-                            this.nodeEventTypes.set(normalizedNode.node_id, 'topology_refresh');
-                        } else {
-                            this.nodeStatuses.set(normalizedNode.node_id, 'unknown');
+                            // Set status based on last_seen time since we don't have event data
+                            const timeSinceLastSeen = (Date.now() / 1000) - normalizedNode.last_seen;
+                            if (timeSinceLastSeen < 60) {
+                                this.nodeStatuses.set(normalizedNode.node_id, 'online');
+                                this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
+                                this.nodeEventTypes.set(normalizedNode.node_id, 'topology_refresh');
+                            } else {
+                                this.nodeStatuses.set(normalizedNode.node_id, 'unknown');
+                            }
                         }
                     });
                 }
