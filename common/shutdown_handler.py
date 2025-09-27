@@ -5,6 +5,7 @@ import logging
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
+from common.utils import get_host_ip
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +337,7 @@ class DHTPublisherShutdownHandler:
             # Create comprehensive departure info
             departure_info = {
                 'node_id': node_id,
-                'ip': get_host_ip() if 'get_host_ip' in globals() else 'unknown',
+                'ip': get_host_ip(),
                 'port': getattr(self.dht_publisher.config, 'port', 8000),
                 'model': getattr(self.dht_publisher.config, 'model_name', 'unknown'),
                 'reason': reason,
