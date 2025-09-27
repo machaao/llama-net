@@ -326,8 +326,8 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             logger.error(f"❌ Error processing enhanced contact {contact.node_id[:8]}... (seq: {sequence_number}): {e}")
     
     async def _get_node_info_from_contact_enhanced(self, contact) -> Optional[NodeInfo]:
-        """Get detailed node info from a DHT contact with enhanced retry logic"""
-        # Try to find the HTTP port with enhanced probing
+        """Get detailed node info from a DHT contact with enhanced retry logic and verification"""
+        # Try to find the HTTP port with enhanced probing (now includes node ID verification)
         http_port = await self._probe_http_port_enhanced(contact.ip, contact.node_id)
         
         if http_port:
@@ -342,27 +342,30 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                             if resp.status == 200:
                                 info = await resp.json()
                                 
-                                # Create NodeInfo with validation
+                                # CRITICAL: Verify node ID matches before creating NodeInfo
+                                response_node_id = info.get('node_id')
+                                if response_node_id != contact.node_id:
+                                    logger.error(f"❌ CRITICAL: Node ID mismatch during info retrieval!")
+                                    logger.error(f"  Expected: {contact.node_id[:8]}...")
+                                    logger.error(f"  Got: {response_node_id[:8] if response_node_id else 'none'}...")
+                                    logger.error(f"  This indicates port {http_port} belongs to a different node!")
+                                    return None  # Reject this contact completely
+                                
+                                # Create NodeInfo with verified data
                                 node_info = NodeInfo(
-                                    node_id=info.get('node_id', contact.node_id),
+                                    node_id=contact.node_id,  # Use contact node_id as authoritative
                                     ip=contact.ip,
                                     port=http_port,
                                     model=info.get('model', 'unknown'),
-                                    load=0.0,
-                                    tps=0.0,
-                                    uptime=0,
+                                    load=info.get('load', 0.0),
+                                    tps=info.get('tps', 0.0),
+                                    uptime=info.get('uptime', 0),
                                     last_seen=int(time.time()),
                                     event_driven=True,
-                                    change_reason='http_discovery'
+                                    change_reason='verified_http_discovery'
                                 )
                                 
-                                # Validate node ID consistency
-                                if node_info.node_id != contact.node_id:
-                                    logger.warning(f"Node ID mismatch: contact={contact.node_id[:8]}..., http={node_info.node_id[:8]}...")
-                                    # Use the contact's node ID as authoritative
-                                    node_info.node_id = contact.node_id
-                                
-                                logger.info(f"✅ Got enhanced node info for {contact.node_id[:8]}... via HTTP (attempt {attempt + 1})")
+                                logger.info(f"✅ Got verified node info for {contact.node_id[:8]}... via HTTP on port {http_port} (attempt {attempt + 1})")
                                 return node_info
                                 
                 except Exception as e:
@@ -371,30 +374,13 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                         await asyncio.sleep(2 ** attempt)
                     continue
         
-        # Enhanced fallback: Create node info from DHT contact with better port estimation
-        logger.info(f"📡 Creating enhanced fallback node info for {contact.node_id[:8]}...")
-        
-        # Better HTTP port estimation
-        fallback_http_port = await self._estimate_http_port(contact)
-        
-        node_info = NodeInfo(
-            node_id=contact.node_id,
-            ip=contact.ip,
-            port=fallback_http_port,
-            model='unknown',
-            load=0.0,
-            tps=0.0,
-            uptime=0,
-            last_seen=int(contact.last_seen) if hasattr(contact, 'last_seen') else int(time.time()),
-            event_driven=True,
-            change_reason='dht_fallback'
-        )
-        
-        logger.info(f"📡 Created enhanced fallback node info for {contact.node_id[:8]}... (HTTP port: {fallback_http_port})")
-        return node_info
+        # STRICT: Don't create fallback nodes if we can't verify the port
+        logger.warning(f"❌ Could not verify HTTP port for {contact.node_id[:8]}... at {contact.ip}")
+        logger.warning(f"   Skipping fallback creation to prevent port misassociation")
+        return None
     
     async def _probe_http_port_enhanced(self, ip: str, node_id: str) -> Optional[int]:
-        """Enhanced HTTP port probing with better coverage and parallel testing"""
+        """Enhanced HTTP port probing with node ID verification to prevent mismatched associations"""
         import aiohttp
         
         # Expanded port range with common LlamaNet patterns
@@ -408,15 +394,30 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 try:
                     timeout = aiohttp.ClientTimeout(total=4, connect=2)
                     async with aiohttp.ClientSession(timeout=timeout) as session:
-                        # Try multiple endpoints for better detection
-                        endpoints = ['/health', '/info', '/status', '/v1/models', '/']
+                        # FIRST: Try /info endpoint to verify node ID
+                        try:
+                            async with session.get(f"http://{ip}:{port}/info") as resp:
+                                if resp.status == 200:
+                                    info = await resp.json()
+                                    response_node_id = info.get('node_id')
+                                    if response_node_id == node_id:
+                                        logger.debug(f"✅ Verified correct node {node_id[:8]}... on port {port}")
+                                        return port
+                                    else:
+                                        logger.debug(f"❌ Wrong node on port {port}: expected {node_id[:8]}..., got {response_node_id[:8] if response_node_id else 'none'}...")
+                                        return None
+                        except Exception as e:
+                            logger.debug(f"Node ID verification failed for {ip}:{port}: {e}")
                         
+                        # FALLBACK: Try other endpoints but mark as unverified
+                        endpoints = ['/health', '/status', '/v1/models', '/']
                         for endpoint in endpoints:
                             try:
                                 async with session.get(f"http://{ip}:{port}{endpoint}") as resp:
                                     if resp.status in [200, 404, 405, 501]:  # Any valid HTTP response
-                                        logger.debug(f"Enhanced probe found HTTP port {port} for {node_id[:8]}... via {endpoint}")
-                                        return port
+                                        logger.warning(f"⚠️ Found HTTP service on port {port} but couldn't verify node ID via {endpoint} - potential mismatch!")
+                                        # Don't return unverified ports to prevent misassociation
+                                        return None
                             except:
                                 continue
                 except:
@@ -427,12 +428,12 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         tasks = [test_port_enhanced(port) for port in test_ports]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Return first successful port
+        # Return first verified port only
         for result in results:
             if isinstance(result, int):
                 return result
         
-        logger.debug(f"Enhanced probe could not find HTTP port for {node_id[:8]}... at {ip}")
+        logger.debug(f"Enhanced probe could not find verified HTTP port for {node_id[:8]}... at {ip}")
         return None
     
     def _should_include_node(self, node_info: NodeInfo) -> bool:
@@ -800,7 +801,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         return unique_ports[0] if unique_ports else 8000
 
     def _should_include_node_enhanced(self, node_info: NodeInfo, contact) -> bool:
-        """Enhanced node inclusion check with additional validation"""
+        """Enhanced node inclusion check with additional validation and improved duplicate handling"""
         # Basic filtering
         if not self._should_include_node(node_info):
             return False
@@ -817,13 +818,31 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 logger.warning(f"Invalid port range for node {node_info.node_id[:8]}...: {node_info.port}")
                 return False
             
-            # Check for duplicate IP:port combinations in active nodes
+            # IMPROVED: Check for duplicate IP:port combinations but handle probe errors gracefully
             for existing_node in self.active_nodes.values():
                 if (existing_node.ip == node_info.ip and 
                     existing_node.port == node_info.port and 
                     existing_node.node_id != node_info.node_id):
-                    logger.warning(f"Duplicate IP:port detected: {node_info.ip}:{node_info.port} for different nodes")
-                    return False
+                    logger.warning(f"Duplicate IP:port detected: {node_info.ip}:{node_info.port}")
+                    logger.warning(f"  Existing node: {existing_node.node_id[:8]}...")
+                    logger.warning(f"  New node: {node_info.node_id[:8]}...")
+                    
+                    # Check if this might be a port probing error
+                    if node_info.model == 'unknown' or existing_node.model == 'unknown':
+                        logger.info(f"Possible port probe mismatch - rejecting unverified node {node_info.node_id[:8]}...")
+                        return False
+                    else:
+                        logger.warning(f"Both nodes have model info - this indicates a real conflict")
+                        # Prefer the node with more recent activity
+                        if node_info.last_seen > existing_node.last_seen:
+                            logger.info(f"New node {node_info.node_id[:8]}... is more recent, allowing")
+                            # Remove the older conflicting node
+                            if existing_node.node_id in self.active_nodes:
+                                del self.active_nodes[existing_node.node_id]
+                                logger.info(f"Removed older conflicting node {existing_node.node_id[:8]}...")
+                        else:
+                            logger.info(f"Existing node {existing_node.node_id[:8]}... is more recent, rejecting new")
+                            return False
             
             return True
             
