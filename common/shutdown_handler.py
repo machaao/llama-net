@@ -2,6 +2,7 @@ import asyncio
 import time
 import signal
 import logging
+import uuid
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -347,14 +348,17 @@ class DHTPublisherShutdownHandler:
                 'departure_timestamp': time.time()
             }
             
+            # Send leave notification via DHT protocol (use leave_notification instead of departure_notification)
+            await self._send_leave_notification_to_dht(departure_info)
+            
             # Broadcast via event system with "node_left" event type
-            await self.dht_publisher._broadcast_node_event("node_left", departure_info)
-            
-            # Send to DHT network
-            await self.dht_publisher._publish_node_left_to_dht(departure_info)
-            
-            # Send direct notifications to contacts
-            await self.dht_publisher._send_departure_to_contacts(departure_info)
+            if hasattr(self.dht_publisher, 'kademlia_node') and self.dht_publisher.kademlia_node:
+                try:
+                    from inference_node.server import sse_handler
+                    if sse_handler and hasattr(sse_handler, 'broadcast_event'):
+                        await sse_handler.broadcast_event("node_left", departure_info)
+                except Exception as e:
+                    logger.debug(f"Could not broadcast via SSE handler: {e}")
             
             logger.info("✅ Enhanced DHT departure notifications sent with node_left events")
             
@@ -616,6 +620,65 @@ class DHTPublisherShutdownHandler:
         
         logger.debug("✅ DHT discovery stopped")
     
+    async def _send_leave_notification_to_dht(self, departure_info: Dict[str, Any]):
+        """Send leave notification to DHT contacts"""
+        if not self.dht_publisher or not hasattr(self.dht_publisher, 'kademlia_node'):
+            return
+            
+        kademlia_node = self.dht_publisher.kademlia_node
+        if not kademlia_node or not kademlia_node.routing_table:
+            return
+        
+        try:
+            # Get all contacts to notify
+            contacts = kademlia_node.routing_table.get_all_contacts()
+            
+            if not contacts:
+                logger.debug("No DHT contacts to notify of departure")
+                return
+            
+            # Create leave notification message
+            leave_message = {
+                'type': 'leave_notification',  # Use the correct message type
+                'id': str(uuid.uuid4()),
+                'sender_id': departure_info['node_id'],
+                'leave_data': {
+                    'reason': departure_info['reason'],
+                    'graceful': departure_info['graceful'],
+                    'timestamp': departure_info['timestamp']
+                }
+            }
+            
+            # Send to all contacts
+            notification_tasks = []
+            for contact in contacts[:10]:  # Limit to first 10 contacts to avoid overwhelming
+                task = asyncio.create_task(
+                    self._send_leave_to_contact(leave_message, contact)
+                )
+                notification_tasks.append(task)
+            
+            # Wait for notifications with timeout
+            if notification_tasks:
+                await asyncio.wait_for(
+                    asyncio.gather(*notification_tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+                logger.info(f"✅ Sent leave notifications to {len(notification_tasks)} DHT contacts")
+            
+        except Exception as e:
+            logger.error(f"Error sending leave notifications to DHT: {e}")
+
+    async def _send_leave_to_contact(self, leave_message: Dict[str, Any], contact):
+        """Send leave notification to a specific contact"""
+        try:
+            if hasattr(self.dht_publisher, 'kademlia_node') and self.dht_publisher.kademlia_node:
+                protocol = self.dht_publisher.kademlia_node.protocol
+                if protocol:
+                    await protocol._send_message(leave_message, (contact.ip, contact.port))
+                    logger.debug(f"✅ Sent leave notification to {contact.node_id[:8]}...")
+        except Exception as e:
+            logger.debug(f"Failed to send leave notification to {contact.node_id[:8]}...: {e}")
+
     def _log_shutdown_stats(self):
         """Log shutdown statistics"""
         stats = self.shutdown_stats
