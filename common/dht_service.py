@@ -309,33 +309,6 @@ class SharedDHTService:
             })
         
         return status
-    
-    async def coordinate_routing_table_updates(self):
-        """Set up coordination between DHT events and routing table updates"""
-        if not self.is_initialized():
-            logger.warning("Cannot coordinate routing updates: DHT service not initialized")
-            return
-        
-        try:
-            # Set up periodic routing table refresh
-            async def periodic_routing_refresh():
-                while self._kademlia_node and self._kademlia_node.running:
-                    try:
-                        await self._kademlia_node.refresh_routing_table_from_network()
-                        await asyncio.sleep(120)  # Refresh every 2 minutes
-                    except asyncio.CancelledError:
-                        break
-                    except Exception as e:
-                        logger.error(f"Error in periodic routing refresh: {e}")
-                        await asyncio.sleep(30)  # Wait before retry
-            
-            # Start the refresh task
-            asyncio.create_task(periodic_routing_refresh())
-            
-            logger.info("✅ DHT routing table coordination established")
-            
-        except Exception as e:
-            logger.error(f"Failed to coordinate routing table updates: {e}")
 
     async def force_node_id_correction(self, correct_node_id: str):
         """Force correction of node ID if there's a mismatch (emergency fix)"""

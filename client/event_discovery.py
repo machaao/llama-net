@@ -316,7 +316,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
     async def _monitor_dht_changes(self):
         """Centralized DHT monitoring with event handling"""
         last_routing_table_size = 0
-        health_check_interval = 15  # Check node health every 15 seconds
+        health_check_interval = 5  # Check node health every 5 seconds
         last_health_check = 0
         event_sequence_number = 0
         
@@ -340,13 +340,13 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     last_health_check = current_time
                 
                 # Event-driven monitoring
-                await asyncio.sleep(10)
+                await asyncio.sleep(5)
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in centralized DHT monitoring: {e}")
-                await asyncio.sleep(10)
+                await asyncio.sleep(5)
     
     async def _handle_routing_table_change_centralized(self, sequence_number: int):
         """Centralized handling of routing table changes"""

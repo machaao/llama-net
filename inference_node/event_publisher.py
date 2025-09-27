@@ -298,11 +298,6 @@ class EventBasedDHTPublisher:
                     await self._enhanced_node_discovery()
                     last_discovery_scan = current_time
 
-                # Event recovery mechanism
-                if current_time - last_recovery_check > recovery_check_interval:
-                    await self._event_recovery_mechanism()
-                    last_recovery_check = current_time
-
                 # Only update on significant changes
                 if should_update:
                     await self._publish_node_info()

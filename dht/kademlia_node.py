@@ -477,37 +477,6 @@ class KademliaNode:
         
         return contact_removed
 
-    async def refresh_routing_table_from_network(self):
-        """Refresh routing table based on current network state"""
-        try:
-            # Get current network nodes from DHT
-            all_nodes_data = await self.find_value("all_nodes")
-            
-            if all_nodes_data:
-                nodes_to_process = all_nodes_data if isinstance(all_nodes_data, list) else [all_nodes_data]
-                
-                for node_data in nodes_to_process:
-                    if isinstance(node_data, dict) and node_data.get('node_id'):
-                        node_id = node_data['node_id']
-                        ip = node_data.get('ip')
-                        port = node_data.get('dht_port', node_data.get('port'))
-                        
-                        if node_id != self.node_id and ip and port:
-                            # Check if this is a new or updated contact
-                            existing_contact = self.routing_table.get_contact_by_id(node_id)
-                            
-                            if not existing_contact:
-                                # New node discovered
-                                await self.handle_network_join_event(node_id, ip, port, 'network_refresh')
-                            else:
-                                # Update existing contact if needed
-                                self.routing_table.update_contact_from_event(node_id, ip, port)
-                
-                logger.info(f"🔄 Routing table refreshed from network data")
-                
-        except Exception as e:
-            logger.error(f"Error refreshing routing table from network: {e}")
-
     async def _find_node_on_contact(self, contact: Contact, target_id: str) -> List[Contact]:
         """Find nodes on a specific contact"""
         message = {
