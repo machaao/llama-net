@@ -353,10 +353,10 @@ class KademliaNode:
                 contact = await self._ping_node(ip, port)
                 if contact and contact.node_id:
                     # Validate the node ID before adding
-                    if self._validate_node_id(str(contact.node_id)):
+                    if NodeValidator.validate_node_id(str(contact.node_id)):
                         self.routing_table.add_contact(contact)
                         successful_connections.append((ip, port, contact.node_id))
-                        
+            
                         # EMIT BOOTSTRAP CONNECTION EVENT
                         await self._broadcast_node_event("bootstrap_connected", {
                             'bootstrap_node': {
@@ -367,7 +367,7 @@ class KademliaNode:
                             'local_node_id': self.node_id,
                             'connection_method': 'bootstrap_ping'
                         })
-                        
+            
                         # Find nodes close to ourselves
                         await self.find_node(self.node_id)
                     else:
@@ -532,7 +532,7 @@ class KademliaNode:
             if response and response.get('pong'):
                 # Try to get sender_id from response root or data
                 sender_id = response.get('sender_id') or response.get('data', {}).get('sender_id')
-                if sender_id and self._validate_node_id(str(sender_id)):
+                if sender_id and NodeValidator.validate_node_id(str(sender_id)):
                     return Contact(str(sender_id), ip, port)
                 else:
                     logger.warning(f"Invalid sender_id received from {ip}:{port}: {sender_id}")
