@@ -132,16 +132,10 @@ class KademliaNode:
         
         # Bootstrap if nodes provided
         if bootstrap_nodes:
-            await self._bootstrap(bootstrap_nodes)
-        
-        # Send join notification to network
-        await self._send_join_notification()
+            await self._bootstrap_basic(bootstrap_nodes)
     
     async def stop(self):
         """Stop the Kademlia node"""
-        # Send leave notification before stopping
-        await self._send_leave_notification()
-        
         self.running = False
         
         # Stop cleanup task
@@ -163,69 +157,6 @@ class KademliaNode:
             finally:
                 self.server = None
 
-    async def _send_join_notification(self):
-        """Send join notification to known contacts"""
-        try:
-            contacts = self.routing_table.get_all_contacts()
-            
-            join_message = {
-                'type': 'join_notification',
-                'id': str(uuid.uuid4()),
-                'sender_id': self.node_id,
-                'join_data': {
-                    'timestamp': time.time(),
-                    'node_info': {
-                        'node_id': self.node_id,
-                        'port': self.port
-                    }
-                }
-            }
-            
-            # Send to all known contacts
-            for contact in contacts[:5]:  # Limit to first 5 contacts
-                try:
-                    await self.protocol.send_request(join_message, (contact.ip, contact.port))
-                    logger.debug(f"📤 Sent join notification to {contact.node_id[:8]}...")
-                except Exception as e:
-                    logger.debug(f"Failed to send join notification to {contact.node_id[:8]}...: {e}")
-            
-            if contacts:
-                logger.info(f"📤 Sent join notifications to {min(len(contacts), 5)} contacts")
-                
-        except Exception as e:
-            logger.debug(f"Error sending join notifications: {e}")
-
-    async def _send_leave_notification(self):
-        """Send leave notification to known contacts"""
-        try:
-            contacts = self.routing_table.get_all_contacts()
-            
-            leave_message = {
-                'type': 'leave_notification',
-                'id': str(uuid.uuid4()),
-                'sender_id': self.node_id,
-                'leave_data': {
-                    'timestamp': time.time(),
-                    'reason': 'graceful_shutdown'
-                }
-            }
-            
-            # Send to all known contacts
-            for contact in contacts[:5]:  # Limit to first 5 contacts
-                try:
-                    await asyncio.wait_for(
-                        self.protocol.send_request(leave_message, (contact.ip, contact.port)),
-                        timeout=2.0
-                    )
-                    logger.debug(f"📤 Sent leave notification to {contact.node_id[:8]}...")
-                except Exception as e:
-                    logger.debug(f"Failed to send leave notification to {contact.node_id[:8]}...: {e}")
-            
-            if contacts:
-                logger.info(f"📤 Sent leave notifications to {min(len(contacts), 5)} contacts")
-                
-        except Exception as e:
-            logger.debug(f"Error sending leave notifications: {e}")
     
     async def _cleanup_loop(self):
         """Periodically clean up stale contacts and verify connectivity"""
@@ -343,10 +274,9 @@ class KademliaNode:
             "storage_entries": len(self.storage)
         }
     
-    async def _bootstrap(self, bootstrap_nodes: List[Tuple[str, int]]):
-        """Enhanced bootstrap with explicit join events"""
+    async def _bootstrap_basic(self, bootstrap_nodes: List[Tuple[str, int]]):
+        """Basic bootstrap without event emission"""
         successful_connections = []
-        failed_connections = []
         
         for ip, port in bootstrap_nodes:
             try:
@@ -359,37 +289,15 @@ class KademliaNode:
                     if NodeValidator.validate_node_id(str(contact.node_id)):
                         self.routing_table.add_contact(contact)
                         successful_connections.append((ip, port, contact.node_id))
-            
-                        # EMIT BOOTSTRAP CONNECTION EVENT
-                        await self._broadcast_node_event("bootstrap_connected", {
-                            'bootstrap_node': {
-                                'ip': ip,
-                                'port': port,
-                                'node_id': contact.node_id
-                            },
-                            'local_node_id': self.node_id,
-                            'connection_method': 'bootstrap_ping'
-                        })
-            
+                        
                         # Find nodes close to ourselves
                         await self.find_node(self.node_id)
                     else:
                         logger.warning(f"Bootstrap node {ip}:{port} returned invalid node ID: {contact.node_id}")
-                        failed_connections.append((ip, port, "invalid_node_id"))
                 else:
                     logger.warning(f"Failed to get valid contact from bootstrap node {ip}:{port}")
-                    failed_connections.append((ip, port, "no_contact"))
             except Exception as e:
                 logger.warning(f"Failed to bootstrap from {ip}:{port}: {e}")
-                failed_connections.append((ip, port, str(e)))
-        
-        # Emit bootstrap summary event
-        await self._broadcast_node_event("bootstrap_completed", {
-            'successful_connections': len(successful_connections),
-            'failed_connections': len(failed_connections),
-            'bootstrap_nodes': successful_connections,
-            'local_node_id': self.node_id
-        })
         
         if successful_connections:
             logger.info(f"✅ Successfully connected to {len(successful_connections)} bootstrap nodes")
@@ -483,34 +391,6 @@ class KademliaNode:
         
         return closest
     
-    async def _broadcast_node_event(self, event_type: str, event_data: Dict[str, Any]):
-        """Broadcast node events via the event publisher if available"""
-        try:
-            # Try to get the event publisher from the DHT service or parent
-            from common.dht_service import SharedDHTService
-            dht_service = SharedDHTService()
-            
-            # Check if we have access to an event publisher through the service
-            if hasattr(dht_service, '_event_publisher') and dht_service._event_publisher:
-                await dht_service._event_publisher._broadcast_node_event(event_type, event_data)
-            else:
-                # Try to broadcast via SSE handler directly
-                try:
-                    from inference_node.server import sse_handler
-                    if sse_handler and hasattr(sse_handler, 'broadcast_event'):
-                        await sse_handler.broadcast_event(event_type, {
-                            'event_data': event_data,
-                            'timestamp': time.time(),
-                            'source': 'kademlia_node'
-                        })
-                except ImportError:
-                    # SSE handler not available (client-only mode)
-                    logger.debug(f"SSE handler not available for event: {event_type}")
-            
-            logger.debug(f"Broadcasted {event_type} event from KademliaNode")
-            
-        except Exception as e:
-            logger.debug(f"Could not broadcast {event_type} event: {e}")
     
     def _am_closest_to_key(self, key_hash: str) -> bool:
         """Check if we are among the closest nodes to a key"""
@@ -585,15 +465,6 @@ class KademliaNode:
         contact = Contact(node_id, ip, port)
         is_new_contact = self.routing_table.handle_node_join(contact, join_source)
         
-        # Emit routing table update event
-        if is_new_contact:
-            await self._broadcast_routing_table_event("node_added", {
-                'node_id': node_id,
-                'ip': ip,
-                'port': port,
-                'source': join_source
-            })
-        
         return is_new_contact
 
     async def handle_network_leave_event(self, node_id: str, leave_reason: str = 'network') -> bool:
@@ -604,28 +475,7 @@ class KademliaNode:
         # Remove from routing table
         contact_removed = self.routing_table.handle_node_leave(node_id, leave_reason)
         
-        # Emit routing table update event
-        if contact_removed:
-            await self._broadcast_routing_table_event("node_removed", {
-                'node_id': node_id,
-                'reason': leave_reason
-            })
-        
         return contact_removed
-
-    async def _broadcast_routing_table_event(self, action: str, event_data: Dict[str, Any]):
-        """Broadcast routing table update events"""
-        try:
-            routing_stats = self.routing_table.get_routing_table_events()
-            
-            await self._broadcast_node_event("routing_table_updated", {
-                'action': action,
-                'routing_stats': routing_stats,
-                'local_node_id': self.node_id,
-                **event_data
-            })
-        except Exception as e:
-            logger.debug(f"Could not broadcast routing table event: {e}")
 
     async def refresh_routing_table_from_network(self):
         """Refresh routing table based on current network state"""

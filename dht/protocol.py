@@ -94,39 +94,20 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             # Log but don't crash the protocol handler
     
     async def _handle_message(self, message: Dict[str, Any], addr: Tuple[str, int]):
-        """Enhanced message handling with join/leave events"""
+        """Simplified message handling - DHT operations only"""
         msg_type = message.get('type')
         sender_id = message.get('sender_id')
         
-        # Handle leave notifications FIRST before any contact tracking
-        if msg_type == 'leave_notification':
-            await self._handle_leave_notification(message, addr)
-            return  # Exit early, don't add as contact
-        
-        # Track if this is a new contact (only for non-leave messages)
-        is_new_contact = False
-        
-        # Update contact activity for any message (except responses and leave notifications)
-        if sender_id and msg_type not in ['response', 'leave_notification']:
+        # Update contact activity for any valid message (basic DHT operation)
+        if sender_id and msg_type not in ['response']:
             from dht.kademlia_node import Contact
-            
-            # Check if this is a new contact
-            existing_contacts = self.node.routing_table.get_all_contacts()
-            existing_ids = {c.node_id for c in existing_contacts}
-            is_new_contact = sender_id not in existing_ids
-            
             contact = Contact(sender_id, addr[0], addr[1])
             self.node.routing_table.add_contact(contact)
-            
-            # Emit join event for new contacts
-            if is_new_contact:
-                await self._emit_contact_joined_event(contact)
-            
-            logger.info(f"📡 Updated contact - {msg_type}: {sender_id[:8]}... from {addr}")
+            logger.debug(f"📡 Updated DHT contact: {sender_id[:8]}... from {addr}")
         
-        # Handle specific message types
+        # Handle DHT protocol messages only
         if msg_type == 'ping':
-            await self._handle_ping_enhanced(message, addr, is_new_contact)
+            await self._handle_ping(message, addr)
         elif msg_type == 'store':
             await self._handle_store(message, addr)
         elif msg_type == 'find_node':
@@ -135,11 +116,8 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             await self._handle_find_value(message, addr)
         elif msg_type == 'response':
             await self._handle_response(message, addr)
-        elif msg_type == 'join_notification':
-            await self._handle_join_notification(message, addr)
-        # leave_notification already handled above
         else:
-            logger.warning(f"Unknown message type: {msg_type}")
+            logger.debug(f"Unknown DHT message type: {msg_type}")
     
     async def _handle_ping(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle ping message"""
@@ -160,24 +138,13 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         }
         await self._send_message(response, addr)
 
-    async def _handle_ping_enhanced(self, message: Dict[str, Any], addr: Tuple[str, int], is_new_contact: bool):
-        """Enhanced ping handling with routing table coordination"""
+    async def _handle_ping(self, message: Dict[str, Any], addr: Tuple[str, int]):
+        """Handle ping message - basic DHT operation only"""
         sender_id = message.get('sender_id')
-        
-        routing_updated = False
-        if sender_id and NodeValidator.validate_node_id(sender_id):
+        if sender_id:
             from dht.kademlia_node import Contact
-            
-            # Check if this is a new contact
-            existing_contact = self.node.routing_table.get_contact_by_id(sender_id)
-            is_new_contact = existing_contact is None
-            
             contact = Contact(sender_id, addr[0], addr[1])
-            routing_updated = self.node.routing_table.handle_node_join(contact, 'ping')
-            
-            # If this is a new contact discovered via ping, emit join event
-            if is_new_contact and routing_updated:
-                await self._emit_contact_discovered_event(contact, 'ping')
+            self.node.routing_table.add_contact(contact)
         
         response = {
             'type': 'response',
@@ -185,228 +152,11 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             'sender_id': self.node.node_id,
             'data': {
                 'pong': True,
-                'sender_id': self.node.node_id,
-                'routing_table_updated': routing_updated,
-                'node_info': {
-                    'node_id': self.node.node_id,
-                    'timestamp': time.time()
-                }
+                'sender_id': self.node.node_id
             }
         }
         await self._send_message(response, addr)
 
-    async def _emit_contact_discovered_event(self, contact, discovery_method: str):
-        """Emit event when a new contact is discovered"""
-        try:
-            # Try to get the event publisher to emit the event
-            await self._forward_join_to_event_system(
-                contact.node_id, 
-                (contact.ip, contact.port), 
-                {'discovery_method': discovery_method}, 
-                True
-            )
-        except Exception as e:
-            logger.debug(f"Could not emit contact discovered event: {e}")
-
-    async def _emit_contact_joined_event(self, contact):
-        """Emit event when a new contact joins the DHT"""
-        try:
-            # Try to get the event publisher to emit the event
-            if hasattr(self.node, 'event_publisher'):
-                await self.node.event_publisher._broadcast_node_event("dht_contact_joined", {
-                    'contact_node_id': contact.node_id,
-                    'contact_ip': contact.ip,
-                    'contact_port': contact.port,
-                    'local_node_id': self.node.node_id,
-                    'join_method': 'dht_protocol'
-                })
-        except Exception as e:
-            logger.debug(f"Could not emit contact joined event: {e}")
-
-    async def _handle_join_notification(self, message: Dict[str, Any], addr: Tuple[str, int]):
-        """Handle explicit join notifications with routing table updates"""
-        sender_id = message.get('sender_id')
-        join_data = message.get('join_data', {})
-        
-        logger.info(f"📥 Received join notification from {sender_id[:8]}... at {addr}")
-        
-        # Add to routing table with join event handling
-        routing_updated = False
-        if sender_id and NodeValidator.validate_node_id(sender_id):
-            from dht.kademlia_node import Contact
-            contact = Contact(sender_id, addr[0], addr[1])
-            
-            # Use the enhanced routing table join handler
-            routing_updated = self.node.routing_table.handle_node_join(contact, 'join_notification')
-            
-            # Forward to event system for SSE broadcasting
-            await self._forward_join_to_event_system(sender_id, addr, join_data, routing_updated)
-        
-        # Acknowledge the join
-        response = {
-            'type': 'response',
-            'id': message.get('id'),
-            'sender_id': self.node.node_id,
-            'data': {
-                'join_acknowledged': True,
-                'welcomer_node_id': self.node.node_id,
-                'routing_table_updated': routing_updated
-            }
-        }
-        await self._send_message(response, addr)
-
-    async def _handle_leave_notification(self, message: Dict[str, Any], addr: Tuple[str, int]):
-        """Handle explicit leave notifications with routing table updates"""
-        sender_id = message.get('sender_id')
-        leave_data = message.get('leave_data', {})
-        
-        logger.info(f"📤 Received leave notification from {sender_id[:8]}... at {addr}")
-        
-        # Remove from routing table with leave event handling
-        routing_updated = False
-        if sender_id and NodeValidator.validate_node_id(sender_id):
-            routing_updated = self.node.routing_table.handle_node_leave(
-                sender_id, 
-                leave_data.get('reason', 'leave_notification')
-            )
-        
-        # Forward to event system for SSE broadcasting
-        await self._forward_leave_to_event_system(sender_id, addr, leave_data, routing_updated)
-    
-    async def _forward_join_to_event_system(self, sender_id: str, addr: Tuple[str, int], join_data: Dict[str, Any], routing_updated: bool = False):
-        """Forward join notification to event system for SSE broadcasting"""
-        try:
-            # Don't broadcast our own joins
-            if sender_id == self.node.node_id:
-                return
-                
-            ip, port = addr
-            
-            # Try to forward via DHT service
-            try:
-                from common.dht_service import SharedDHTService
-                dht_service = SharedDHTService()
-                
-                if dht_service.is_initialized() and hasattr(dht_service, 'handle_join_notification'):
-                    await dht_service.handle_join_notification(sender_id, addr)
-                    logger.debug(f"✅ Forwarded join notification to DHT service for {sender_id[:8]}...")
-                    return
-            except Exception as e:
-                logger.debug(f"Could not forward via DHT service: {e}")
-            
-            # Fallback: Try to broadcast directly via SSE handler
-            try:
-                from inference_node.server import sse_manager
-                if sse_manager and hasattr(sse_manager.handler, 'broadcast_event'):
-                    
-                    # Create node info from join notification
-                    node_info = {
-                        'node_id': sender_id,
-                        'ip': ip,
-                        'port': port,
-                        'model': 'unknown',  # Will be enriched later
-                        'load': 0.0,
-                        'tps': 0.0,
-                        'uptime': 0,
-                        'last_seen': int(time.time()),
-                        'join_source': 'dht_notification',
-                        'newly_discovered': True,
-                        'routing_table_updated': routing_updated
-                    }
-                    
-                    await sse_manager.handler.broadcast_event("node_joined", {
-                        'node_info': node_info,
-                        'timestamp': time.time(),
-                        'source': 'dht_protocol',
-                        'event_driven': True
-                    })
-                    
-                    logger.info(f"🎉 Broadcasted join event via SSE for {sender_id[:8]}...")
-                    
-                    # Try to enrich node info asynchronously
-                    asyncio.create_task(self._enrich_node_info(sender_id, ip, port))
-                    
-            except Exception as e:
-                logger.debug(f"Could not broadcast via SSE handler: {e}")
-                
-        except Exception as e:
-            logger.error(f"Error forwarding join notification for {sender_id[:8]}...: {e}")
-
-    async def _forward_leave_to_event_system(self, sender_id: str, addr: Tuple[str, int], leave_data: Dict[str, Any], routing_updated: bool = False):
-        """Forward leave notification to event system for SSE broadcasting"""
-        try:
-            # Don't broadcast our own leaves
-            if sender_id == self.node.node_id:
-                return
-                
-            ip, port = addr
-            
-            # Forward to event system as "node_left" event
-            try:
-                from inference_node.server import sse_manager
-                if sse_manager and hasattr(sse_manager.handler, 'broadcast_event'):
-                    await sse_manager.handler.broadcast_event("node_left", {
-                        'node_info': {
-                            'node_id': sender_id,
-                            'ip': ip,
-                            'port': port,
-                            'reason': leave_data.get('reason', 'leave_notification'),
-                            'graceful': True,
-                            'routing_table_updated': routing_updated
-                        },
-                        'timestamp': time.time(),
-                        'source': 'dht_protocol',
-                        'event_driven': True
-                    })
-                    logger.info(f"✅ Forwarded leave notification event for {sender_id[:8]}...")
-            except Exception as e:
-                logger.debug(f"Could not forward leave notification: {e}")
-                
-        except Exception as e:
-            logger.error(f"Error forwarding leave notification for {sender_id[:8]}...: {e}")
-    
-    async def _enrich_node_info(self, node_id: str, ip: str, port: int):
-        """Try to get detailed node information after join"""
-        try:
-            import aiohttp
-            
-            # Try to get node info from HTTP API
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                async with session.get(f"http://{ip}:{port}/info") as response:
-                    if response.status == 200:
-                        node_info = await response.json()
-                        
-                        # Create enriched node info
-                        enriched_info = {
-                            'node_id': node_id,
-                            'ip': ip,
-                            'port': port,
-                            'model': node_info.get('model', 'unknown'),
-                            'load': 0.0,
-                            'tps': 0.0,
-                            'uptime': 0,
-                            'last_seen': int(time.time()),
-                            'enriched': True,
-                            'system_info': node_info.get('system', {})
-                        }
-                        
-                        # Broadcast enriched info
-                        try:
-                            from inference_node.server import sse_handler
-                            if sse_handler:
-                                await sse_handler.broadcast_event("node_updated", {
-                                    'node_info': enriched_info,
-                                    'timestamp': time.time(),
-                                    'source': 'dht_enrichment',
-                                    'event_driven': True
-                                })
-                                
-                                logger.info(f"📊 Broadcasted enriched info for {node_id[:8]}... (model: {enriched_info['model']})")
-                        except Exception as e:
-                            logger.debug(f"Could not broadcast enriched info: {e}")
-                            
-        except Exception as e:
-            logger.debug(f"Could not enrich node info for {node_id[:8]}...: {e}")
     
     async def _handle_store(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle store message"""

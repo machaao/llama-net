@@ -225,7 +225,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 logger.debug(f"🔄 Node updated: {node_id}")
     
     async def _monitor_dht_changes(self):
-        """Monitor DHT for real-time changes with enhanced event sequencing"""
+        """Centralized DHT monitoring with event handling"""
         last_routing_table_size = 0
         health_check_interval = 45  # Check node health every 45 seconds
         last_health_check = 0
@@ -235,53 +235,53 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             try:
                 current_time = time.time()
                 
-                # Check for routing table changes with event sequencing
+                # Monitor routing table changes and emit events centrally
                 if self.kademlia_node and self.kademlia_node.routing_table:
                     current_size = len(self.kademlia_node.routing_table.get_all_contacts())
                     
                     if current_size != last_routing_table_size:
                         event_sequence_number += 1
-                        logger.info(f"DHT routing table changed: {last_routing_table_size} -> {current_size} (seq: {event_sequence_number})")
-                        await self._handle_routing_table_change_sequenced(event_sequence_number)
+                        logger.info(f"DHT routing table changed: {last_routing_table_size} -> {current_size} (centralized)")
+                        await self._handle_routing_table_change_centralized(event_sequence_number)
                         last_routing_table_size = current_size
                 
-                # Active health checking of known nodes with event validation
+                # Centralized health checking
                 if current_time - last_health_check > health_check_interval:
-                    await self._health_check_active_nodes_enhanced()
+                    await self._centralized_health_check()
                     last_health_check = current_time
                 
-                # Event-driven monitoring with sequence validation
+                # Event-driven monitoring
                 await asyncio.sleep(30)
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error monitoring DHT changes: {e}")
+                logger.error(f"Error in centralized DHT monitoring: {e}")
                 await asyncio.sleep(10)
     
-    async def _handle_routing_table_change_sequenced(self, sequence_number: int):
-        """Handle routing table changes with event sequencing"""
+    async def _handle_routing_table_change_centralized(self, sequence_number: int):
+        """Centralized handling of routing table changes"""
         try:
             # Get current contacts from routing table
             contacts = self.kademlia_node.routing_table.get_all_contacts()
             current_contact_ids = {contact.node_id for contact in contacts}
             
-            # Find new contacts with sequence validation
+            # Find new contacts
             known_contact_ids = {node_id for node_id in self.known_node_ids}
             new_contact_ids = current_contact_ids - known_contact_ids
             
-            logger.info(f"📊 DHT routing table change (seq: {sequence_number}): {len(contacts)} total contacts, {len(new_contact_ids)} new")
+            logger.info(f"📊 Centralized DHT change (seq: {sequence_number}): {len(contacts)} total contacts, {len(new_contact_ids)} new")
             
-            # Process new contacts with enhanced validation
+            # Process new contacts with centralized event emission
             for contact in contacts:
                 if contact.node_id in new_contact_ids:
-                    logger.info(f"🆕 New DHT contact detected (seq: {sequence_number}): {contact.node_id[:8]}... at {contact.ip}")
-                    await self._process_new_contact_enhanced(contact, sequence_number)
+                    logger.info(f"🆕 New DHT contact detected (centralized): {contact.node_id[:8]}... at {contact.ip}")
+                    await self._process_new_contact_centralized(contact, sequence_number)
             
             # Update known contacts
             self.known_node_ids.update(current_contact_ids)
             
-            # Emit network change event with sequence information
+            # Emit centralized network change event
             await self._emit_event(NodeEvent(
                 event_type=NodeEventType.NETWORK_CHANGED,
                 node_info=None,
@@ -289,20 +289,18 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 metadata={
                     "routing_table_size": len(contacts),
                     "new_contacts": len(new_contact_ids),
-                    "total_known_nodes": len(self.known_node_ids),
-                    "change_source": "routing_table_update",
                     "sequence_number": sequence_number,
-                    "event_sequenced": True
+                    "centralized_handling": True
                 }
             ))
             
         except Exception as e:
-            logger.error(f"Error handling sequenced routing table change: {e}")
+            logger.error(f"Error in centralized routing table change handling: {e}")
     
-    async def _process_new_contact_enhanced(self, contact, sequence_number: int):
-        """Process a new DHT contact with enhanced validation and sequencing"""
+    async def _process_new_contact_centralized(self, contact, sequence_number: int):
+        """Process a new DHT contact with centralized event handling"""
         try:
-            logger.debug(f"🔍 Processing new DHT contact (seq: {sequence_number}): {contact.node_id[:8]}... at {contact.ip}")
+            logger.debug(f"🔍 Processing new DHT contact (centralized): {contact.node_id[:8]}... at {contact.ip}")
             
             # Validate contact before processing
             if not self._validate_contact(contact):
@@ -324,23 +322,22 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     self.active_nodes[node_info.node_id] = node_info
                     self.known_node_ids.add(node_info.node_id)
                     
-                    # ALWAYS emit event for new nodes, regardless of filtering
+                    # Emit centralized events
                     if is_truly_new:
                         await self._emit_event(NodeEvent(
                             event_type=NodeEventType.NODE_JOINED,
                             node_info=node_info,
                             timestamp=time.time(),
                             metadata={
-                                "source": "dht_contact",
+                                "source": "centralized_discovery",
                                 "discovery_method": "http_probe" if node_info.model != 'unknown' else "dht_fallback",
                                 "contact_ip": contact.ip,
                                 "contact_port": getattr(contact, 'port', None),
                                 "sequence_number": sequence_number,
-                                "validation_passed": True,
-                                "filtered_in": True
+                                "centralized_handling": True
                             }
                         ))
-                        logger.info(f"✅ Emitted NODE_JOINED event (seq: {sequence_number}) for {contact.node_id[:8]}...")
+                        logger.info(f"✅ Centralized NODE_JOINED event for {contact.node_id[:8]}...")
                     else:
                         # This is an update to existing node
                         await self._emit_event(NodeEvent(
@@ -348,21 +345,21 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                             node_info=node_info,
                             timestamp=time.time(),
                             metadata={
-                                "source": "dht_contact_update",
+                                "source": "centralized_update",
                                 "sequence_number": sequence_number,
                                 "update_reason": "contact_refresh"
                             }
                         ))
-                        logger.debug(f"✅ Emitted NODE_UPDATED event (seq: {sequence_number}) for {contact.node_id[:8]}...")
+                        logger.debug(f"✅ Centralized NODE_UPDATED event for {contact.node_id[:8]}...")
                 else:
-                    logger.debug(f"❌ Node {contact.node_id[:8]}... filtered out by enhanced inclusion rules")
+                    logger.debug(f"❌ Node {contact.node_id[:8]}... filtered out by inclusion rules")
                     # Still track that we've seen this node to avoid repeated processing
                     self.known_node_ids.add(contact.node_id)
             else:
-                logger.warning(f"❌ Could not create node info for contact {contact.node_id[:8]}... (seq: {sequence_number})")
+                logger.warning(f"❌ Could not create node info for contact {contact.node_id[:8]}...")
                 
         except Exception as e:
-            logger.error(f"❌ Error processing enhanced contact {contact.node_id[:8]}... (seq: {sequence_number}): {e}")
+            logger.error(f"❌ Error processing centralized contact {contact.node_id[:8]}...: {e}")
     
     async def _get_node_info_from_contact_enhanced(self, contact) -> Optional[NodeInfo]:
         """Get detailed node info from a DHT contact with enhanced retry logic and verification"""
@@ -738,61 +735,59 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         
         return True  # Node is confirmed down
     
-    async def _health_check_active_nodes_enhanced(self):
-        """Enhanced health checking with better error handling and event validation"""
+    async def _centralized_health_check(self):
+        """Centralized health checking with event emission"""
         if not self.active_nodes:
             return
         
         current_time = time.time()
         nodes_to_check = []
         
-        # Find nodes that need health checking with enhanced criteria
+        # Find nodes that need health checking
         for node_id, node_info in self.active_nodes.items():
             time_since_seen = current_time - node_info.last_seen
             
-            # Check nodes not seen for 60 seconds (reduced from 90)
+            # Check nodes not seen for 60 seconds
             if time_since_seen > 60:
                 nodes_to_check.append((node_id, node_info))
         
         if nodes_to_check:
-            logger.debug(f"Enhanced health checking {len(nodes_to_check)} potentially stale nodes")
+            logger.debug(f"Centralized health checking {len(nodes_to_check)} potentially stale nodes")
             
             # Health check with limited concurrency
             semaphore = asyncio.Semaphore(3)
             tasks = []
             
             for node_id, node_info in nodes_to_check:
-                task = asyncio.create_task(self._health_check_node_enhanced(node_id, node_info, semaphore))
+                task = asyncio.create_task(self._health_check_node_centralized(node_id, node_info, semaphore))
                 tasks.append(task)
             
             # Wait for all health checks
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Process results with event validation
+            # Process results with centralized event handling
             for i, result in enumerate(results):
                 node_id, node_info = nodes_to_check[i]
                 
                 if isinstance(result, Exception):
-                    logger.debug(f"Enhanced health check error for {node_id[:8]}...: {result}")
-                    # Treat exceptions as node failure
-                    await self._handle_node_departure_confirmed(node_id, node_info, "health_check_exception")
+                    logger.debug(f"Centralized health check error for {node_id[:8]}...: {result}")
+                    await self._handle_centralized_node_departure(node_id, node_info, "health_check_exception")
                     continue
                 
                 is_alive = result
                 if not is_alive:
-                    # Validate departure before emitting event
                     if await self._validate_node_departure(node_id, node_info):
-                        await self._handle_node_departure_confirmed(node_id, node_info, "enhanced_health_check_failed")
+                        await self._handle_centralized_node_departure(node_id, node_info, "centralized_health_check_failed")
 
-    async def _handle_node_departure_confirmed(self, node_id: str, node_info: NodeInfo, reason: str):
-        """Handle confirmed node departure with proper event emission"""
-        logger.info(f"Node {node_id[:8]}... confirmed departed via {reason}")
+    async def _handle_centralized_node_departure(self, node_id: str, node_info: NodeInfo, reason: str):
+        """Handle confirmed node departure with centralized event emission"""
+        logger.info(f"Node {node_id[:8]}... confirmed departed via {reason} (centralized)")
         
         # Remove from active tracking
         if node_id in self.active_nodes:
             del self.active_nodes[node_id]
         
-        # Emit leave event
+        # Emit centralized leave event
         await self._emit_event(NodeEvent(
             event_type=NodeEventType.NODE_LEFT,
             node_info=node_info,
@@ -800,14 +795,15 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             metadata={
                 "reason": reason, 
                 "last_seen": node_info.last_seen,
-                "validation_method": "enhanced_health_check",
-                "graceful": False
+                "validation_method": "centralized_health_check",
+                "graceful": False,
+                "centralized_handling": True
             }
         ))
-        logger.info(f"✅ Emitted NODE_LEFT event for {node_id[:8]}... (reason: {reason})")
+        logger.info(f"✅ Centralized NODE_LEFT event for {node_id[:8]}... (reason: {reason})")
 
-    async def _health_check_node_enhanced(self, node_id: str, node_info: NodeInfo, semaphore) -> bool:
-        """Enhanced health check with multiple validation methods"""
+    async def _health_check_node_centralized(self, node_id: str, node_info: NodeInfo, semaphore) -> bool:
+        """Centralized health check with multiple validation methods"""
         async with semaphore:
             try:
                 import aiohttp
@@ -827,17 +823,17 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                                 if response.status in [200, 404, 405]:
                                     # Node is responding, update last_seen
                                     node_info.last_seen = int(time.time())
-                                    logger.debug(f"Enhanced health check passed for {node_id[:8]}... via {endpoint}")
+                                    logger.debug(f"Centralized health check passed for {node_id[:8]}... via {endpoint}")
                                     return True
                     except Exception as e:
-                        logger.debug(f"Enhanced health check failed for {node_id[:8]}... on {endpoint}: {e}")
+                        logger.debug(f"Centralized health check failed for {node_id[:8]}... on {endpoint}: {e}")
                         continue
                 
-                logger.debug(f"All enhanced health check methods failed for {node_id[:8]}...")
+                logger.debug(f"All centralized health check methods failed for {node_id[:8]}...")
                 return False
                 
             except Exception as e:
-                logger.debug(f"Enhanced health check error for {node_id[:8]}...: {e}")
+                logger.debug(f"Centralized health check error for {node_id[:8]}...: {e}")
                 return False
 
     async def _update_unknown_nodes(self):
