@@ -255,8 +255,8 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     logger.error(f"Error in direct event listener {type(listener).__name__}: {e}")
             
             # Log the event emission
-            node_id = event.node_info.node_id[:8] + "..." if event.node_info else "N/A"
-            logger.debug(f"📡 Emitted {event_type_name} event for node {node_id}")
+            node_id = event.node_info.node_id if event.node_info else "N/A"
+            logger.info(f"📡 Emitted {event_type_name} event for node {node_id}")
             
         except Exception as e:
             logger.error(f"Error emitting event {event.event_type}: {e}")
@@ -301,6 +301,10 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             if node_id in self.active_nodes:
                 del self.active_nodes[node_id]
                 self.known_node_ids.discard(node_id)
+                existing_contact = self.kademlia_node.get_contact(node_id)
+                if existing_contact:
+                    self.kademlia_node.routing_table.remove_contact(existing_contact)
+
                 logger.info(f"👋 Node left: {node_id}")
             
         elif event.event_type == NodeEventType.NODE_UPDATED:
@@ -311,7 +315,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
     async def _monitor_dht_changes(self):
         """Centralized DHT monitoring with event handling"""
         last_routing_table_size = 0
-        health_check_interval = 45  # Check node health every 45 seconds
+        health_check_interval = 15  # Check node health every 15 seconds
         last_health_check = 0
         event_sequence_number = 0
         
@@ -335,7 +339,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                     last_health_check = current_time
                 
                 # Event-driven monitoring
-                await asyncio.sleep(30)
+                await asyncio.sleep(10)
                 
             except asyncio.CancelledError:
                 break
@@ -906,7 +910,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
 
     async def _handle_centralized_node_departure(self, node_id: str, node_info: NodeInfo, reason: str):
         """Handle confirmed node departure with centralized event emission"""
-        logger.info(f"Node {node_id[:8]}... confirmed departed via {reason} (centralized)")
+        logger.info(f"Node {node_id} confirmed departed via {reason} (centralized)")
         
         # Remove from active tracking
         if node_id in self.active_nodes:
@@ -925,7 +929,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 "centralized_handling": True
             }
         ))
-        logger.info(f"✅ Centralized NODE_LEFT event for {node_id[:8]}... (reason: {reason})")
+        logger.info(f"✅ Centralized NODE_LEFT event for {node_id}... (reason: {reason})")
 
     async def _health_check_node_centralized(self, node_id: str, node_info: NodeInfo, semaphore) -> bool:
         """Centralized health check with multiple validation methods"""
@@ -1196,5 +1200,5 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                         logger.info(f"Node {node_id[:8]}... still active in DHT routing table")
                         return False
         
-        logger.info(f"Node departure validated for {node_id[:8]}...")
+        logger.info(f"Node departure validated for {node_id}")
         return True

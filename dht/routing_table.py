@@ -72,16 +72,19 @@ class RoutingTable:
         self.buckets[bucket_index].add_contact(contact)
         
         if is_new_contact:
-            logger.info(f"🔗 New DHT contact added: {contact.node_id[:12]}... ({contact.ip}:{contact.port})")
+            logger.info(f"🔗 New DHT contact added: {contact.node_id}... ({contact.ip}:{contact.port})")
         else:
-            logger.debug(f"Updated contact {contact.node_id[:8]} in bucket {bucket_index} - new address: {contact.ip}:{contact.port}")
+            logger.info(f"Updated contact {contact.node_id} in bucket {bucket_index} - new address: {contact.ip}:{contact.port}")
     
     def remove_contact(self, node_id: str):
         """Remove a contact from the routing table"""
+
         bucket_index = self._get_bucket_index(node_id)
         if bucket_index in self.buckets:
             self.buckets[bucket_index].remove_contact(node_id)
-    
+
+        logger.info(f"🔗 DHT contact removed: {node_id}")
+
     def cleanup_stale_contacts(self):
         """Remove contacts that haven't been seen recently"""
         current_time = time.time()
@@ -197,7 +200,7 @@ class RoutingTable:
         if is_new_contact:
             logger.info(f"🆕 Node joined DHT: {contact.node_id[:12]}... ({contact.ip}:{contact.port}) via {join_source}")
         else:
-            logger.debug(f"🔄 Updated existing contact: {contact.node_id[:8]}... new address: {contact.ip}:{contact.port}")
+            logger.info(f"🔄 Updated existing contact: {contact.node_id[:8]}... new address: {contact.ip}:{contact.port}")
         
         return is_new_contact
 
