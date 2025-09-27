@@ -252,7 +252,7 @@ class KademliaProtocol(asyncio.DatagramProtocol):
                     'source': 'dht_protocol',
                     'event_driven': True
                 })
-                logger.info(f"✅ Forwarded leave notification as node_left event for {sender_id[:8]}...")
+                logger.info(f"✅ Forwarded leave notification event for {sender_id[:8]}...")
         except Exception as e:
             logger.debug(f"Could not forward leave notification: {e}")
         

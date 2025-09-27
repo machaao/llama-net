@@ -9,6 +9,7 @@ from dht.kademlia_node import KademliaNode
 from common.models import NodeInfo
 from common.utils import get_logger
 from common.network_utils import NetworkUtils, SubnetFilter
+from common.validation_utils import NodeValidator, NetworkValidator
 from client.discovery import DiscoveryInterface
 
 logger = get_logger(__name__)

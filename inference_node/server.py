@@ -21,7 +21,8 @@ from common.models import (
     OpenAIChoice, OpenAIUsage, OpenAIMessage,
     create_streaming_chat_response, create_streaming_completion_response
 )
-from common.sse_handler import SSEForwarder, SSEHandler, SSENetworkMonitor
+from common.sse_handler import SSEForwarder
+from common.unified_sse import UnifiedSSEManager
 from common.shutdown_handler import DHTPublisherShutdownHandler, SignalHandler
 from common.service_manager import get_service_manager
 
