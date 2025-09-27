@@ -390,7 +390,7 @@ class LlamaNetUI {
                 return null;
             }
             
-            // Return normalized and validated data
+            // Return normalized and validated data with all NodeInfo fields
             return {
                 node_id: nodeData.node_id,
                 ip: nodeData.ip,
@@ -401,6 +401,24 @@ class LlamaNetUI {
                 uptime: parseInt(nodeData.uptime) || 0,
                 last_seen: parseInt(nodeData.last_seen) || Math.floor(Date.now() / 1000),
                 dht_port: parseInt(nodeData.dht_port) || null,
+                
+                // Event-driven metadata from NodeInfo model
+                event_driven: nodeData.event_driven !== undefined ? nodeData.event_driven : true,
+                last_significant_change: nodeData.last_significant_change || null,
+                change_reason: nodeData.change_reason || null,
+                
+                // Multi-IP support from NodeInfo model
+                available_ips: nodeData.available_ips || null,
+                ip_types: nodeData.ip_types || null,
+                preferred_ip: nodeData.preferred_ip || null,
+                
+                // Additional metadata from NodeInfo model
+                cpu_info: nodeData.cpu_info || null,
+                ram_total: nodeData.ram_total || null,
+                gpu_info: nodeData.gpu_info || null,
+                context_size: nodeData.context_size || null,
+                
+                // UI validation metadata
                 validated: true,
                 validation_timestamp: Date.now()
             };
@@ -426,7 +444,7 @@ class LlamaNetUI {
             modelGroups[node.model].push(node);
         });
         
-        // Calculate network stats
+        // Calculate network stats using server-compatible structure
         const totalNodes = nodes.length;
         const avgLoad = nodes.length > 0 ? nodes.reduce((sum, n) => sum + n.load, 0) / nodes.length : 0;
         const totalTps = nodes.reduce((sum, n) => sum + n.tps, 0);
@@ -435,12 +453,22 @@ class LlamaNetUI {
             return eventStatus === 'online' || (Date.now() / 1000) - n.last_seen < 60;
         }).length;
         
-        // Update network stats
+        // Create network summary compatible with server format
+        const networkSummary = {
+            total_models: Object.keys(modelGroups).length,
+            total_nodes: totalNodes,
+            avg_network_load: avgLoad,
+            total_network_tps: totalTps,
+            timestamp: Date.now() / 1000
+        };
+        
+        // Update network stats with server-compatible structure
         this.nodeStats = {
             totalNodes,
             onlineNodes,
             modelsAvailable: new Set(Object.keys(modelGroups)),
-            networkHealth: this.calculateNetworkHealth(avgLoad, onlineNodes)
+            networkHealth: this.calculateNetworkHealth(networkSummary),
+            networkSummary: networkSummary  // Store server-compatible summary
         };
         
         // Create enhanced content with refresh timestamp
@@ -597,7 +625,20 @@ class LlamaNetUI {
         return `${Math.floor(diff / 3600)}h ago`;
     }
     
-    calculateNetworkHealth(avgLoad, nodeCount) {
+    calculateNetworkHealth(networkSummary) {
+        // Handle both old format (avgLoad, nodeCount) and new format (networkSummary object)
+        let avgLoad, nodeCount;
+        
+        if (typeof networkSummary === 'object' && networkSummary !== null) {
+            // New format: networkSummary object from server
+            avgLoad = networkSummary.avg_network_load || 0;
+            nodeCount = networkSummary.total_nodes || 0;
+        } else {
+            // Legacy format: direct parameters
+            avgLoad = arguments[0] || 0;
+            nodeCount = arguments[1] || 0;
+        }
+        
         if (nodeCount === 0) return 'no_nodes';
         if (nodeCount === 1) return 'limited';
         if (avgLoad < 0.3 && nodeCount >= 3) return 'excellent';
@@ -692,20 +733,31 @@ class LlamaNetUI {
         try {
             // When network topology changes, we need to refresh our node data
             // since individual node events might not capture all changes
-            const [dhtResponse, modelsResponse] = await Promise.all([
+            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
                 fetch(`${this.baseUrl}/dht/status`).catch(() => null),
-                fetch(`${this.baseUrl}/v1/models/network`).catch(() => null)
+                fetch(`${this.baseUrl}/v1/models/network`).catch(() => null),
+                fetch(`${this.baseUrl}/models/statistics`).catch(() => null)
             ]);
             
             if (dhtResponse && dhtResponse.ok && modelsResponse && modelsResponse.ok) {
                 const dhtData = await dhtResponse.json();
                 const modelsData = await modelsResponse.json();
+                let statsData = null;
+                
+                if (statsResponse && statsResponse.ok) {
+                    statsData = await statsResponse.json();
+                }
                 
                 // Debug log to check the structure
                 console.log('🔍 Models data structure:', modelsData);
                 
                 // Update activeNodes from fresh API data
                 this.updateActiveNodesFromAPI(modelsData);
+                
+                // Update network stats from server statistics if available
+                if (statsData) {
+                    this.updateNetworkStatsFromAPI(statsData);
+                }
                 
                 // Update the display with fresh data
                 this.updateNetworkDisplayRealTime();
@@ -2358,14 +2410,12 @@ class LlamaNetUI {
         if (statsData && statsData.network_summary) {
             const summary = statsData.network_summary;
             
-            // Update internal stats
+            // Update internal stats with server-compatible structure
             this.nodeStats = {
                 ...this.nodeStats,
                 totalNodes: summary.total_nodes || this.nodeStats.totalNodes,
-                networkHealth: this.calculateNetworkHealth(
-                    summary.avg_network_load || 0,
-                    summary.total_nodes || 0
-                )
+                networkHealth: this.calculateNetworkHealth(summary),
+                networkSummary: summary  // Store complete server summary
             };
             
             // Update any displayed network summary info
