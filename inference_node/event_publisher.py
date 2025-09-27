@@ -161,19 +161,32 @@ class EventBasedDHTPublisher:
         """Stop the event-based publisher with enhanced departure broadcasting"""
         logger.info("Stopping event-based DHT publisher...")
         
-        # Quick departure broadcast (don't retry on failure during shutdown)
+        # Prepare departure info
+        departure_info = {
+            'node_id': self.config.node_id,
+            'ip': get_host_ip(),
+            'port': self.config.port,
+            'model': self.config.model_name,
+            'reason': 'graceful_shutdown',
+            'last_seen': int(time.time())
+        }
+        
+        # Broadcast departure via both SSE and DHT
         try:
+            # Send via SSE (existing)
             await asyncio.wait_for(
-                self._broadcast_node_event("node_left", {
-                    'node_id': self.config.node_id,
-                    'ip': get_host_ip(),
-                    'port': self.config.port,
-                    'model': self.config.model_name,
-                    'reason': 'graceful_shutdown'
-                }),
-                timeout=2.0  # Quick timeout during shutdown
+                self._broadcast_node_event("node_left", departure_info),
+                timeout=2.0
             )
-            logger.info("✅ Departure event broadcasted")
+            logger.info("✅ Departure event broadcasted via SSE")
+            
+            # Send via DHT (NEW)
+            await asyncio.wait_for(
+                self._publish_node_left_to_dht(departure_info),
+                timeout=2.0
+            )
+            logger.info("✅ Departure event published to DHT")
+            
         except asyncio.TimeoutError:
             logger.warning("⏰ Departure broadcast timed out during shutdown")
         except Exception as e:
@@ -669,6 +682,62 @@ class EventBasedDHTPublisher:
         except Exception as e:
             logger.error(f"Error updating all_nodes registry: {e}")
     
+    async def _publish_node_left_to_dht(self, node_info: Dict[str, Any]):
+        """Publish node_left event to DHT network"""
+        try:
+            if not self.kademlia_node:
+                logger.warning("Cannot publish node_left to DHT: Kademlia node not available")
+                return
+            
+            # Create node_left event data
+            node_left_event = {
+                'event_type': 'node_left',
+                'node_id': node_info.get('node_id'),
+                'ip': node_info.get('ip'),
+                'port': node_info.get('port'),
+                'model': node_info.get('model'),
+                'reason': node_info.get('reason', 'unknown'),
+                'timestamp': int(time.time()),
+                'detected_by': self.config.node_id,
+                'last_seen': node_info.get('last_seen')
+            }
+            
+            # Store under node_left events key
+            node_left_key = f"events:node_left:{node_info.get('node_id', 'unknown')}"
+            
+            success = await self.kademlia_node.store(node_left_key, node_left_event)
+            if success:
+                logger.info(f"📡 Published node_left to DHT: {node_info.get('node_id', 'unknown')[:8]}...")
+            else:
+                logger.warning(f"Failed to publish node_left to DHT for {node_info.get('node_id', 'unknown')[:8]}...")
+                
+            # Also update the all_nodes registry to remove the departed node
+            await self._remove_from_all_nodes_registry(node_info.get('node_id'))
+            
+        except Exception as e:
+            logger.error(f"Error publishing node_left to DHT: {e}")
+
+    async def _remove_from_all_nodes_registry(self, departed_node_id: str):
+        """Remove departed node from all_nodes registry in DHT"""
+        try:
+            # Get existing all_nodes data
+            existing_data = await self.kademlia_node.find_value("all_nodes")
+            
+            if existing_data and isinstance(existing_data, list):
+                # Remove the departed node
+                updated_data = [node for node in existing_data 
+                               if node.get('node_id') != departed_node_id]
+                
+                # Store updated list
+                success = await self.kademlia_node.store("all_nodes", updated_data)
+                if success:
+                    logger.info(f"Removed departed node {departed_node_id[:8]}... from DHT all_nodes registry")
+                else:
+                    logger.warning(f"Failed to remove departed node from DHT registry")
+            
+        except Exception as e:
+            logger.error(f"Error removing departed node from DHT registry: {e}")
+    
     async def _unpublish_node_info(self):
         """Remove node info from DHT when shutting down"""
         try:
@@ -869,17 +938,24 @@ class EventBasedDHTPublisher:
                             is_actually_down = await self._verify_node_actually_down(node_info)
                             
                             if is_actually_down:
-                                await self._broadcast_node_event("node_departed", {
+                                departure_info = {
                                     'node_id': departed_node_id,
                                     'ip': node_info.get('ip'),
                                     'port': node_info.get('port'),
                                     'model': node_info.get('model'),
                                     'departure_reason': 'proactive_detection',
                                     'detected_by': self.config.node_id,
-                                    'last_known_contact': self._last_contact_time.get(departed_node_id, 0)
-                                })
-                                
-                                logger.info(f"👋 Proactively detected node departure: {departed_node_id[:8]}...")
+                                    'last_known_contact': self._last_contact_time.get(departed_node_id, 0),
+                                    'reason': 'proactive_detection'
+                                }
+                            
+                                # Broadcast via SSE (existing)
+                                await self._broadcast_node_event("node_departed", departure_info)
+                            
+                                # Publish to DHT (NEW)
+                                await self._publish_node_left_to_dht(departure_info)
+                            
+                                logger.info(f"👋 Proactively detected node departure: {departed_node_id[:8]}... (published to SSE + DHT)")
                             else:
                                 # Node is still alive, update our records
                                 logger.debug(f"Node {departed_node_id[:8]}... is still alive, updating records")
@@ -1001,20 +1077,9 @@ class EventBasedDHTPublisher:
     async def _handle_node_departure(self, node_data: Dict[str, Any]):
         """Handle a detected node departure"""
         node_id = node_data['node_id']
-
-        # Remove from all_nodes registry
-        try:
-            existing_data = await self.kademlia_node.find_value("all_nodes")
-            if existing_data and isinstance(existing_data, list):
-                updated_data = [node for node in existing_data 
-                               if node.get('node_id') != node_id]
-                await self.kademlia_node.store("all_nodes", updated_data)
-                logger.info(f"Removed departed node {node_id[:8]}... from all_nodes registry")
-        except Exception as e:
-            logger.error(f"Error removing departed node from registry: {e}")
-
-        # Broadcast departure event
-        await self._broadcast_node_event("node_left", {
+        
+        # Prepare departure info
+        departure_info = {
             'node_id': node_id,
             'ip': node_data.get('ip'),
             'port': node_data.get('port'),
@@ -1022,7 +1087,13 @@ class EventBasedDHTPublisher:
             'reason': 'health_check_failed',
             'detected_by': self.config.node_id,
             'last_seen': node_data.get('last_seen')
-        })
+        }
+
+        # Broadcast departure event via SSE (existing)
+        await self._broadcast_node_event("node_left", departure_info)
+        
+        # Publish departure event to DHT (NEW)
+        await self._publish_node_left_to_dht(departure_info)
 
     async def _periodic_new_node_detection(self):
         """Periodic check for new nodes that have joined the network (discovery only - NO EVENTS)"""
