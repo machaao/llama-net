@@ -292,20 +292,6 @@ async def lifespan(app: FastAPI):
         #     logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
         #     p2p_handler = None
         
-        # Wait for all services to be ready (join event will be sent post-uvicorn)
-        logger.info("⏳ Waiting for all services to be ready...")
-        all_ready = await service_manager.wait_for_all_services(timeout=30.0)
-        
-        # Validate all components are properly initialized
-        if not validate_global_components():
-            logger.error("❌ Component validation failed")
-            raise RuntimeError("Required components not properly initialized")
-        
-        if all_ready:
-            logger.info("🚀 All services started successfully!")
-        else:
-            logger.warning("⚠️ Some services may not be fully ready, but continuing...")
-        
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
         # Cleanup any partially started services
