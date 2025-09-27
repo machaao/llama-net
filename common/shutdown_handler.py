@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 from common.utils import get_host_ip
+from common.error_handler import ErrorHandler
 
 logger = logging.getLogger(__name__)
 
@@ -553,33 +554,16 @@ class DHTPublisherShutdownHandler:
             logger.debug("SSE handler stopped accepting new connections")
     
     async def _cancel_task_impl(self, task: Optional[asyncio.Task], name: str):
-        """Implementation for cancelling an asyncio task safely"""
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                logger.debug(f"✅ {name} task cancelled")
-            except Exception as e:
-                logger.debug(f"❌ Error cancelling {name} task: {e}")
-        else:
-            logger.debug(f"✅ {name} task already done or None")
+        """Use consolidated error handler for task cancellation"""
+        await ErrorHandler.safe_task_cancellation(task, name)
 
     async def _safe_stop_impl(self, component: Any, name: str):
-        """Implementation for safely stopping a component with stop() method"""
-        if component and hasattr(component, 'stop'):
-            await component.stop()
-            logger.debug(f"✅ {name} stopped")
-        else:
-            logger.debug(f"✅ {name} has no stop method or is None")
+        """Use consolidated error handler for component stopping"""
+        await ErrorHandler.safe_component_stop(component, name)
 
     async def _safe_close_impl(self, component: Any, name: str):
-        """Implementation for safely closing a component with close() method"""
-        if component and hasattr(component, 'close'):
-            await component.close()
-            logger.debug(f"✅ {name} closed")
-        else:
-            logger.debug(f"✅ {name} has no close method or is None")
+        """Use consolidated error handler for component closing"""
+        await ErrorHandler.safe_component_close(component, name)
     
     async def _stop_dht_publisher(self):
         """Stop DHT publisher with enhanced cleanup"""

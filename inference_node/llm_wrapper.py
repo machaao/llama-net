@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any, Generator
 from llama_cpp import Llama
 from common.utils import get_logger, normalize_stop_tokens
 from common.metrics_manager import MetricsManager
+from common.error_handler import ErrorHandler
 from inference_node.config import InferenceConfig
 
 logger = get_logger(__name__)

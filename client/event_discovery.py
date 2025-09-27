@@ -752,7 +752,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             ))
     
     def _validate_contact(self, contact) -> bool:
-        """Validate a DHT contact before processing"""
+        """Use centralized validation"""
         return NodeValidator.validate_contact(contact)
 
     async def _estimate_http_port(self, contact) -> int:

@@ -6,6 +6,7 @@ import socket
 import hashlib
 from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
+from common.port_utils import PortManager
 
 logger = get_logger(__name__)
 

@@ -30,47 +30,8 @@ def _cleanup_all():
 # Register cleanup at module import
 atexit.register(_cleanup_all)
 
-class RequestTracker:
-    """Track active requests for overload detection"""
-    
-    def __init__(self):
-        self.active_requests = 0
-        self.total_requests = 0
-        self.start_time = time.time()
-        self._lock = threading.Lock()
-        
-        # Register cleanup
-        register_cleanup(self._cleanup)
-    
-    def _cleanup(self):
-        """Cleanup method for proper resource disposal"""
-        try:
-            self.active_requests = 0
-            self.total_requests = 0
-        except Exception:
-            pass
-    
-    def request_started(self):
-        """Mark request as started"""
-        with self._lock:
-            self.active_requests += 1
-            self.total_requests += 1
-    
-    def request_completed(self):
-        """Mark request as completed"""
-        with self._lock:
-            self.active_requests = max(0, self.active_requests - 1)
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get request statistics"""
-        with self._lock:
-            uptime = time.time() - self.start_time
-            return {
-                "active_requests": self.active_requests,
-                "total_requests": self.total_requests,
-                "requests_per_second": self.total_requests / uptime if uptime > 0 else 0,
-                "uptime": uptime
-            }
+# RequestTracker functionality moved to common/metrics_manager.py
+# Use MetricsManager for all request tracking
 
 class SystemInfo:
     """Collect system information with proper resource management"""
@@ -258,39 +219,8 @@ class SystemInfo:
                 "disk_percent": 0.0
             }
 
-    @staticmethod
-    def is_overloaded(cpu_threshold: float = 80.0, 
-                     memory_threshold: float = 85.0,
-                     active_requests: int = 0,
-                     max_requests: int = 10) -> Dict[str, Any]:
-        """Check if node is overloaded based on configurable thresholds"""
-        load_metrics = SystemInfo.get_current_load()
-        
-        overload_reasons = []
-        
-        # Check CPU threshold
-        if load_metrics["cpu_percent"] > cpu_threshold:
-            overload_reasons.append(f"CPU: {load_metrics['cpu_percent']:.1f}% > {cpu_threshold}%")
-        
-        # Check memory threshold  
-        if load_metrics["memory_percent"] > memory_threshold:
-            overload_reasons.append(f"Memory: {load_metrics['memory_percent']:.1f}% > {memory_threshold}%")
-        
-        # Check request queue threshold
-        if active_requests >= max_requests:
-            overload_reasons.append(f"Requests: {active_requests} >= {max_requests}")
-        
-        return {
-            "is_overloaded": len(overload_reasons) > 0,
-            "overload_reasons": overload_reasons,
-            "load_metrics": load_metrics,
-            "active_requests": active_requests,
-            "thresholds": {
-                "cpu": cpu_threshold,
-                "memory": memory_threshold, 
-                "max_requests": max_requests
-            }
-        }
+    # Overload checking moved to common/metrics_manager.py
+    # Use MetricsManager.is_overloaded() for consistent overload detection
 
     @staticmethod
     def get_all_info() -> Dict[str, Any]:
