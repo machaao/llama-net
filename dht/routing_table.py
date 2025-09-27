@@ -1,6 +1,7 @@
 import time
 from typing import List, Dict, Optional, TYPE_CHECKING, Any
 from common.utils import get_logger
+from common.validation_utils import NodeValidator
 
 if TYPE_CHECKING:
     from dht.kademlia_node import Contact
@@ -176,6 +177,91 @@ class RoutingTable:
         
         return unique_contacts
     
+    def handle_node_join(self, contact: 'Contact', join_source: str = 'unknown') -> bool:
+        """Handle explicit node join event with enhanced tracking"""
+        if contact.node_id == self.node_id:
+            return False  # Don't add ourselves
+        
+        # Validate contact before adding
+        if not NodeValidator.validate_contact(contact):
+            logger.warning(f"Invalid contact in join event: {contact.node_id}")
+            return False
+        
+        # Check if this is truly a new contact
+        existing_contact = self.get_contact_by_id(contact.node_id)
+        is_new_contact = existing_contact is None
+        
+        # Add/update the contact
+        self.add_contact(contact)
+        
+        if is_new_contact:
+            logger.info(f"🆕 Node joined DHT: {contact.node_id[:12]}... ({contact.ip}:{contact.port}) via {join_source}")
+        else:
+            logger.debug(f"🔄 Updated existing contact: {contact.node_id[:8]}... new address: {contact.ip}:{contact.port}")
+        
+        return is_new_contact
+
+    def handle_node_leave(self, node_id: str, leave_reason: str = 'unknown') -> bool:
+        """Handle explicit node leave event"""
+        if node_id == self.node_id:
+            return False  # Don't remove ourselves
+        
+        # Validate node ID
+        if not NodeValidator.validate_node_id(node_id):
+            logger.warning(f"Invalid node ID in leave event: {node_id}")
+            return False
+        
+        # Check if we actually have this contact
+        existing_contact = self.get_contact_by_id(node_id)
+        if existing_contact:
+            self.remove_contact(node_id)
+            logger.info(f"👋 Node left DHT: {node_id[:12]}... (reason: {leave_reason})")
+            return True
+        else:
+            logger.debug(f"🤷 Leave notification for unknown node: {node_id[:8]}...")
+            return False
+
+    def get_contact_by_id(self, node_id: str) -> Optional['Contact']:
+        """Get a contact by node ID"""
+        for bucket in self.buckets.values():
+            for contact in bucket.contacts:
+                if contact.node_id == node_id:
+                    return contact
+        return None
+
+    def update_contact_from_event(self, node_id: str, new_ip: str, new_port: int) -> bool:
+        """Update contact information from network events"""
+        existing_contact = self.get_contact_by_id(node_id)
+        if existing_contact:
+            # Update contact info if it changed
+            if existing_contact.ip != new_ip or existing_contact.port != new_port:
+                logger.info(f"📍 Contact address updated: {node_id[:8]}... {existing_contact.ip}:{existing_contact.port} -> {new_ip}:{new_port}")
+                existing_contact.ip = new_ip
+                existing_contact.port = new_port
+                existing_contact.last_seen = time.time()
+                return True
+            else:
+                # Just update last_seen
+                existing_contact.last_seen = time.time()
+                return False
+        return False
+
+    def get_routing_table_events(self) -> Dict[str, Any]:
+        """Get routing table statistics for event broadcasting"""
+        current_time = time.time()
+        all_contacts = self.get_all_contacts()
+        
+        active_contacts = [c for c in all_contacts if current_time - c.last_seen < 60]
+        recent_contacts = [c for c in all_contacts if current_time - c.last_seen < 30]
+        
+        return {
+            "total_contacts": len(all_contacts),
+            "active_contacts": len(active_contacts),
+            "recent_contacts": len(recent_contacts),
+            "buckets_count": len(self.buckets),
+            "last_updated": current_time
+        }
+
     def get_stats(self) -> Dict[str, Any]:
         """Get routing table statistics"""
         current_time = time.time()

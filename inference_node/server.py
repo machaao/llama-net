@@ -233,6 +233,16 @@ async def lifespan(app: FastAPI):
         await dht_service.initialize(config.node_id, config.dht_port, bootstrap_nodes)
         await service_manager.mark_service_ready("dht_service")
         
+        # Set up DHT routing table coordination
+        await service_manager.mark_service_initializing("dht_coordination")
+        try:
+            await dht_service.coordinate_routing_table_updates()
+            await service_manager.mark_service_ready("dht_coordination")
+            logger.info("✅ DHT routing table coordination established")
+        except Exception as e:
+            await service_manager.mark_service_failed("dht_coordination", str(e))
+            logger.warning(f"DHT coordination failed (continuing without): {e}")
+        
         # 6. Start DHT publisher (with delayed join)
         await service_manager.mark_service_initializing("dht_publisher")
         logger.info("Starting DHT publisher...")

@@ -310,6 +310,43 @@ class SharedDHTService:
         
         return status
     
+    async def coordinate_routing_table_updates(self):
+        """Set up coordination between DHT events and routing table updates"""
+        if not self.is_initialized():
+            logger.warning("Cannot coordinate routing updates: DHT service not initialized")
+            return
+        
+        try:
+            # Set up periodic routing table refresh
+            async def periodic_routing_refresh():
+                while self._kademlia_node and self._kademlia_node.running:
+                    try:
+                        await self._kademlia_node.refresh_routing_table_from_network()
+                        await asyncio.sleep(120)  # Refresh every 2 minutes
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        logger.error(f"Error in periodic routing refresh: {e}")
+                        await asyncio.sleep(30)  # Wait before retry
+            
+            # Start the refresh task
+            asyncio.create_task(periodic_routing_refresh())
+            
+            logger.info("✅ DHT routing table coordination established")
+            
+        except Exception as e:
+            logger.error(f"Failed to coordinate routing table updates: {e}")
+
+    async def handle_external_join_event(self, node_id: str, ip: str, port: int):
+        """Handle join events from external sources (like SSE)"""
+        if self.is_initialized() and self._kademlia_node:
+            await self._kademlia_node.handle_network_join_event(node_id, ip, port, 'external_event')
+
+    async def handle_external_leave_event(self, node_id: str, reason: str = 'external_event'):
+        """Handle leave events from external sources (like SSE)"""
+        if self.is_initialized() and self._kademlia_node:
+            await self._kademlia_node.handle_network_leave_event(node_id, reason)
+
     async def handle_join_notification(self, node_id: str, address: tuple):
         """Handle join notifications and forward to event publisher"""
         try:

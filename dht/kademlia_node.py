@@ -275,7 +275,7 @@ class KademliaNode:
             logger.info(f"🔍 Contact verification: {alive_count}/{len(stale_contacts)} contacts are alive")
     
     async def _verify_contact_with_retry(self, contact, semaphore):
-        """Verify a single contact with retry and HTTP fallback"""
+        """Enhanced contact verification with routing table coordination"""
         async with semaphore:
             # Try DHT ping with retry
             for attempt in range(2):
@@ -312,7 +312,10 @@ class KademliaNode:
             except Exception as e:
                 logger.debug(f"HTTP health check failed for {contact.node_id[:8]}...: {e}")
             
-            logger.info(f"💀 Contact {contact.node_id[:8]}... confirmed unreachable after all verification attempts")
+            # Node is confirmed unreachable - trigger leave event
+            logger.info(f"💀 Contact {contact.node_id[:8]}... confirmed unreachable, triggering leave event")
+            await self.handle_network_leave_event(contact.node_id, 'verification_failed')
+            
             return False
     
     async def _cleanup_storage(self):
@@ -568,6 +571,93 @@ class KademliaNode:
             return response['value']
         return None
     
+    async def handle_network_join_event(self, node_id: str, ip: str, port: int, join_source: str = 'network') -> bool:
+        """Handle network-level join events and update routing table"""
+        if node_id == self.node_id:
+            return False  # Don't handle our own joins
+        
+        # Validate the node ID format
+        if not NodeValidator.validate_node_id(node_id):
+            logger.warning(f"Invalid node ID in join event: {node_id}")
+            return False
+        
+        # Create contact and update routing table
+        contact = Contact(node_id, ip, port)
+        is_new_contact = self.routing_table.handle_node_join(contact, join_source)
+        
+        # Emit routing table update event
+        if is_new_contact:
+            await self._broadcast_routing_table_event("node_added", {
+                'node_id': node_id,
+                'ip': ip,
+                'port': port,
+                'source': join_source
+            })
+        
+        return is_new_contact
+
+    async def handle_network_leave_event(self, node_id: str, leave_reason: str = 'network') -> bool:
+        """Handle network-level leave events and update routing table"""
+        if node_id == self.node_id:
+            return False  # Don't handle our own leaves
+        
+        # Remove from routing table
+        contact_removed = self.routing_table.handle_node_leave(node_id, leave_reason)
+        
+        # Emit routing table update event
+        if contact_removed:
+            await self._broadcast_routing_table_event("node_removed", {
+                'node_id': node_id,
+                'reason': leave_reason
+            })
+        
+        return contact_removed
+
+    async def _broadcast_routing_table_event(self, action: str, event_data: Dict[str, Any]):
+        """Broadcast routing table update events"""
+        try:
+            routing_stats = self.routing_table.get_routing_table_events()
+            
+            await self._broadcast_node_event("routing_table_updated", {
+                'action': action,
+                'routing_stats': routing_stats,
+                'local_node_id': self.node_id,
+                **event_data
+            })
+        except Exception as e:
+            logger.debug(f"Could not broadcast routing table event: {e}")
+
+    async def refresh_routing_table_from_network(self):
+        """Refresh routing table based on current network state"""
+        try:
+            # Get current network nodes from DHT
+            all_nodes_data = await self.find_value("all_nodes")
+            
+            if all_nodes_data:
+                nodes_to_process = all_nodes_data if isinstance(all_nodes_data, list) else [all_nodes_data]
+                
+                for node_data in nodes_to_process:
+                    if isinstance(node_data, dict) and node_data.get('node_id'):
+                        node_id = node_data['node_id']
+                        ip = node_data.get('ip')
+                        port = node_data.get('dht_port', node_data.get('port'))
+                        
+                        if node_id != self.node_id and ip and port:
+                            # Check if this is a new or updated contact
+                            existing_contact = self.routing_table.get_contact_by_id(node_id)
+                            
+                            if not existing_contact:
+                                # New node discovered
+                                await self.handle_network_join_event(node_id, ip, port, 'network_refresh')
+                            else:
+                                # Update existing contact if needed
+                                self.routing_table.update_contact_from_event(node_id, ip, port)
+                
+                logger.info(f"🔄 Routing table refreshed from network data")
+                
+        except Exception as e:
+            logger.error(f"Error refreshing routing table from network: {e}")
+
     async def _find_node_on_contact(self, contact: Contact, target_id: str) -> List[Contact]:
         """Find nodes on a specific contact"""
         message = {
