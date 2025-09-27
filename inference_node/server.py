@@ -349,23 +349,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
-@app.on_event("startup")
-async def on_startup():
-    """Send DHT join event after uvicorn is fully initialized"""
-    global dht_publisher
-    
-    # Wait a brief moment to ensure uvicorn is fully ready
-    await asyncio.sleep(1.0)
-    
-    if dht_publisher and hasattr(dht_publisher, 'send_post_uvicorn_join_event'):
-        try:
-            await dht_publisher.send_post_uvicorn_join_event()
-            logger.info("🚀 DHT join event sent post-uvicorn initialization")
-        except Exception as e:
-            logger.error(f"Failed to send post-uvicorn join event: {e}")
-    else:
-        logger.warning("DHT publisher not available for post-uvicorn join event")
-
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.exists(static_dir):
