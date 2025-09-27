@@ -47,8 +47,7 @@ heartbeat_manager = None
 dht_discovery = None
 node_selector = None
 p2p_handler = None
-sse_handler = None
-sse_network_monitor = None
+sse_manager = None  # Unified SSE manager
 discovery_bridge = None
 shutdown_handler = None
 signal_handler = None
@@ -253,31 +252,24 @@ async def lifespan(app: FastAPI):
         shutdown_handler.register_component('dht_discovery', dht_discovery)
         await service_manager.mark_service_ready("dht_discovery")
         
-        # 8. Initialize SSE handler
-        await service_manager.mark_service_initializing("sse_handler")
-        logger.info("Initializing SSE handler...")
-        sse_handler = SSEHandler()
-        shutdown_handler.register_component('sse_handler', sse_handler)
-        await service_manager.mark_service_ready("sse_handler")
-        
-        # 9. Initialize SSE network monitor
-        await service_manager.mark_service_initializing("sse_network_monitor")
+        # 8. Initialize unified SSE manager
+        await service_manager.mark_service_initializing("sse_manager")
+        logger.info("Initializing unified SSE manager...")
         base_url = f"http://{config.host}:{config.port}"
-        sse_network_monitor = SSENetworkMonitor(base_url)
-        sse_network_monitor.set_sse_handler(sse_handler)
-        await sse_network_monitor.start()
-        shutdown_handler.register_component('sse_network_monitor', sse_network_monitor)
-        await service_manager.mark_service_ready("sse_network_monitor")
+        sse_manager = UnifiedSSEManager(base_url)
+        await sse_manager.start()
+        shutdown_handler.register_component('sse_manager', sse_manager)
+        await service_manager.mark_service_ready("sse_manager")
         
-        # 10. Bridge discovery events to SSE
+        # 9. Bridge discovery events to SSE
         await service_manager.mark_service_initializing("discovery_bridge")
-        if dht_discovery and sse_handler:
-            discovery_bridge = DiscoverySSEBridge(sse_handler)
+        if dht_discovery and sse_manager:
+            discovery_bridge = DiscoverySSEBridge(sse_manager.handler)
             dht_discovery.add_event_listener(discovery_bridge)
             logger.info("✅ Discovery-to-SSE bridge established - real-time events enabled")
         await service_manager.mark_service_ready("discovery_bridge")
         
-        # 11. Initialize node selector
+        # 10. Initialize node selector
         await service_manager.mark_service_initializing("node_selector")
         node_selector = NodeSelector(dht_discovery)
         await service_manager.mark_service_ready("node_selector")

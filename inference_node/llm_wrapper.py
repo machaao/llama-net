@@ -11,7 +11,7 @@ class LlamaWrapper:
     
     def __init__(self, config: InferenceConfig):
         self.config = config
-        self.start_time = time.time()
+        self.metrics_manager = MetricsManager()
         
         logger.info(f"Loading model from {config.model_path}")
         self.llm = Llama(
@@ -22,11 +22,6 @@ class LlamaWrapper:
         )
         logger.info(f"Model loaded successfully: {config.model_name}")
         
-        # Metrics
-        self.total_tokens_generated = 0
-        self.total_generation_time = 0
-        self.request_count = 0
-        
     def generate(self, 
                 prompt: str, 
                 max_tokens: int = 100,
@@ -36,36 +31,36 @@ class LlamaWrapper:
                 stop: Optional[List[str]] = None,
                 repeat_penalty: float = 1.1) -> Dict[str, Any]:
         """Generate text from a prompt"""
-        self.request_count += 1
-        
+        self.metrics_manager.record_request_start()
         start_time = time.time()
         
-        # Normalize stop tokens for llama-cpp-python
-        stop_tokens = normalize_stop_tokens(stop)
-        
-        # Generate text
-        output = self.llm(
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            stop=stop_tokens,
-            repeat_penalty=repeat_penalty
-        )
-        
-        generation_time = time.time() - start_time
-        tokens_generated = output['usage']['completion_tokens'] if 'usage' in output else len(output['choices'][0]['text'].split())
-        
-        # Update metrics
-        self.total_tokens_generated += tokens_generated
-        self.total_generation_time += generation_time
-        
-        return {
-            "text": output['choices'][0]['text'],
-            "tokens_generated": tokens_generated,
-            "generation_time": generation_time
-        }
+        try:
+            # Normalize stop tokens for llama-cpp-python
+            stop_tokens = normalize_stop_tokens(stop)
+            
+            # Generate text
+            output = self.llm(
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                stop=stop_tokens,
+                repeat_penalty=repeat_penalty
+            )
+            
+            generation_time = time.time() - start_time
+            tokens_generated = output['usage']['completion_tokens'] if 'usage' in output else len(output['choices'][0]['text'].split())
+            
+            return {
+                "text": output['choices'][0]['text'],
+                "tokens_generated": tokens_generated,
+                "generation_time": generation_time
+            }
+        finally:
+            generation_time = time.time() - start_time
+            tokens_generated = output['usage']['completion_tokens'] if 'output' in locals() and 'usage' in output else 0
+            self.metrics_manager.record_request_end(tokens_generated, generation_time)
     
     def generate_stream(self, 
                        prompt: str, 
@@ -76,7 +71,7 @@ class LlamaWrapper:
                        stop: Optional[List[str]] = None,
                        repeat_penalty: float = 1.1) -> Generator[Dict[str, Any], None, None]:
         """Generate text with streaming support"""
-        self.request_count += 1
+        self.metrics_manager.record_request_start()
         start_time = time.time()
         
         # Normalize stop tokens for llama-cpp-python
@@ -117,10 +112,9 @@ class LlamaWrapper:
                         if choice.get('finish_reason') is not None:
                             break
         finally:
-            # Update metrics
+            # Update metrics using consolidated manager
             final_time = time.time() - start_time
-            self.total_tokens_generated += total_tokens
-            self.total_generation_time += final_time
+            self.metrics_manager.record_request_end(total_tokens, final_time)
 
     async def generate_stream_async(self, 
                                    prompt: str, 
@@ -143,23 +137,7 @@ class LlamaWrapper:
             yield chunk
     
     def get_metrics(self) -> Dict[str, Any]:
-        """Get metrics about the model"""
-        uptime = int(time.time() - self.start_time)
-        
-        # Calculate tokens per second
-        tps = 0
-        if self.total_generation_time > 0:
-            tps = self.total_tokens_generated / self.total_generation_time
-            
-        # Calculate load (simple implementation)
-        load = min(1.0, self.request_count / 10)  # Arbitrary scale
-        if self.request_count > 0:
-            self.request_count -= 1  # Decay load over time
-            
-        return {
-            "uptime": uptime,
-            "tps": round(tps, 2),
-            "load": round(load, 2),
-            "total_tokens": self.total_tokens_generated,
-            "model": self.config.model_name
-        }
+        """Get metrics about the model using consolidated manager"""
+        metrics = self.metrics_manager.get_comprehensive_metrics()
+        metrics["model"] = self.config.model_name
+        return metrics

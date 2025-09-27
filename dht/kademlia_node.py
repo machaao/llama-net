@@ -45,7 +45,7 @@ class KademliaNode:
     def __init__(self, node_id: str = None, port: int = 8001):
         # CRITICAL: Always use the provided node_id if it's valid (hardware-based)
         if node_id:
-            if self._validate_node_id(node_id):
+            if NodeValidator.validate_node_id(node_id):
                 self.node_id = node_id
                 logger.info(f"✅ Using provided hardware-based node ID: {node_id[:16]}...")
             else:
@@ -83,47 +83,15 @@ class KademliaNode:
         """Generate a random 160-bit node ID"""
         return hashlib.sha1(str(random.random()).encode()).hexdigest()
     
-    def _validate_node_id(self, node_id: str) -> bool:
-        """Validate that node_id is a valid hex string"""
-        try:
-            int(node_id, 16)
-            return True
-        except ValueError:
-            return False
-    
-    def _is_port_available(self, port: int) -> bool:
-        """Check if a UDP port is available"""
-        import socket
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(('', port))
-                return True
-        except OSError:
-            return False
-
-    def _find_available_port(self, start_port: int = 8001) -> int:
-        """Find an available UDP port starting from start_port"""
-        import socket
-        port = start_port
-        while port < start_port + 100:
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    s.bind(('', port))
-                    return port
-            except OSError:
-                port += 1
-        raise RuntimeError(f"No available UDP ports found starting from {start_port}")
     
     async def start(self, bootstrap_nodes: List[Tuple[str, int]] = None):
         """Start the Kademlia node"""
         self.running = True
         
         # Check if port is available before starting
-        if not self._is_port_available(self.port):
+        if not PortManager.is_udp_port_available(self.port):
             original_port = self.port
-            self.port = self._find_available_port(self.port)
+            self.port = PortManager.find_available_udp_port(self.port)
             logger.warning(f"DHT port {original_port} was in use, using {self.port} instead")
         
         # Start UDP server
@@ -144,7 +112,7 @@ class KademliaNode:
             if e.errno == 48:  # Address already in use
                 # Try to find an alternative port
                 original_port = self.port
-                self.port = self._find_available_port(self.port + 1)
+                self.port = PortManager.find_available_udp_port(self.port + 1)
                 logger.warning(f"Port {original_port} still in use, retrying with port {self.port}")
                 self.server = await loop.create_datagram_endpoint(
                     protocol_factory,

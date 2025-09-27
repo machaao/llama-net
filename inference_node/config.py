@@ -12,44 +12,6 @@ logger = get_logger(__name__)
 class InferenceConfig:
     """Configuration for the inference node"""
     
-    def _find_available_port(self, start_port: int = 8000) -> int:
-        """Find an available TCP port starting from start_port"""
-        import socket
-        port = start_port
-        while port < start_port + 100:  # Try up to 100 ports
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    s.bind(('', port))
-                    return port
-            except OSError:
-                port += 1
-        raise RuntimeError(f"No available TCP ports found starting from {start_port}")
-    
-    def _is_udp_port_available(self, port: int) -> bool:
-        """Check if a UDP port is available"""
-        import socket
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(('', port))
-                return True
-        except OSError:
-            return False
-
-    def _find_available_udp_port(self, start_port: int = 8001) -> int:
-        """Find an available UDP port starting from start_port"""
-        import socket
-        port = start_port
-        while port < start_port + 100:
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    s.bind(('', port))
-                    return port
-            except OSError:
-                port += 1
-        raise RuntimeError(f"No available UDP ports found starting from {start_port}")
     
     def __init__(self, model_path: str = None):
         # Parse command line arguments if model_path not provided
@@ -74,52 +36,13 @@ class InferenceConfig:
             self.model_path = args.model_path or load_env_var("MODEL_PATH", "")
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
             
-            # Handle HTTP port
-            if args.port and args.port != 8000:  # User specified a non-default port
-                # Check if the specified port is available
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s.bind(('', args.port))
-                    self.port = args.port
-                except OSError:
-                    logger.warning(f"Specified port {args.port} is not available, finding alternative")
-                    self.port = self._find_available_port(args.port)
-                    logger.info(f"Using available port: {self.port}")
-            elif load_env_var("PORT", None):
-                specified_port = int(load_env_var("PORT"))
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s.bind(('', specified_port))
-                    self.port = specified_port
-                except OSError:
-                    logger.warning(f"Environment PORT {specified_port} is not available, finding alternative")
-                    self.port = self._find_available_port(specified_port)
-                    logger.info(f"Using available port: {self.port}")
-            else:
-                self.port = self._find_available_port(8000)
-                logger.info(f"Using available port: {self.port}")
+            # Handle HTTP port using consolidated utilities
+            preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))
+            self.port = PortManager.get_port_with_fallback(preferred_http_port, 'tcp')
 
-            # Handle DHT port  
-            if args.dht_port and args.dht_port != 8001:  # User specified a non-default port
-                if self._is_udp_port_available(args.dht_port):
-                    self.dht_port = args.dht_port
-                else:
-                    logger.warning(f"Specified DHT port {args.dht_port} is not available, finding alternative")
-                    self.dht_port = self._find_available_udp_port(args.dht_port)
-                    logger.info(f"Using available DHT port: {self.dht_port}")
-            elif load_env_var("DHT_PORT", None):
-                specified_dht_port = int(load_env_var("DHT_PORT"))
-                if self._is_udp_port_available(specified_dht_port):
-                    self.dht_port = specified_dht_port
-                else:
-                    logger.warning(f"Environment DHT_PORT {specified_dht_port} is not available, finding alternative")
-                    self.dht_port = self._find_available_udp_port(specified_dht_port)
-                    logger.info(f"Using available DHT port: {self.dht_port}")
-            else:
-                self.dht_port = self._find_available_udp_port(8001)
-                logger.info(f"Using available DHT port: {self.dht_port}")
+            # Handle DHT port using consolidated utilities  
+            preferred_dht_port = args.dht_port if args.dht_port != 8001 else int(load_env_var("DHT_PORT", 8001))
+            self.dht_port = PortManager.get_port_with_fallback(preferred_dht_port, 'udp')
                 
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(args.node_id, self.port)
@@ -129,34 +52,13 @@ class InferenceConfig:
             self.model_path = model_path
             self.host = load_env_var("HOST", "0.0.0.0")
             
-            # Handle HTTP port
-            if load_env_var("PORT", None):
-                specified_port = int(load_env_var("PORT"))
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s.bind(('', specified_port))
-                    self.port = specified_port
-                except OSError:
-                    logger.warning(f"Environment PORT {specified_port} is not available, finding alternative")
-                    self.port = self._find_available_port(specified_port)
-                    logger.info(f"Using available port: {self.port}")
-            else:
-                self.port = self._find_available_port(8000)
-                logger.info(f"Using available port: {self.port}")
+            # Handle HTTP port using consolidated utilities
+            preferred_http_port = int(load_env_var("PORT", 8000))
+            self.port = PortManager.get_port_with_fallback(preferred_http_port, 'tcp')
 
-            # Handle DHT port
-            if load_env_var("DHT_PORT", None):
-                specified_dht_port = int(load_env_var("DHT_PORT"))
-                if self._is_udp_port_available(specified_dht_port):
-                    self.dht_port = specified_dht_port
-                else:
-                    logger.warning(f"Environment DHT_PORT {specified_dht_port} is not available, finding alternative")
-                    self.dht_port = self._find_available_udp_port(specified_dht_port)
-                    logger.info(f"Using available DHT port: {self.dht_port}")
-            else:
-                self.dht_port = self._find_available_udp_port(8001)
-                logger.info(f"Using available DHT port: {self.dht_port}")
+            # Handle DHT port using consolidated utilities
+            preferred_dht_port = int(load_env_var("DHT_PORT", 8001))
+            self.dht_port = PortManager.get_port_with_fallback(preferred_dht_port, 'udp')
                 
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(None, self.port)

@@ -752,29 +752,7 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
     
     def _validate_contact(self, contact) -> bool:
         """Validate a DHT contact before processing"""
-        try:
-            # Check required fields
-            if not contact.node_id or not contact.ip:
-                return False
-            
-            # Validate node ID format
-            if len(contact.node_id) != 40:  # SHA-1 hex length
-                return False
-            
-            # Validate IP format
-            import ipaddress
-            ipaddress.IPv4Address(contact.ip)
-            
-            # Check if contact is too old
-            if hasattr(contact, 'last_seen'):
-                if time.time() - contact.last_seen > 300:  # 5 minutes
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            logger.debug(f"Contact validation error: {e}")
-            return False
+        return NodeValidator.validate_contact(contact)
 
     async def _estimate_http_port(self, contact) -> int:
         """Enhanced HTTP port estimation based on DHT port and common patterns"""
