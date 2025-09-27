@@ -489,6 +489,10 @@ class EventBasedDHTPublisher:
         try:
             from common.utils import get_host_ip
             
+            # Record join timestamp
+            join_timestamp = time.time()
+            self._join_timestamp = join_timestamp
+            
             # Get current network info
             primary_ip = get_host_ip()
             available_ips = [primary_ip]
@@ -514,14 +518,15 @@ class EventBasedDHTPublisher:
                 'dht_port': self.config.dht_port,
                 'available_ips': available_ips,
                 'join_reason': 'all_services_ready',
-                'timestamp': time.time(),
-                'delayed_join': True
+                'timestamp': join_timestamp,
+                'delayed_join': True,
+                'services_ready': True
             })
             
             self._join_event_sent = True
             self._has_published_before = True
             
-            logger.info(f"🎉 DHT join event sent after all services ready: {self.config.node_id[:12]}...")
+            logger.info(f"🎉 DHT join event sent after all services ready: {self.config.node_id[:12]}... (timestamp: {join_timestamp})")
             
             # Update node info to remove join_pending flag
             await self._update_node_info_post_join()

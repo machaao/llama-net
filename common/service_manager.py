@@ -47,6 +47,7 @@ class ServiceInitializationManager:
         self.register_service("system_info", dependencies={"config"})
         self.register_service("heartbeat_manager", dependencies={"llm"})
         self.register_service("dht_service", dependencies={"config"})
+        self.register_service("dht_publisher", dependencies={"dht_service"})
         self.register_service("dht_discovery", dependencies={"dht_service"})
         self.register_service("sse_handler", dependencies={"dht_discovery"})
         self.register_service("sse_network_monitor", dependencies={"sse_handler"})

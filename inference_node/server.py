@@ -236,10 +236,12 @@ async def lifespan(app: FastAPI):
         await service_manager.mark_service_ready("dht_service")
         
         # 6. Start DHT publisher (with delayed join)
+        await service_manager.mark_service_initializing("dht_publisher")
         logger.info("Starting DHT publisher...")
         dht_publisher = DHTPublisher(config, llm.get_metrics)
         await dht_publisher.start()  # Join event will be delayed
         shutdown_handler.register_component('dht_publisher', dht_publisher)
+        await service_manager.mark_service_ready("dht_publisher")
         
         # Connect event publisher to DHT service for bootstrap event coordination
         if dht_publisher and dht_service.is_initialized():
@@ -1720,9 +1722,23 @@ async def get_services_status():
     """Get initialization status of all services"""
     service_manager = get_service_manager()
     
+    # Get DHT join status
+    dht_join_sent = False
+    join_timestamp = None
+    
+    if dht_publisher and hasattr(dht_publisher, '_join_event_sent'):
+        dht_join_sent = dht_publisher._join_event_sent
+        
+    if dht_publisher and hasattr(dht_publisher, '_join_timestamp'):
+        join_timestamp = dht_publisher._join_timestamp
+    
     return {
         "service_initialization": service_manager.get_initialization_status(),
-        "dht_join_sent": getattr(dht_publisher, '_join_event_sent', False) if dht_publisher else False,
+        "dht_join_status": {
+            "join_event_sent": dht_join_sent,
+            "join_timestamp": join_timestamp,
+            "delayed_join_enabled": True
+        },
         "timestamp": time.time()
     }
 
