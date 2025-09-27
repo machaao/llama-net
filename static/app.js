@@ -362,7 +362,7 @@ class LlamaNetUI {
             node_id: nodeData.node_id || nodeData.id,
             ip: nodeData.ip || 'unknown',
             port: nodeData.port || nodeData.http_port || 8000,
-            model: nodeData.model || 'unknown',
+            model: nodeData.model || nodeData.model_name || nodeData.id || 'unknown', // Add fallback to id
             load: nodeData.load || 0,
             tps: nodeData.tps || 0,
             uptime: nodeData.uptime || 0,
@@ -659,6 +659,9 @@ class LlamaNetUI {
                 const dhtData = await dhtResponse.json();
                 const modelsData = await modelsResponse.json();
                 
+                // Debug log to check the structure
+                console.log('🔍 Models data structure:', modelsData);
+                
                 // Update activeNodes from fresh API data
                 this.updateActiveNodesFromAPI(modelsData);
                 
@@ -684,9 +687,18 @@ class LlamaNetUI {
         
         if (modelsData.data) {
             modelsData.data.forEach(model => {
+                const modelName = model.id; // The model name is in the 'id' field
+                
                 if (model.nodes) {
                     model.nodes.forEach(node => {
-                        const normalizedNode = this.normalizeNodeData(node);
+                        // Ensure the node has the correct model name
+                        const nodeWithModel = {
+                            ...node,
+                            model: modelName, // Explicitly set the model name from the parent model object
+                            model_name: modelName // Add backup field
+                        };
+                        
+                        const normalizedNode = this.normalizeNodeData(nodeWithModel);
                         this.activeNodes.set(normalizedNode.node_id, normalizedNode);
                         
                         // Set status based on last_seen time since we don't have event data
