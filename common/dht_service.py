@@ -146,7 +146,7 @@ class SharedDHTService:
             return False
     
     async def _start_with_bootstrap_events(self):
-        """Start Kademlia node with enhanced bootstrap event handling"""
+        """Start Kademlia node with enhanced bootstrap event handling (NO JOIN EVENTS)"""
         if not self._bootstrap_nodes:
             # Starting as bootstrap node
             await self._kademlia_node.start([])
@@ -156,7 +156,8 @@ class SharedDHTService:
                     'node_id': self._node_id,
                     'port': self._port,
                     'dht_port': self._kademlia_node.port,
-                    'role': 'bootstrap_node'
+                    'role': 'bootstrap_node',
+                    'event_type': 'bootstrap_only'  # Clearly mark as bootstrap event
                 })
             
             logger.info("🌟 Started as bootstrap node")
@@ -168,7 +169,8 @@ class SharedDHTService:
                 await self._event_publisher._broadcast_node_event("bootstrap_join_initiated", {
                     'node_id': self._node_id,
                     'bootstrap_nodes': self._bootstrap_nodes,
-                    'join_method': 'enhanced_bootstrap'
+                    'join_method': 'enhanced_bootstrap',
+                    'event_type': 'bootstrap_only'  # Clearly mark as bootstrap event
                 })
             
             await self._kademlia_node.start(self._bootstrap_nodes)
@@ -181,7 +183,8 @@ class SharedDHTService:
                     'node_id': self._node_id,
                     'successful_connections': len(contacts),
                     'bootstrap_nodes': self._bootstrap_nodes,
-                    'join_success': len(contacts) > 0
+                    'join_success': len(contacts) > 0,
+                    'event_type': 'bootstrap_only'  # Clearly mark as bootstrap event
                 })
             
             if len(contacts) > 0:

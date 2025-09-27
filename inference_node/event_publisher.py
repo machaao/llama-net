@@ -1025,7 +1025,7 @@ class EventBasedDHTPublisher:
         })
 
     async def _periodic_new_node_detection(self):
-        """Periodic check for new nodes that have joined the network (discovery only)"""
+        """Periodic check for new nodes that have joined the network (discovery only - NO EVENTS)"""
         try:
             # Get all published nodes from DHT
             all_nodes_data = await self.kademlia_node.find_value("all_nodes")
@@ -1037,7 +1037,7 @@ class EventBasedDHTPublisher:
 
             current_time = time.time()
 
-            # Track known nodes to detect new ones
+            # Track known nodes to detect new ones (for internal tracking only)
             if not hasattr(self, '_known_node_ids'):
                 self._known_node_ids = set()
 
@@ -1061,14 +1061,15 @@ class EventBasedDHTPublisher:
                         if is_reachable:
                             self._known_node_ids.add(node_id)
                             logger.debug(f"🔍 Discovered existing node: {node_id[:8]}... (last seen: {current_time - last_seen:.0f}s ago)")
+                            # NO EVENT SENT - only internal tracking
 
-            # Note: No join events sent here - only the authoritative post-uvicorn join event is sent
+            # Note: NO join events sent here - only the authoritative post-uvicorn join event is sent
                 
         except Exception as e:
             logger.error(f"Error in periodic new node detection: {e}")
 
     async def _enhanced_node_discovery(self):
-        """Enhanced node discovery with proper event handling"""
+        """Enhanced node discovery with proper event handling (NO JOIN EVENTS)"""
         try:
             # Get all published nodes with retry logic
             all_nodes_data = await self._get_published_nodes_with_retry()
@@ -1099,13 +1100,14 @@ class EventBasedDHTPublisher:
                     if is_reachable:
                         discovered_nodes.append(node_data)
                         
-                        # Check if this is a new discovery
+                        # Check if this is a new discovery (internal tracking only)
                         if not hasattr(self, '_known_node_ids'):
                             self._known_node_ids = set()
                         
                         if node_id not in self._known_node_ids:
                             self._known_node_ids.add(node_id)
                             logger.debug(f"🔍 Discovered existing node: {node_id[:8]}... via DHT scan")
+                            # NO EVENT SENT - only internal tracking
             
             # Log discovery summary (no event needed)
             if discovered_nodes:

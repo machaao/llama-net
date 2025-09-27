@@ -67,13 +67,10 @@ class DiscoverySSEBridge(NodeEventListener):
         try:
             # Convert discovery events to SSE events
             if event.event_type == NodeEventType.NODE_JOINED:
-                await self.sse_handler.broadcast_event("node_joined", {
-                    "node_info": event.node_info.dict() if event.node_info else None,
-                    "timestamp": event.timestamp,
-                    "source": "discovery_bridge",
-                    "event_driven": True
-                })
-                logger.info(f"🔗 Bridged NODE_JOINED event to SSE: {event.node_info.node_id[:8]}..." if event.node_info else "unknown")
+                # REMOVED: Don't broadcast join events from discovery
+                # Only the post-uvicorn join event should be sent
+                logger.debug(f"🔇 Suppressed discovery NODE_JOINED event: {event.node_info.node_id[:8]}..." if event.node_info else "unknown")
+                return  # Skip broadcasting this event
                 
             elif event.event_type == NodeEventType.NODE_LEFT:
                 await self.sse_handler.broadcast_event("node_left", {
