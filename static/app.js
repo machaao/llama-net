@@ -2704,9 +2704,11 @@ function refreshNodeInfo(nodeId) {
 document.addEventListener('DOMContentLoaded', async () => {
     llamaNetUI = new LlamaNetUI();
     
-    // Call refreshNetworkDataOnTopologyChange on document load
+    // Call both refreshNetworkDataOnTopologyChange and refresh button flow on document load
     try {
         await llamaNetUI.refreshNetworkDataOnTopologyChange();
+        // Also trigger the refresh button flow to ensure complete initialization
+        await llamaNetUI.refreshNetworkStatus();
     } catch (error) {
         console.warn('Initial network data refresh failed:', error);
     }
