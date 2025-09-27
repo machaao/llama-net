@@ -167,6 +167,9 @@ class LlamaNetUI {
     }
     
     async loadInitialNetworkStatus() {
+        // Show loading state immediately
+        this.showNetworkLoading();
+        
         // Load initial network status using consolidated endpoints
         try {
             const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
@@ -180,7 +183,13 @@ class LlamaNetUI {
                 const modelsData = await modelsResponse.json();
                 const statsData = await statsResponse.json();
                 
-                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
+                // Update activeNodes from API data
+                this.updateActiveNodesFromAPI(modelsData);
+                
+                // Force update the display with initial data
+                this.updateNetworkDisplayRealTime();
+                
+                console.log('✅ Initial network status loaded successfully');
             } else {
                 this.showNetworkError('Unable to connect to LlamaNet node');
             }
@@ -1607,6 +1616,20 @@ class LlamaNetUI {
         }, 3000);
     }
     
+    showNetworkLoading() {
+        const container = document.getElementById('network-status');
+        if (container) {
+            container.innerHTML = `
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Discovering nodes...</p>
+                </div>
+            `;
+        }
+    }
+    
     showNetworkError(message) {
         const container = document.getElementById('network-status');
         container.innerHTML = `
@@ -2702,15 +2725,26 @@ function refreshNodeInfo(nodeId) {
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('🚀 Initializing LlamaNet UI...');
+    
     llamaNetUI = new LlamaNetUI();
     
-    // Call both refreshNetworkDataOnTopologyChange and refresh button flow on document load
+    // Ensure initial network status is loaded
     try {
+        // Wait a bit for the UI to initialize
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Force initial network data load
+        await llamaNetUI.loadInitialNetworkStatus();
+        
+        // Also call the refresh methods for complete initialization
         await llamaNetUI.refreshNetworkDataOnTopologyChange();
-        // Also trigger the refresh button flow to ensure complete initialization
-        await llamaNetUI.refreshNetworkStatus();
+        
+        console.log('✅ LlamaNet UI initialization complete');
     } catch (error) {
         console.warn('Initial network data refresh failed:', error);
+        // Still show something in the network status div
+        llamaNetUI.showNetworkError('Failed to load initial network data');
     }
 });
 
