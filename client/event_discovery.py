@@ -153,19 +153,29 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
             logger.debug(f"Removed event listener: {type(listener).__name__}")
     
     async def _emit_event(self, event: NodeEvent):
-        """Emit an event to all listeners"""
-        await self.event_queue.put(event)
-        
-        # Also notify listeners directly for immediate processing
-        for listener in self.event_listeners:
-            try:
-                if hasattr(listener, 'on_node_event'):
-                    await listener.on_node_event(event)
-                else:
-                    # Handle function-based listeners
-                    await listener(event)
-            except Exception as e:
-                logger.error(f"Error in direct event listener {type(listener).__name__}: {e}")
+        """Emit an event to all listeners with error handling"""
+        try:
+            # Add to event queue for processing
+            await self.event_queue.put(event)
+            
+            # Also notify listeners directly for immediate processing
+            for listener in self.event_listeners:
+                try:
+                    if hasattr(listener, 'on_node_event'):
+                        await listener.on_node_event(event)
+                    else:
+                        # Handle function-based listeners
+                        await listener(event)
+                except Exception as e:
+                    logger.error(f"Error in direct event listener {type(listener).__name__}: {e}")
+            
+            # Log the event emission
+            event_type_name = event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type)
+            node_id = event.node_info.node_id[:8] + "..." if event.node_info else "N/A"
+            logger.debug(f"📡 Emitted {event_type_name} event for node {node_id}")
+            
+        except Exception as e:
+            logger.error(f"Error emitting event {event.event_type}: {e}")
     
     async def _process_events(self):
         """Process events from the queue"""
@@ -298,28 +308,55 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 logger.warning(f"❌ Contact validation failed for {contact.node_id[:8]}...")
                 return
             
+            # Check if this is truly a new contact (not just an update)
+            is_truly_new = contact.node_id not in self.known_node_ids
+            
             # Try to get node info via HTTP with retry
             node_info = await self._get_node_info_from_contact_enhanced(contact)
             
             if node_info:
-                # Apply filtering with enhanced validation
-                if self._should_include_node_enhanced(node_info, contact):
-                    await self._emit_event(NodeEvent(
-                        event_type=NodeEventType.NODE_JOINED,
-                        node_info=node_info,
-                        timestamp=time.time(),
-                        metadata={
-                            "source": "dht_contact",
-                            "discovery_method": "http_probe" if node_info.model != 'unknown' else "dht_fallback",
-                            "contact_ip": contact.ip,
-                            "contact_port": getattr(contact, 'port', None),
-                            "sequence_number": sequence_number,
-                            "validation_passed": True
-                        }
-                    ))
-                    logger.info(f"✅ Emitted sequenced NODE_JOINED event (seq: {sequence_number}) for {contact.node_id[:8]}...")
+                # Apply filtering for internal tracking
+                should_track = self._should_include_node_enhanced(node_info, contact)
+                
+                if should_track:
+                    # Add to internal tracking first
+                    self.active_nodes[node_info.node_id] = node_info
+                    self.known_node_ids.add(node_info.node_id)
+                    
+                    # ALWAYS emit event for new nodes, regardless of filtering
+                    if is_truly_new:
+                        await self._emit_event(NodeEvent(
+                            event_type=NodeEventType.NODE_JOINED,
+                            node_info=node_info,
+                            timestamp=time.time(),
+                            metadata={
+                                "source": "dht_contact",
+                                "discovery_method": "http_probe" if node_info.model != 'unknown' else "dht_fallback",
+                                "contact_ip": contact.ip,
+                                "contact_port": getattr(contact, 'port', None),
+                                "sequence_number": sequence_number,
+                                "validation_passed": True,
+                                "filtered_in": True
+                            }
+                        ))
+                        logger.info(f"✅ Emitted NODE_JOINED event (seq: {sequence_number}) for {contact.node_id[:8]}...")
+                    else:
+                        # This is an update to existing node
+                        await self._emit_event(NodeEvent(
+                            event_type=NodeEventType.NODE_UPDATED,
+                            node_info=node_info,
+                            timestamp=time.time(),
+                            metadata={
+                                "source": "dht_contact_update",
+                                "sequence_number": sequence_number,
+                                "update_reason": "contact_refresh"
+                            }
+                        ))
+                        logger.debug(f"✅ Emitted NODE_UPDATED event (seq: {sequence_number}) for {contact.node_id[:8]}...")
                 else:
                     logger.debug(f"❌ Node {contact.node_id[:8]}... filtered out by enhanced inclusion rules")
+                    # Still track that we've seen this node to avoid repeated processing
+                    self.known_node_ids.add(contact.node_id)
             else:
                 logger.warning(f"❌ Could not create node info for contact {contact.node_id[:8]}... (seq: {sequence_number})")
                 
@@ -560,6 +597,129 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         
         # Re-evaluate all current nodes
         asyncio.create_task(self._reevaluate_all_nodes())
+
+    async def _update_active_nodes_from_data_with_events(self, nodes_data, previous_nodes):
+        """Update active nodes from data with proper event emission"""
+        new_active_nodes = {}
+        
+        for node_data in nodes_data:
+            if isinstance(node_data, dict) and node_data.get('node_id'):
+                try:
+                    node_info = NodeInfo(**node_data)
+                    if self._should_include_node(node_info):
+                        node_id = node_info.node_id
+                        new_active_nodes[node_id] = node_info
+                        
+                        # Check if this is a new node or an update
+                        if node_id not in previous_nodes:
+                            # New node discovered
+                            await self._emit_event(NodeEvent(
+                                event_type=NodeEventType.NODE_JOINED,
+                                node_info=node_info,
+                                timestamp=time.time(),
+                                metadata={
+                                    "source": "data_refresh",
+                                    "discovery_method": "topology_refresh",
+                                    "newly_discovered": True
+                                }
+                            ))
+                            logger.info(f"✅ Emitted NODE_JOINED event for {node_id[:8]}... (discovered in data refresh)")
+                        else:
+                            # Check for significant updates
+                            previous_node = previous_nodes[node_id]
+                            if self._is_significant_node_update(previous_node, node_info):
+                                await self._emit_event(NodeEvent(
+                                    event_type=NodeEventType.NODE_UPDATED,
+                                    node_info=node_info,
+                                    timestamp=time.time(),
+                                    metadata={
+                                        "source": "data_refresh",
+                                        "update_reason": "topology_refresh",
+                                        "previous_last_seen": previous_node.last_seen
+                                    }
+                                ))
+                                logger.debug(f"✅ Emitted NODE_UPDATED event for {node_id[:8]}... (updated in data refresh)")
+                        
+                        # Set status based on last_seen time
+                        time_since_last_seen = (time.time() - node_info.last_seen)
+                        if time_since_last_seen < 60:
+                            self.nodeStatuses.set(node_id, 'online')
+                            self.nodeLastEvent.set(node_id, time.time() * 1000)  # Convert to milliseconds
+                            self.nodeEventTypes.set(node_id, 'topology_refresh')
+                        else:
+                            self.nodeStatuses.set(node_id, 'unknown')
+                            
+                except Exception as e:
+                    logger.debug(f"Failed to process node data: {e}")
+        
+        # Update the active nodes
+        self.active_nodes = new_active_nodes
+        
+        logger.info(f"📊 Updated activeNodes from data with events: {len(self.active_nodes)} nodes")
+
+    def _is_significant_node_update(self, previous_node, current_node):
+        """Check if a node update is significant enough to emit an event"""
+        try:
+            # Check for significant changes
+            if abs(previous_node.load - current_node.load) > 0.1:
+                return True
+            if abs(previous_node.tps - current_node.tps) > 1.0:
+                return True
+            if previous_node.ip != current_node.ip or previous_node.port != current_node.port:
+                return True
+            if current_node.last_seen - previous_node.last_seen > 30:  # 30 seconds
+                return True
+            
+            return False
+        except Exception as e:
+            logger.debug(f"Error checking node update significance: {e}")
+            return False
+
+    def get_event_stats(self):
+        """Get statistics about event emission for debugging"""
+        return {
+            "active_nodes": len(self.active_nodes),
+            "known_node_ids": len(self.known_node_ids),
+            "event_listeners": len(self.event_listeners),
+            "event_queue_size": self.event_queue.qsize() if hasattr(self.event_queue, 'qsize') else 0,
+            "last_dht_change": self.last_dht_change,
+            "running": self.running
+        }
+
+    async def debug_emit_test_events(self):
+        """Debug method to test event emission"""
+        logger.info("🧪 Emitting test events for debugging...")
+        
+        # Test join event
+        test_node = NodeInfo(
+            node_id="test_node_" + str(int(time.time())),
+            ip="127.0.0.1",
+            port=8999,
+            model="test_model",
+            load=0.5,
+            tps=10.0,
+            uptime=100,
+            last_seen=int(time.time())
+        )
+        
+        await self._emit_event(NodeEvent(
+            event_type=NodeEventType.NODE_JOINED,
+            node_info=test_node,
+            timestamp=time.time(),
+            metadata={"source": "debug_test", "test": True}
+        ))
+        
+        # Wait a bit then emit leave event
+        await asyncio.sleep(1)
+        
+        await self._emit_event(NodeEvent(
+            event_type=NodeEventType.NODE_LEFT,
+            node_info=test_node,
+            timestamp=time.time(),
+            metadata={"source": "debug_test", "test": True, "reason": "test_cleanup"}
+        ))
+        
+        logger.info("🧪 Test events emitted")
     
     async def _verify_node_actually_down(self, node_info: NodeInfo) -> bool:
         """Verify that a node is actually down before emitting 'left' event"""
@@ -613,23 +773,37 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 
                 if isinstance(result, Exception):
                     logger.debug(f"Enhanced health check error for {node_id[:8]}...: {result}")
+                    # Treat exceptions as node failure
+                    await self._handle_node_departure_confirmed(node_id, node_info, "health_check_exception")
                     continue
                 
                 is_alive = result
                 if not is_alive:
                     # Validate departure before emitting event
                     if await self._validate_node_departure(node_id, node_info):
-                        logger.info(f"Node {node_id[:8]}... confirmed departed via enhanced health check")
-                        await self._emit_event(NodeEvent(
-                            event_type=NodeEventType.NODE_LEFT,
-                            node_info=node_info,
-                            timestamp=time.time(),
-                            metadata={
-                                "reason": "enhanced_health_check_failed", 
-                                "last_seen": node_info.last_seen,
-                                "validation_method": "multi_endpoint_check"
-                            }
-                        ))
+                        await self._handle_node_departure_confirmed(node_id, node_info, "enhanced_health_check_failed")
+
+    async def _handle_node_departure_confirmed(self, node_id: str, node_info: NodeInfo, reason: str):
+        """Handle confirmed node departure with proper event emission"""
+        logger.info(f"Node {node_id[:8]}... confirmed departed via {reason}")
+        
+        # Remove from active tracking
+        if node_id in self.active_nodes:
+            del self.active_nodes[node_id]
+        
+        # Emit leave event
+        await self._emit_event(NodeEvent(
+            event_type=NodeEventType.NODE_LEFT,
+            node_info=node_info,
+            timestamp=time.time(),
+            metadata={
+                "reason": reason, 
+                "last_seen": node_info.last_seen,
+                "validation_method": "enhanced_health_check",
+                "graceful": False
+            }
+        ))
+        logger.info(f"✅ Emitted NODE_LEFT event for {node_id[:8]}... (reason: {reason})")
 
     async def _health_check_node_enhanced(self, node_id: str, node_info: NodeInfo, semaphore) -> bool:
         """Enhanced health check with multiple validation methods"""
