@@ -323,7 +323,8 @@ class LlamaNetUI {
                 
             case 'network_changed':
                 console.log('🌐 Network topology changed (SSE)');
-                this.updateNetworkDisplayRealTime();
+                // Force refresh of network data when topology changes
+                this.refreshNetworkDataOnTopologyChange();
                 break;
                 
             case 'heartbeat':
@@ -643,6 +644,66 @@ class LlamaNetUI {
                 indicator.title = 'Real-time updates disconnected';
             }
         });
+    }
+    
+    async refreshNetworkDataOnTopologyChange() {
+        try {
+            // When network topology changes, we need to refresh our node data
+            // since individual node events might not capture all changes
+            const [dhtResponse, modelsResponse] = await Promise.all([
+                fetch(`${this.baseUrl}/dht/status`).catch(() => null),
+                fetch(`${this.baseUrl}/v1/models/network`).catch(() => null)
+            ]);
+            
+            if (dhtResponse && dhtResponse.ok && modelsResponse && modelsResponse.ok) {
+                const dhtData = await dhtResponse.json();
+                const modelsData = await modelsResponse.json();
+                
+                // Update activeNodes from fresh API data
+                this.updateActiveNodesFromAPI(modelsData);
+                
+                // Update the display with fresh data
+                this.updateNetworkDisplayRealTime();
+                
+                console.log('🔄 Network data refreshed due to topology change');
+            } else {
+                console.warn('⚠️ Could not refresh network data after topology change');
+                // Still try to update display with current data
+                this.updateNetworkDisplayRealTime();
+            }
+        } catch (error) {
+            console.error('Error refreshing network data on topology change:', error);
+            // Fallback to current display update
+            this.updateNetworkDisplayRealTime();
+        }
+    }
+    
+    updateActiveNodesFromAPI(modelsData) {
+        // Clear and rebuild activeNodes from fresh API data
+        this.activeNodes.clear();
+        
+        if (modelsData.data) {
+            modelsData.data.forEach(model => {
+                if (model.nodes) {
+                    model.nodes.forEach(node => {
+                        const normalizedNode = this.normalizeNodeData(node);
+                        this.activeNodes.set(normalizedNode.node_id, normalizedNode);
+                        
+                        // Set status based on last_seen time since we don't have event data
+                        const timeSinceLastSeen = (Date.now() / 1000) - normalizedNode.last_seen;
+                        if (timeSinceLastSeen < 60) {
+                            this.nodeStatuses.set(normalizedNode.node_id, 'online');
+                            this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
+                            this.nodeEventTypes.set(normalizedNode.node_id, 'topology_refresh');
+                        } else {
+                            this.nodeStatuses.set(normalizedNode.node_id, 'unknown');
+                        }
+                    });
+                }
+            });
+        }
+        
+        console.log(`📊 Updated activeNodes from API: ${this.activeNodes.size} nodes`);
     }
     
     stopSSENetworkMonitoring() {
