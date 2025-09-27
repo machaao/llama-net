@@ -1,6 +1,7 @@
 import asyncio
 import time
 import hashlib
+import uuid
 from typing import Dict, Any, List, Tuple, Optional
 from common.utils import get_logger, get_host_ip
 from inference_node.config import InferenceConfig
@@ -158,43 +159,75 @@ class EventBasedDHTPublisher:
             logger.info(f"Hardware fingerprint: {summary}")
     
     async def stop(self):
-        """Stop the event-based publisher with enhanced departure broadcasting"""
+        """Stop the event-based publisher with enhanced departure broadcasting and waiting"""
         logger.info("Stopping event-based DHT publisher...")
         
-        # Prepare departure info
+        # Prepare comprehensive departure info
         departure_info = {
             'node_id': self.config.node_id,
             'ip': get_host_ip(),
             'port': self.config.port,
             'model': self.config.model_name,
             'reason': 'graceful_shutdown',
-            'last_seen': int(time.time())
+            'last_seen': int(time.time()),
+            'departure_timestamp': time.time(),
+            'graceful': True,
+            'final_metrics': self.metrics_callback() if self.metrics_callback else {}
         }
         
-        # Broadcast departure via both SSE and DHT
-        try:
-            # Send via SSE (existing)
-            await asyncio.wait_for(
-                self._broadcast_node_event("node_left", departure_info),
-                timeout=2.0
-            )
-            logger.info("✅ Departure event broadcasted via SSE")
-            
-            # Send via DHT (NEW)
-            await asyncio.wait_for(
-                self._publish_node_left_to_dht(departure_info),
-                timeout=2.0
-            )
-            logger.info("✅ Departure event published to DHT")
-            
-        except asyncio.TimeoutError:
-            logger.warning("⏰ Departure broadcast timed out during shutdown")
-        except Exception as e:
-            logger.debug(f"Departure broadcast failed during shutdown: {e}")
-        
+        # Set running to False immediately to stop monitoring
         self.running = False
         
-        # Cancel tasks quickly
+        # Send departure events via multiple channels with retries
+        departure_success = False
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"📤 Sending departure notifications (attempt {attempt + 1}/{max_attempts})...")
+                
+                # Send via SSE (existing)
+                sse_task = asyncio.create_task(
+                    self._broadcast_node_event("node_left", departure_info)
+                )
+                
+                # Send via DHT (enhanced)
+                dht_task = asyncio.create_task(
+                    self._publish_node_left_to_dht(departure_info)
+                )
+                
+                # Send direct notifications to known contacts
+                contacts_task = asyncio.create_task(
+                    self._send_departure_to_contacts(departure_info)
+                )
+                
+                # Wait for all departure notifications with timeout
+                await asyncio.wait_for(
+                    asyncio.gather(sse_task, dht_task, contacts_task, return_exceptions=True),
+                    timeout=3.0
+                )
+                
+                departure_success = True
+                logger.info("✅ Departure notifications sent successfully")
+                break
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ Departure notification attempt {attempt + 1} timed out")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1.0)  # Brief wait before retry
+            except Exception as e:
+                logger.warning(f"❌ Departure notification attempt {attempt + 1} failed: {e}")
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1.0)
+        
+        if not departure_success:
+            logger.error("❌ Failed to send departure notifications after all attempts")
+        
+        # Wait additional time for event propagation
+        logger.info("⏳ Waiting for event propagation...")
+        await asyncio.sleep(2.0)
+        
+        # Cancel monitoring tasks quickly
         tasks_to_cancel = [self.monitor_task]
         for task in tasks_to_cancel:
             if task and not task.done():
@@ -205,14 +238,14 @@ class EventBasedDHTPublisher:
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*[t for t in tasks_to_cancel if t], return_exceptions=True),
-                    timeout=2.0
+                    timeout=1.0
                 )
             except asyncio.TimeoutError:
                 logger.warning("⏰ Task cancellation timed out")
         
         # Quick unpublish attempt
         try:
-            await asyncio.wait_for(self._unpublish_node_info(), timeout=2.0)
+            await asyncio.wait_for(self._unpublish_node_info(), timeout=1.0)
             logger.debug("✅ Node info unpublished")
         except asyncio.TimeoutError:
             logger.warning("⏰ Unpublish timed out during shutdown")
@@ -716,6 +749,59 @@ class EventBasedDHTPublisher:
             
         except Exception as e:
             logger.error(f"Error publishing node_left to DHT: {e}")
+
+    async def _send_departure_to_contacts(self, departure_info: Dict[str, Any]):
+        """Send departure notifications directly to known DHT contacts"""
+        try:
+            if not self.kademlia_node or not self.kademlia_node.routing_table:
+                return
+            
+            contacts = self.kademlia_node.routing_table.get_all_contacts()
+            if not contacts:
+                logger.debug("No DHT contacts to notify of departure")
+                return
+            
+            # Send to up to 5 most recent contacts
+            recent_contacts = sorted(contacts, key=lambda c: c.last_seen, reverse=True)[:5]
+            
+            departure_message = {
+                'type': 'departure_notification',
+                'id': str(uuid.uuid4()),
+                'sender_id': self.config.node_id,
+                'departure_data': {
+                    'departed_node_id': self.config.node_id,
+                    'timestamp': time.time(),
+                    'departure_reason': 'graceful_shutdown',
+                    'notifier_node_id': self.config.node_id,
+                    'node_info': departure_info
+                }
+            }
+            
+            notification_tasks = []
+            for contact in recent_contacts:
+                try:
+                    task = asyncio.create_task(
+                        self.kademlia_node.protocol.send_request(
+                            departure_message, 
+                            (contact.ip, contact.port)
+                        )
+                    )
+                    notification_tasks.append(task)
+                except Exception as e:
+                    logger.debug(f"Failed to create departure notification task for {contact.node_id[:8]}...: {e}")
+            
+            if notification_tasks:
+                # Wait for notifications with timeout
+                results = await asyncio.wait_for(
+                    asyncio.gather(*notification_tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+                
+                success_count = sum(1 for result in results if not isinstance(result, Exception))
+                logger.info(f"📤 Sent departure notifications to {success_count}/{len(notification_tasks)} contacts")
+            
+        except Exception as e:
+            logger.error(f"Error sending departure notifications to contacts: {e}")
 
     async def _remove_from_all_nodes_registry(self, departed_node_id: str):
         """Remove departed node from all_nodes registry in DHT"""

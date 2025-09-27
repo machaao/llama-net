@@ -71,7 +71,7 @@ class DHTPublisherShutdownHandler:
         logger.debug(f"Added shutdown task: {name} (priority: {priority}, timeout: {timeout}s)")
     
     async def initiate_shutdown(self, reason: str = "graceful_shutdown"):
-        """Initiate graceful shutdown sequence"""
+        """Initiate graceful shutdown sequence with enhanced event coordination"""
         if self.shutdown_event.is_set():
             logger.warning("Shutdown already in progress")
             return
@@ -84,8 +84,8 @@ class DHTPublisherShutdownHandler:
         logger.info(f"⏱️ Maximum shutdown time: {self.max_shutdown_time}s")
         
         try:
-            # Phase 1: Send departure notifications
-            await self._send_departure_notifications(reason)
+            # Phase 1: Send departure notifications and wait for propagation
+            await self._send_departure_notifications_and_wait(reason)
             
             # Phase 2: Stop services in priority order
             self.shutdown_phase = ShutdownPhase.STOPPING_SERVICES
@@ -271,26 +271,21 @@ class DHTPublisherShutdownHandler:
             logger.debug(f"Error getting node info for recovery: {e}")
             return None
     
-    async def _send_departure_notifications(self, reason: str):
-        """Send departure notifications to the network"""
-        logger.info("📤 Sending departure notifications...")
+    async def _send_departure_notifications_and_wait(self, reason: str):
+        """Send departure notifications and wait for proper propagation"""
+        logger.info("📤 Sending departure notifications and waiting for propagation...")
         
         departure_tasks = []
         
-        # DHT departure notification
+        # DHT departure notification with enhanced waiting
         if self.dht_publisher:
             try:
                 departure_task = asyncio.create_task(
-                    self.dht_publisher._broadcast_node_event("node_left", {
-                        'node_id': getattr(self.dht_publisher.config, 'node_id', 'unknown'),
-                        'reason': reason,
-                        'timestamp': time.time(),
-                        'graceful': True
-                    })
+                    self._enhanced_dht_departure(reason)
                 )
-                departure_tasks.append(("dht_departure", departure_task))
+                departure_tasks.append(("enhanced_dht_departure", departure_task))
             except Exception as e:
-                logger.debug(f"Could not create DHT departure task: {e}")
+                logger.debug(f"Could not create enhanced DHT departure task: {e}")
         
         # SSE departure notification
         if self.sse_handler:
@@ -299,23 +294,67 @@ class DHTPublisherShutdownHandler:
                     self.sse_handler.broadcast_event("node_shutdown", {
                         'reason': reason,
                         'timestamp': time.time(),
-                        'graceful': True
+                        'graceful': True,
+                        'node_id': getattr(self.dht_publisher.config, 'node_id', 'unknown') if self.dht_publisher else 'unknown'
                     })
                 )
                 departure_tasks.append(("sse_departure", departure_task))
             except Exception as e:
                 logger.debug(f"Could not create SSE departure task: {e}")
         
-        # Execute departure notifications with timeout
+        # Execute departure notifications with extended timeout
         for name, task in departure_tasks:
             try:
-                await asyncio.wait_for(task, timeout=2.0)
-                logger.debug(f"✅ {name} notification sent")
+                await asyncio.wait_for(task, timeout=4.0)  # Increased timeout
+                logger.info(f"✅ {name} notification completed")
             except asyncio.TimeoutError:
                 logger.warning(f"⏰ {name} notification timed out")
                 task.cancel()
             except Exception as e:
-                logger.debug(f"❌ {name} notification failed: {e}")
+                logger.warning(f"❌ {name} notification failed: {e}")
+        
+        # Additional wait for network propagation
+        logger.info("⏳ Waiting for network event propagation...")
+        await asyncio.sleep(2.5)  # Extended wait for event propagation
+        
+        logger.info("✅ Departure notification phase completed")
+
+    async def _enhanced_dht_departure(self, reason: str):
+        """Enhanced DHT departure with multiple notification methods"""
+        if not self.dht_publisher:
+            return
+        
+        try:
+            # Get node info for departure
+            node_id = getattr(self.dht_publisher.config, 'node_id', 'unknown')
+            
+            # Broadcast via event system
+            await self.dht_publisher._broadcast_node_event("node_left", {
+                'node_id': node_id,
+                'reason': reason,
+                'timestamp': time.time(),
+                'graceful': True,
+                'shutdown_phase': 'departure_notification'
+            })
+            
+            # Send to DHT network
+            departure_info = {
+                'node_id': node_id,
+                'reason': reason,
+                'timestamp': time.time(),
+                'graceful': True
+            }
+            
+            await self.dht_publisher._publish_node_left_to_dht(departure_info)
+            
+            # Send direct notifications to contacts
+            await self.dht_publisher._send_departure_to_contacts(departure_info)
+            
+            logger.info("✅ Enhanced DHT departure notifications sent")
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced DHT departure: {e}")
+            raise
     
     async def _stop_services(self):
         """Stop all services in priority order"""
@@ -634,7 +673,7 @@ class SignalHandler:
             logger.warning(f"Could not register signal handlers: {e}")
     
     def _signal_handler(self, signum: int, frame):
-        """Handle shutdown signals"""
+        """Handle shutdown signals with enhanced coordination"""
         signal_name = signal.Signals(signum).name
         logger.info(f"🛑 Received {signal_name} signal, initiating graceful shutdown...")
         
@@ -659,12 +698,12 @@ class SignalHandler:
                 import time
                 import os
                 
-                # Wait for shutdown to complete (max 8 seconds to match shutdown handler)
-                for i in range(80):  # 8 seconds in 0.1s intervals
+                # Wait for shutdown to complete (max 10 seconds to allow for event propagation)
+                for i in range(100):  # 10 seconds in 0.1s intervals
                     if shutdown_task.done():
                         logger.info("✅ Graceful shutdown completed, exiting")
-                        # Give uvicorn a moment to clean up
-                        time.sleep(0.2)
+                        # Give additional time for final cleanup
+                        time.sleep(0.5)
                         os._exit(0)
                     time.sleep(0.1)
                 

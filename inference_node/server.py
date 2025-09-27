@@ -330,11 +330,23 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Error cleaning up ProcessPoolExecutor: {e}")
     
-    # Use graceful shutdown with enhanced handler
-    await graceful_shutdown()
+    # Use graceful shutdown with enhanced handler and wait for events
+    if shutdown_handler:
+        try:
+            logger.info("🔄 Starting graceful shutdown with event propagation...")
+            await shutdown_handler.initiate_shutdown("server_shutdown")
+            logger.info("✅ Graceful shutdown completed")
+        except Exception as e:
+            logger.error(f"Error during graceful shutdown: {e}")
+            # Fallback to basic cleanup if shutdown handler fails
+            await basic_cleanup()
+    else:
+        logger.warning("Shutdown handler not available, using basic cleanup")
+        await basic_cleanup()
     
-    # IMPORTANT: Give uvicorn time to process the shutdown
-    await asyncio.sleep(0.5)
+    # IMPORTANT: Give additional time for final event propagation
+    logger.info("⏳ Final wait for event propagation...")
+    await asyncio.sleep(1.0)
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
