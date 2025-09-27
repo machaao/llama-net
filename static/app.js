@@ -180,7 +180,7 @@ class LlamaNetUI {
                 const modelsData = await modelsResponse.json();
                 const statsData = await statsResponse.json();
                 
-                await this.updateNetworkDisplayWithValidation(dhtStatus, modelsData, statsData);
+                await this.updateNetworkDisplay(dhtStatus, modelsData, statsData);
             } else {
                 this.showNetworkError('Unable to connect to LlamaNet node');
             }
