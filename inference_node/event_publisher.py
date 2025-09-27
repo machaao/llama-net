@@ -273,7 +273,7 @@ class EventBasedDHTPublisher:
 
                     self.last_published_metrics = current_metrics.copy()
                     self.last_significant_change = current_time
-                    logger.info(f"Published update due to significant metric change")
+                    logger.debug(f"Published update due to significant metric change")
 
                 # Monitor for node departures in DHT
                 await self._check_for_node_departures()
@@ -395,13 +395,10 @@ class EventBasedDHTPublisher:
             logger.error(f"Error publishing node info: {e}")
 
     async def _publish_node_info(self):
-        """Publish current node info to DHT with node join detection"""
+        """Publish current node info to DHT (updates only, no join events)"""
         try:
             # Get current metrics
             metrics = self.metrics_callback()
-
-            # Check if this is the first time we're publishing (node join)
-            is_first_publish = not hasattr(self, '_has_published_before') or not self._has_published_before
 
             # Discover all available IP addresses
             from common.network_utils import NetworkInterfaceDiscovery
@@ -440,10 +437,9 @@ class EventBasedDHTPublisher:
                 'available_ips': available_ips,
                 'ip_types': ip_types,
                 'multi_ip_enabled': True,
-                'hardware_based': True,  # Flag to indicate hardware-based node ID
-                'hardware_fingerprint_version': '1.0',  # Version for future compatibility
-                'is_first_publish': is_first_publish,  # Flag for join detection
-                'join_pending': False  # Join event already sent or not needed
+                'hardware_based': True,
+                'hardware_fingerprint_version': '1.0',
+                'join_pending': False
             }
 
             # Add hardware fingerprint summary for debugging and validation
@@ -455,9 +451,9 @@ class EventBasedDHTPublisher:
 
             # Store under multiple keys for different discovery patterns
             keys = [
-                f"model:{self.config.model_name}",  # Find by model
-                f"node:{self.config.node_id}",      # Find specific node
-                f"hardware:{self._get_hardware_key()}"  # Find by hardware fingerprint
+                f"model:{self.config.model_name}",
+                f"node:{self.config.node_id}",
+                f"hardware:{self._get_hardware_key()}"
             ]
 
             for key in keys:
@@ -1029,7 +1025,7 @@ class EventBasedDHTPublisher:
         })
 
     async def _periodic_new_node_detection(self):
-        """Periodic check for new nodes that have joined the network"""
+        """Periodic check for new nodes that have joined the network (discovery only)"""
         try:
             # Get all published nodes from DHT
             all_nodes_data = await self.kademlia_node.find_value("all_nodes")
@@ -1040,7 +1036,6 @@ class EventBasedDHTPublisher:
                 all_nodes_data = [all_nodes_data]
 
             current_time = time.time()
-            new_nodes = []
 
             # Track known nodes to detect new ones
             if not hasattr(self, '_known_node_ids'):
@@ -1064,23 +1059,10 @@ class EventBasedDHTPublisher:
                         # Verify the node is actually reachable
                         is_reachable = await self._verify_node_reachable(node_data)
                         if is_reachable:
-                            new_nodes.append(node_data)
                             self._known_node_ids.add(node_id)
-                            logger.info(f"🆕 Detected new node via periodic scan: {node_id[:8]}... (last seen: {current_time - last_seen:.0f}s ago)")
+                            logger.debug(f"🔍 Discovered existing node: {node_id[:8]}... (last seen: {current_time - last_seen:.0f}s ago)")
 
-            # Broadcast join events for newly detected nodes
-            for node_data in new_nodes:
-                await self._broadcast_node_event("node_joined", {
-                    'node_id': node_data['node_id'],
-                    'ip': node_data.get('ip'),
-                    'port': node_data.get('port'),
-                    'model': node_data.get('model'),
-                    'dht_port': node_data.get('dht_port'),
-                    'join_reason': 'periodic_detection',
-                    'detected_by': self.config.node_id,
-                    'last_seen': node_data.get('last_seen'),
-                    'timestamp': current_time
-                })
+            # Note: No join events sent here - only the authoritative post-uvicorn join event is sent
                 
         except Exception as e:
             logger.error(f"Error in periodic new node detection: {e}")
@@ -1122,26 +1104,12 @@ class EventBasedDHTPublisher:
                             self._known_node_ids = set()
                         
                         if node_id not in self._known_node_ids:
-                            await self._broadcast_node_event("node_discovered", {
-                                'node_id': node_id,
-                                'ip': node_data.get('ip'),
-                                'port': node_data.get('port'),
-                                'model': node_data.get('model'),
-                                'discovery_method': 'dht_scan',
-                                'last_seen': last_seen,
-                                'discovered_by': self.config.node_id
-                            })
-                            
                             self._known_node_ids.add(node_id)
-                            logger.info(f"🔍 Discovered new node: {node_id[:8]}... via DHT scan")
+                            logger.debug(f"🔍 Discovered existing node: {node_id[:8]}... via DHT scan")
             
-            # Emit discovery summary
-            await self._broadcast_node_event("discovery_scan_completed", {
-                'nodes_discovered': len(discovered_nodes),
-                'total_known_nodes': len(getattr(self, '_known_node_ids', set())),
-                'scan_timestamp': current_time,
-                'scanner_node_id': self.config.node_id
-            })
+            # Log discovery summary (no event needed)
+            if discovered_nodes:
+                logger.debug(f"Discovery scan completed: {len(discovered_nodes)} nodes found, {len(getattr(self, '_known_node_ids', set()))} total known")
             
         except Exception as e:
             logger.error(f"Error in enhanced node discovery: {e}")
