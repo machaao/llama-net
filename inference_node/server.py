@@ -281,29 +281,29 @@ async def lifespan(app: FastAPI):
         await service_manager.mark_service_initializing("node_selector")
         node_selector = NodeSelector(dht_discovery)
         await service_manager.mark_service_ready("node_selector")
-        
+
         # 12. Start P2P handler LAST (optional service)
-        await service_manager.mark_service_initializing("p2p_handler")
-        try:
-            logger.info("Starting P2P handler...")
-            p2p_handler = P2PRequestHandler(config, llm)
-            await p2p_handler.start()
-            if p2p_handler:
-                dht_publisher.p2p_handler = p2p_handler
-                shutdown_handler.register_component('p2p_handler', p2p_handler)
-            await service_manager.mark_service_ready("p2p_handler")
-            logger.info("P2P handler started successfully")
-        except Exception as e:
-            await service_manager.mark_service_failed("p2p_handler", str(e))
-            logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
-            p2p_handler = None
+        # await service_manager.mark_service_initializing("p2p_handler")
+        # try:
+        #     logger.info("Starting P2P handler...")
+        #     p2p_handler = P2PRequestHandler(config, llm)
+        #     await p2p_handler.start()
+        #     if p2p_handler:
+        #         dht_publisher.p2p_handler = p2p_handler
+        #         shutdown_handler.register_component('p2p_handler', p2p_handler)
+        #     await service_manager.mark_service_ready("p2p_handler")
+        #     logger.info("P2P handler started successfully")
+        # except Exception as e:
+        #     await service_manager.mark_service_failed("p2p_handler", str(e))
+        #     logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
+        #     p2p_handler = None
         
         # Wait for all services to be ready (join event will be sent post-uvicorn)
         logger.info("⏳ Waiting for all services to be ready...")
         all_ready = await service_manager.wait_for_all_services(timeout=30.0)
         
         if all_ready:
-            logger.info("🚀 All services started successfully! Join event will be sent post-uvicorn.")
+            logger.info("🚀 All services started successfully!")
         else:
             logger.warning("⚠️ Some services may not be fully ready, but continuing...")
         
