@@ -39,6 +39,7 @@ class NetworkDiscovery:
         self.cache_ttl = cache_ttl
         self._cache = {}
         self._last_discovery = 0
+        self._subnet_matcher = None  # Lazy load to avoid circular import
         
     async def discover_all_ips(self, force_refresh: bool = False) -> List[IPClassification]:
         """Discover and classify all available IP addresses"""
@@ -268,6 +269,13 @@ class NetworkDiscovery:
             
             classification.confidence_score = max(0.0, score)
     
+    def _get_subnet_matcher(self):
+        """Lazy load subnet matcher to avoid circular import"""
+        if self._subnet_matcher is None:
+            from common.subnet_matcher import get_subnet_matcher
+            self._subnet_matcher = get_subnet_matcher()
+        return self._subnet_matcher
+
     async def get_best_ip_for_context(self, context_ips: List[str] = None) -> Optional[str]:
         """Get the best IP address for a given context (e.g., bootstrap nodes)"""
         all_ips = await self.discover_all_ips()
@@ -275,26 +283,15 @@ class NetworkDiscovery:
         if not all_ips:
             return None
         
-        # If no context provided, return highest confidence IP
-        if not context_ips:
-            return all_ips[0].ip
+        # Use subnet matcher for intelligent IP selection
+        subnet_matcher = self._get_subnet_matcher()
+        best_ip = subnet_matcher.get_best_ip_for_context(all_ips, context_ips)
         
-        # Find best subnet match with context IPs
-        best_match = None
-        best_score = -1
+        if best_ip:
+            return best_ip
         
-        for ip_class in all_ips:
-            if not ip_class.is_reachable and ip_class.type != 'loopback':
-                continue
-                
-            subnet_score = self._calculate_subnet_compatibility(ip_class, context_ips)
-            total_score = ip_class.confidence_score + subnet_score
-            
-            if total_score > best_score:
-                best_score = total_score
-                best_match = ip_class
-        
-        return best_match.ip if best_match else all_ips[0].ip
+        # Fallback to highest confidence IP
+        return all_ips[0].ip if all_ips else None
     
     def _calculate_subnet_compatibility(self, ip_class: IPClassification, context_ips: List[str]) -> float:
         """Calculate how compatible an IP is with context IPs (subnet matching)"""
