@@ -398,23 +398,40 @@ async def web_ui():
 # OpenAI-compatible endpoints only
 @app.get("/v1/models")
 async def list_models():
-    """List available models (OpenAI-compatible)"""
+    """List available models (OpenAI-compatible) with chat format info"""
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
     
-    return OpenAIModelList(
-        data=[
-            OpenAIModel(
-                id=config.model_name,
-                created=int(time.time()),
-                owned_by="llamanet"
-            )
-        ]
+    # Get chat template info if available
+    chat_format_info = {}
+    if llm:
+        try:
+            template_info = llm.get_chat_template_info()
+            chat_format_info = {
+                "chat_format": template_info.get("chat_format", "unknown"),
+                "detected_format": template_info.get("detected_format", "unknown"),
+                "supports_chat": template_info.get("supports_chat", False),
+                "template_auto_detected": template_info.get("template_auto_detected", False)
+            }
+        except Exception as e:
+            logger.warning(f"Could not get chat format info: {e}")
+            chat_format_info = {"chat_format": "unknown", "error": str(e)}
+    
+    model_data = OpenAIModel(
+        id=config.model_name,
+        created=int(time.time()),
+        owned_by="llamanet"
     )
+    
+    # Add chat format info to the model data
+    model_dict = model_data.dict()
+    model_dict.update(chat_format_info)
+    
+    return OpenAIModelList(data=[model_dict])
 
 @app.get("/v1/models/network")
 async def list_network_models():
-    """List all available models across the network (OpenAI-compatible extension)"""
+    """List all available models across the network (OpenAI-compatible extension) with chat formats"""
     if not dht_discovery:
         raise HTTPException(status_code=503, detail="DHT discovery not initialized")
     
@@ -433,24 +450,82 @@ async def list_network_models():
                     "created": int(time.time()),
                     "owned_by": "llamanet",
                     "node_count": 0,
-                    "nodes": []
+                    "nodes": [],
+                    "chat_formats": set(),  # Track unique chat formats for this model
+                    "primary_chat_format": None
                 }
             
             models_dict[model_name]["node_count"] += 1
-            models_dict[model_name]["nodes"].append({
+            
+            # Add node info with chat format if available
+            node_info = {
                 "node_id": node.node_id,
                 "ip": node.ip,
                 "port": node.port,
                 "load": node.load,
                 "tps": node.tps,
                 "last_seen": node.last_seen
-            })
+            }
+            
+            # Try to get chat format info from the node
+            try:
+                # For current node, use local info
+                if node.node_id == config.node_id and llm:
+                    template_info = llm.get_chat_template_info()
+                    node_info["chat_format"] = template_info.get("chat_format", "unknown")
+                    node_info["detected_format"] = template_info.get("detected_format", "unknown")
+                    node_info["supports_chat"] = template_info.get("supports_chat", False)
+                    
+                    # Add to model's chat formats
+                    chat_format = template_info.get("chat_format", "unknown")
+                    models_dict[model_name]["chat_formats"].add(chat_format)
+                    if not models_dict[model_name]["primary_chat_format"]:
+                        models_dict[model_name]["primary_chat_format"] = chat_format
+                else:
+                    # For remote nodes, we'll detect based on model name as fallback
+                    from inference_node.llm_wrapper import detect_chat_format_from_model_name
+                    detected_format = detect_chat_format_from_model_name(model_name)
+                    node_info["chat_format"] = detected_format
+                    node_info["detected_format"] = detected_format
+                    node_info["supports_chat"] = True
+                    node_info["source"] = "name_detection"
+                    
+                    # Add to model's chat formats
+                    models_dict[model_name]["chat_formats"].add(detected_format)
+                    if not models_dict[model_name]["primary_chat_format"]:
+                        models_dict[model_name]["primary_chat_format"] = detected_format
+                        
+            except Exception as e:
+                logger.debug(f"Could not get chat format for node {node.node_id}: {e}")
+                node_info["chat_format"] = "unknown"
+                node_info["supports_chat"] = False
+            
+            models_dict[model_name]["nodes"].append(node_info)
+        
+        # Convert sets to lists for JSON serialization and finalize model info
+        for model_name, model_data in models_dict.items():
+            model_data["chat_formats"] = list(model_data["chat_formats"])
+            model_data["supports_multiple_formats"] = len(model_data["chat_formats"]) > 1
+            
+            # Add chat template summary
+            if model_data["chat_formats"]:
+                model_data["chat_template_summary"] = {
+                    "primary_format": model_data["primary_chat_format"],
+                    "available_formats": model_data["chat_formats"],
+                    "format_consistency": len(model_data["chat_formats"]) == 1
+                }
         
         return {
             "object": "list",
             "data": list(models_dict.values()),
             "total_models": len(models_dict),
-            "total_nodes": len(all_nodes)
+            "total_nodes": len(all_nodes),
+            "chat_format_summary": {
+                "models_with_chat_support": len([m for m in models_dict.values() if m.get("primary_chat_format") != "unknown"]),
+                "unique_chat_formats": len(set(m.get("primary_chat_format") for m in models_dict.values() if m.get("primary_chat_format"))),
+                "format_distribution": {fmt: len([m for m in models_dict.values() if m.get("primary_chat_format") == fmt]) 
+                                     for fmt in set(m.get("primary_chat_format") for m in models_dict.values() if m.get("primary_chat_format"))}
+            }
         }
         
     except Exception as e:
@@ -1017,11 +1092,36 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
 # Status and utility endpoints
 @app.get("/status")
 async def status():
-    """Get node status"""
+    """Get node status with chat format information"""
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not initialized")
-        
-    return llm.get_metrics()
+    
+    # Get base metrics
+    metrics = llm.get_metrics()
+    
+    # Add additional status information
+    status_info = {
+        **metrics,
+        "node_id": config.node_id,
+        "model_name": config.model_name,
+        "openai_compatible": True,
+        "timestamp": time.time()
+    }
+    
+    # Chat format info is already included in metrics via get_metrics()
+    # but let's ensure it's properly formatted for status endpoint
+    if "chat_template" in metrics:
+        chat_info = metrics["chat_template"]
+        status_info["chat_format_status"] = {
+            "current_format": chat_info.get("chat_format", "unknown"),
+            "detected_format": chat_info.get("detected_format", "unknown"),
+            "auto_detected": chat_info.get("template_auto_detected", False),
+            "supports_chat": chat_info.get("supports_chat", False),
+            "supported_roles": chat_info.get("supported_roles", []),
+            "handler_type": chat_info.get("handler_type", "unknown")
+        }
+    
+    return status_info
 
 @app.get("/info")
 async def info():
