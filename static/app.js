@@ -92,11 +92,6 @@ class LlamaNetUI {
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
         
-        // Chat template support
-        this.availableTemplates = new Map();
-        this.selectedTemplate = null;
-        this.templateInfo = null;
-        
         // SSE-only properties (NO POLLING) - Updated for unified SSE manager
         this.eventSource = null;
         this.isConnected = false;
@@ -136,9 +131,6 @@ class LlamaNetUI {
         // ONE-TIME initial network status load (not polling)
         this.loadInitialNetworkStatus();
         
-        // Load chat template information
-        await this.loadChatTemplateInfo();
-        
         this.setupEventListeners();
         
         // Restore selected model UI if available
@@ -170,49 +162,6 @@ class LlamaNetUI {
         });
     }
     
-    async loadChatTemplateInfo() {
-        // Load chat template information from the server
-        try {
-            const response = await fetch(`${this.baseUrl}/chat/template`);
-            if (response.ok) {
-                this.templateInfo = await response.json();
-                console.log('📋 Chat template info loaded:', this.templateInfo);
-                
-                // Update UI to show template support
-                this.updateTemplateIndicator();
-            } else {
-                console.warn('Could not load chat template info');
-            }
-        } catch (error) {
-            console.warn('Error loading chat template info:', error);
-        }
-    }
-    
-    updateTemplateIndicator() {
-        // Update the UI to show chat template information
-        const chatHeader = document.querySelector('.card-header h5');
-        if (chatHeader && this.templateInfo) {
-            const templateBadge = this.getTemplateBadge();
-            chatHeader.innerHTML = `
-                <i class="fas fa-comments"></i> Chat Interface 
-                ${this.selectedModel ? `- Model: ${this.selectedModel}` : ''}
-                ${templateBadge}
-            `;
-        }
-    }
-    
-    getTemplateBadge() {
-        // Generate a badge showing chat template support
-        if (!this.templateInfo) return '';
-        
-        const format = this.templateInfo.chat_format || 'unknown';
-        const detectedFormat = this.templateInfo.detected_format || format;
-        const badgeClass = format === 'unknown' ? 'secondary' : 'success';
-        
-        return `<span class="badge bg-${badgeClass} ms-2" title="Chat format: ${format} (detected: ${detectedFormat})">
-            <i class="fas fa-robot"></i> ${format}
-        </span>`;
-    }
     
     setupEventListeners() {
         // No API mode selector needed - OpenAI only
@@ -595,20 +544,12 @@ class LlamaNetUI {
             const availability = this.getAvailability(nodes.length);
             const availabilityClass = this.getAvailabilityClass(availability);
             
-            // Check if we have template info for this model
-            const templateInfo = this.availableTemplates.get(modelName);
-            const templateBadge = templateInfo ? 
-                `<span class="badge bg-info ms-1" title="Chat template: ${templateInfo.chat_format}">
-                    <i class="fas fa-robot"></i> ${templateInfo.chat_format}
-                </span>` : '';
-            
             return `
                 <div class="model-group mb-2" data-model="${modelName}">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <div class="fw-bold small text-primary">
                             <i class="fas fa-brain"></i> ${modelName}
                             <span class="badge bg-${availabilityClass} ms-1">${availability}</span>
-                            ${templateBadge}
                         </div>
                         <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel('${modelName}')" title="Select this model">
                             <i class="fas fa-check"></i>
@@ -1318,9 +1259,6 @@ class LlamaNetUI {
                 selectedGroup.classList.add('selected-model');
             }
             
-            // Load template info for the selected model
-            await this.loadModelTemplateInfo(modelId);
-            
             // Show success message
             this.showToast('success', `Selected model: ${modelId}`);
             
@@ -1336,34 +1274,12 @@ class LlamaNetUI {
         }
     }
     
-    async loadModelTemplateInfo(modelId) {
-        // Load template information for a specific model
-        try {
-            const response = await fetch(`${this.baseUrl}/v1/models/${modelId}/template`);
-            if (response.ok) {
-                const modelTemplateInfo = await response.json();
-                this.availableTemplates.set(modelId, modelTemplateInfo);
-                console.log(`📋 Template info for ${modelId}:`, modelTemplateInfo);
-                
-                // Update template info for current selection
-                if (modelId === this.selectedModel) {
-                    this.templateInfo = modelTemplateInfo;
-                    this.updateTemplateIndicator();
-                }
-            }
-        } catch (error) {
-            console.warn(`Could not load template info for ${modelId}:`, error);
-        }
-    }
-    
     updateChatInterface(modelId) {
-        // Update the chat header to show selected model with template info
-        const templateBadge = this.getTemplateBadge();
+        // Update the chat header to show selected model
         const chatHeader = document.querySelector('.card-header h5');
         if (chatHeader) {
             chatHeader.innerHTML = `
-                <i class="fas fa-comments"></i> Chat Interface - Model: ${modelId} 
-                ${templateBadge}
+                <i class="fas fa-comments"></i> Chat Interface - Model: ${modelId}
             `;
         }
         
@@ -1371,21 +1287,16 @@ class LlamaNetUI {
         const chatContainer = document.getElementById('chat-messages');
         const welcomeMsg = chatContainer.querySelector('.text-center.text-muted');
         if (welcomeMsg) {
-            const templateSupport = this.templateInfo ? 
-                `<p class="small text-success"><i class="fas fa-check-circle"></i> Chat templates supported (${this.templateInfo.chat_format})</p>` : 
-                '';
-            
             welcomeMsg.innerHTML = `
                 <i class="fas fa-robot fa-2x mb-2"></i>
                 <p>Welcome to LlamaNet! Using model: <strong>${modelId}</strong></p>
-                ${templateSupport}
                 <p class="small">Start a conversation below.</p>
             `;
         }
     }
     
     async showModelDetails(modelId) {
-        // Show detailed model information modal including template info
+        // Show detailed model information modal
         const modal = new bootstrap.Modal(document.getElementById('nodeInfoModal'));
         
         // Update modal title
@@ -1402,24 +1313,16 @@ class LlamaNetUI {
         modal.show();
         
         try {
-            // Get detailed model statistics and template info
-            const [statsResponse, templateResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/models/statistics`),
-                fetch(`${this.baseUrl}/v1/models/${modelId}/template`).catch(() => null)
-            ]);
+            // Get detailed model statistics
+            const statsResponse = await fetch(`${this.baseUrl}/models/statistics`);
             
             if (statsResponse.ok) {
                 const statsData = await statsResponse.json();
                 const modelStats = statsData.models[modelId];
                 
-                let templateInfo = null;
-                if (templateResponse && templateResponse.ok) {
-                    templateInfo = await templateResponse.json();
-                }
-                
                 if (modelStats) {
                     document.getElementById('node-info-details').innerHTML = 
-                        this.renderModelDetailsView(modelId, modelStats, statsData.network_summary, templateInfo);
+                        this.renderModelDetailsView(modelId, modelStats, statsData.network_summary);
                 } else {
                     throw new Error('Model not found in statistics');
                 }
@@ -1437,7 +1340,7 @@ class LlamaNetUI {
         }
     }
     
-    renderModelDetailsView(modelId, modelStats, networkSummary, templateInfo = null) {
+    renderModelDetailsView(modelId, modelStats, networkSummary) {
         const availability = modelStats.availability || 'unknown';
         const availabilityClass = {
             'high': 'success',
@@ -1445,27 +1348,6 @@ class LlamaNetUI {
             'low': 'danger',
             'unknown': 'secondary'
         }[availability] || 'secondary';
-        
-        // Enhanced template information section
-        let templateSection = '';
-        if (templateInfo) {
-            const features = templateInfo.features || [];
-            const availableFormats = templateInfo.available_formats || [];
-            const currentFormat = templateInfo.chat_format || 'unknown';
-            const detectedFormat = templateInfo.detected_format || currentFormat;
-            
-            templateSection = `
-                <h6 class="mt-3"><i class="fas fa-robot"></i> Chat Template Support</h6>
-                <div class="network-detail-item">
-                    <strong>Current Format:</strong> <span class="badge bg-success">${currentFormat}</span><br>
-                    <strong>Detected Format:</strong> <span class="badge bg-info">${detectedFormat}</span><br>
-                    <strong>Auto-detection:</strong> ${templateInfo.template_auto_detected ? 'Enabled' : 'Disabled'}<br>
-                    <strong>Supported Roles:</strong> ${templateInfo.supported_roles?.join(', ') || 'Unknown'}<br>
-                    <strong>Features:</strong> ${features.length > 0 ? features.join(', ') : 'Basic chat support'}<br>
-                    <strong>Available Formats:</strong> <small>${availableFormats.slice(0, 8).join(', ')}${availableFormats.length > 8 ? '...' : ''}</small>
-                </div>
-            `;
-        }
         
         return `
             <div class="row">
@@ -1478,8 +1360,6 @@ class LlamaNetUI {
                         <strong>Average Load:</strong> ${modelStats.avg_load.toFixed(3)}<br>
                         <strong>Total Capacity:</strong> ${modelStats.total_tps.toFixed(1)} TPS<br>
                     </div>
-                    
-                    ${templateSection}
                     
                     ${modelStats.best_node ? `
                     <h6 class="mt-3"><i class="fas fa-star"></i> Best Performing Node</h6>
@@ -1524,56 +1404,11 @@ class LlamaNetUI {
                     <button class="btn btn-outline-secondary" onclick="llamaNetUI.refreshModelDetails('${modelId}')">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
-                    ${templateInfo ? `
-                    <button class="btn btn-outline-info" onclick="llamaNetUI.showTemplateDetails('${modelId}')" title="View chat template details">
-                        <i class="fas fa-robot"></i> Format Details
-                    </button>
-                    ` : ''}
                 </div>
             </div>
         `;
     }
     
-    async showTemplateDetails(modelId) {
-        // Show detailed chat template information
-        try {
-            const [templateResponse, formatsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/v1/models/${modelId}/template`),
-                fetch(`${this.baseUrl}/v1/models/${modelId}/formats`)
-            ]);
-            
-            if (templateResponse.ok && formatsResponse.ok) {
-                const templateInfo = await templateResponse.json();
-                const formatsInfo = await formatsResponse.json();
-                
-                const features = templateInfo.features || [];
-                const roles = templateInfo.supported_roles || [];
-                const availableFormats = formatsInfo.available_formats || [];
-                
-                const message = `
-Chat Template Details for ${modelId}:
-
-Current Format: ${formatsInfo.current_format}
-Detected Format: ${formatsInfo.detected_format}
-Auto-detection: ${templateInfo.template_auto_detected ? 'Enabled' : 'Disabled'}
-Supported Roles: ${roles.join(', ')}
-Features: ${features.join(', ')}
-
-Available Formats: ${availableFormats.join(', ')}
-
-This model supports proper chat formatting with role-based message handling.
-Format was automatically detected based on the model name.
-                `.trim();
-                
-                alert(message);
-            } else {
-                this.showToast('error', 'Could not load template details');
-            }
-        } catch (error) {
-            console.error('Error loading template details:', error);
-            this.showToast('error', 'Failed to load template details');
-        }
-    }
     
     async refreshModelDetails(modelId) {
         // Refresh the model details view
@@ -1848,16 +1683,14 @@ Format was automatically detected based on the model name.
         const streamingEnabled = document.getElementById('enable-streaming')?.checked || false;
         const strategy = document.getElementById('load-strategy')?.value || 'round_robin';
         
-        // Build chat history for context - OPTIMIZED for chat templates
+        // Build chat history for context
         const messages = [];
         
-        // Add system message optimized for chat templates
-        if (this.templateInfo && this.templateInfo.supported_roles.includes('system')) {
-            messages.push({ 
-                role: 'system', 
-                content: 'You are a helpful AI assistant. Provide clear, concise responses.' 
-            });
-        }
+        // Add system message
+        messages.push({ 
+            role: 'system', 
+            content: 'You are a helpful AI assistant. Provide clear, concise responses.' 
+        });
         
         // Add recent chat history (last 6 exchanges to keep context manageable)
         const recentHistory = this.chatHistory.slice(-12); // 6 exchanges = 12 messages
@@ -1898,20 +1731,14 @@ Format was automatically detected based on the model name.
             
             const data = await response.json();
             
-            // Enhanced metadata with template info
+            // Enhanced metadata
             const metadata = {
                 id: data.id,
                 tokens: data.usage.total_tokens,
-                api: 'OpenAI Compatible (Chat Templates)',
+                api: 'OpenAI Compatible',
                 node_info: data.node_info,
                 model_used: modelToUse
             };
-            
-            // Add template information if available
-            if (this.templateInfo) {
-                metadata.chat_template = this.templateInfo.chat_format;
-                metadata.template_features = this.templateInfo.features || [];
-            }
             
             return {
                 text: this.cleanResponse(data.choices[0].message.content),
@@ -2004,27 +1831,17 @@ Format was automatically detected based on the model name.
         // Estimate tokens (rough approximation)
         streamState.totalTokens = Math.ceil(streamState.accumulatedText.split(' ').length * 1.3);
         
-        // Build metadata parts with enhanced template info
+        // Build metadata parts
         const metadataParts = [
             `ID: ${streamState.responseId.substring(0, 8)}...`,
             `Tokens: ~${streamState.totalTokens}`
         ];
-
-        // Add template information if available
-        if (this.templateInfo) {
-            metadataParts.push(`<span class="template-info">Template: ${this.templateInfo.chat_format}</span>`);
-        }
 
         // Add node info if available with proper styling
         if (streamState.nodeInfo) {
             const processingType = streamState.nodeInfo.processing_node === 'forwarded' ? 'via' : 'on';
             const nodeDisplay = `Node: ${processingType} ${streamState.nodeInfo.node_id.substring(0, 8)}... (${streamState.nodeInfo.ip}:${streamState.nodeInfo.port})`;
             metadataParts.push(`<span class="node-info">${nodeDisplay}</span>`);
-            
-            // Add chat template support indicator
-            if (streamState.nodeInfo.chat_template) {
-                metadataParts.push(`<span class="template-support">✓ Templates</span>`);
-            }
         }
         
         // Add metadata
@@ -2043,10 +1860,8 @@ Format was automatically detected based on the model name.
             metadata: {
                 id: streamState.responseId,
                 tokens: streamState.totalTokens,
-                api: 'Streaming (Chat Templates)',
-                node_info: streamState.nodeInfo,
-                chat_template: this.templateInfo?.chat_format,
-                template_features: this.templateInfo?.features
+                api: 'Streaming',
+                node_info: streamState.nodeInfo
             },
             isStreaming: true // Flag to indicate this was handled by streaming
         });
@@ -2188,22 +2003,12 @@ Format was automatically detected based on the model name.
             if (metadata.api) parts.push(`API: ${metadata.api}`);
             if (metadata.id) parts.push(`ID: ${metadata.id.substring(0, 8)}...`);
             
-            // Add chat template information
-            if (metadata.chat_template) {
-                parts.push(`<span class="template-info">Template: ${metadata.chat_template}</span>`);
-            }
-            
             // Add node information display
             if (metadata.node_info) {
                 const nodeInfo = metadata.node_info;
                 const processingType = nodeInfo.processing_node === 'forwarded' ? 'via' : 'on';
                 const nodeDisplay = `Node: ${processingType} ${nodeInfo.node_id.substring(0, 8)}... (${nodeInfo.ip}:${nodeInfo.port})`;
                 parts.push(`<span class="node-info">${nodeDisplay}</span>`);
-                
-                // Add chat template support indicator if available
-                if (nodeInfo.chat_template) {
-                    parts.push(`<span class="template-support">✓ Templates</span>`);
-                }
             }
             
             if (parts.length > 0) {
