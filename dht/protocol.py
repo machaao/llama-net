@@ -97,7 +97,9 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         """Simplified message handling - DHT operations only"""
         msg_type = message.get('type')
         sender_id = message.get('sender_id')
-        
+
+        logger.info(f"📡 DHT message received: {sender_id}, {msg_type}, {addr}")
+
         # Update contact activity for any valid message (basic DHT operation)
         if sender_id and msg_type not in ['response']:
             from dht.kademlia_node import Contact
@@ -106,9 +108,9 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             if msg_type == 'ping':
                 self.node.routing_table.add_contact(contact)
 
-            logger.debug(f"📡 Updated DHT contact: {sender_id[:8]}... from {addr}")
-        
+
         # Handle DHT protocol messages only
+        # 'ping' acts like an act node
         if msg_type == 'ping':
             await self._handle_ping(message, addr)
         elif msg_type == 'store':
