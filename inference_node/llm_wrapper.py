@@ -44,7 +44,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
         'chatml-function-calling': ['chatml-function-calling'],
         'vicuna': ['vicuna'],
         'alpaca': ['alpaca', 'wizard'],
-        'chatml': ['chatml', 'openai', 'gpt', 'yi-', 'qwen2']  # Keep chatml patterns last as fallback
+        'chatml': ['chatml', 'openai', 'oss', 'gpt', 'yi-', 'qwen2']  # Keep chatml patterns last as fallback
     }
     
     # Check each format pattern (order matters for specificity)
@@ -79,6 +79,8 @@ class LlamaWrapper:
             n_ctx=config.n_ctx,
             n_batch=config.n_batch,
             n_gpu_layers=config.n_gpu_layers,
+            verbose=config.verbose,
+            reasoning=True,
             chat_format=self.detected_chat_format  # Use detected format instead of "auto"
         )
         
