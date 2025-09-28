@@ -1925,6 +1925,102 @@ async def get_chat_template():
         logger.error(f"Error getting chat template: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/chat/formats")
+async def get_all_chat_formats():
+    """Get comprehensive information about all supported chat formats"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    try:
+        template_info = llm.get_chat_template_info()
+        available_formats = template_info.get("available_formats", [])
+        current_format = template_info.get("chat_format", "unknown")
+        detected_format = template_info.get("detected_format", "unknown")
+        
+        # Create detailed format information
+        format_details = {}
+        for fmt in available_formats:
+            format_details[fmt] = {
+                "name": fmt,
+                "is_current": fmt == current_format,
+                "is_detected": fmt == detected_format,
+                "description": _get_format_description(fmt),
+                "typical_models": _get_typical_models_for_format(fmt),
+                "supported_roles": ["system", "user", "assistant"],  # Most formats support these
+                "special_features": _get_format_features(fmt)
+            }
+        
+        return {
+            "current_format": current_format,
+            "detected_format": detected_format,
+            "auto_detection_enabled": True,
+            "available_formats": available_formats,
+            "format_details": format_details,
+            "detection_method": "model_name_pattern_matching",
+            "fallback_format": "chatml",
+            "model_name": config.model_name,
+            "supports_format_switching": False,
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting chat formats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _get_format_description(format_name: str) -> str:
+    """Get description for a chat format"""
+    descriptions = {
+        "chatml": "ChatML format used by OpenAI models and compatible systems",
+        "llama-2": "Meta Llama 2 chat format with system and instruction prompts",
+        "llama-3": "Meta Llama 3 chat format with enhanced conversation structure",
+        "alpaca": "Stanford Alpaca instruction-following format",
+        "vicuna": "Vicuna conversational format based on ShareGPT",
+        "mistral-instruct": "Mistral AI instruction format",
+        "zephyr": "HuggingFace Zephyr chat format",
+        "openchat": "OpenChat conversational format",
+        "gemma": "Google Gemma chat format",
+        "qwen": "Alibaba Qwen chat format",
+        "functionary": "Function calling capable chat format",
+        "chatglm3": "ChatGLM3 conversational format"
+    }
+    return descriptions.get(format_name, f"Chat format: {format_name}")
+
+def _get_typical_models_for_format(format_name: str) -> List[str]:
+    """Get typical model names that use this format"""
+    model_examples = {
+        "chatml": ["gpt-3.5-turbo", "gpt-4", "yi-chat", "qwen2-chat"],
+        "llama-2": ["llama-2-7b-chat", "llama-2-13b-chat", "llama-2-70b-chat"],
+        "llama-3": ["llama-3-8b-instruct", "llama-3-70b-instruct"],
+        "alpaca": ["alpaca-7b", "alpaca-13b", "wizard-lm"],
+        "vicuna": ["vicuna-7b", "vicuna-13b", "vicuna-33b"],
+        "mistral-instruct": ["mistral-7b-instruct", "mixtral-8x7b-instruct"],
+        "zephyr": ["zephyr-7b-beta", "zephyr-7b-alpha"],
+        "openchat": ["openchat-3.5", "openchat-3.6"],
+        "gemma": ["gemma-2b-it", "gemma-7b-it"],
+        "qwen": ["qwen-7b-chat", "qwen-14b-chat"],
+        "functionary": ["functionary-7b-v1", "functionary-7b-v2"],
+        "chatglm3": ["chatglm3-6b", "chatglm3-6b-32k"]
+    }
+    return model_examples.get(format_name, [])
+
+def _get_format_features(format_name: str) -> List[str]:
+    """Get special features for a chat format"""
+    features = {
+        "chatml": ["role_based_messages", "system_prompts", "streaming_support"],
+        "llama-2": ["system_prompts", "instruction_following", "conversation_memory"],
+        "llama-3": ["enhanced_reasoning", "improved_context", "better_instruction_following"],
+        "alpaca": ["instruction_following", "single_turn_optimized"],
+        "vicuna": ["multi_turn_conversations", "human_like_responses"],
+        "mistral-instruct": ["instruction_following", "code_generation", "reasoning"],
+        "functionary": ["function_calling", "tool_use", "structured_output"],
+        "zephyr": ["helpful_responses", "safety_aligned", "conversation_aware"],
+        "openchat": ["open_domain_chat", "knowledge_grounded"],
+        "gemma": ["safety_focused", "responsible_ai", "factual_responses"],
+        "qwen": ["multilingual_support", "code_understanding", "reasoning"],
+        "chatglm3": ["chinese_optimized", "bilingual_support", "long_context"]
+    }
+    return features.get(format_name, ["basic_chat_support"])
+
 @app.get("/services/status")
 async def get_services_status():
     """Get initialization status of all services"""
