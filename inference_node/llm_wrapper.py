@@ -1,4 +1,5 @@
 import time
+import asyncio
 from typing import Dict, List, Optional, Any, Generator
 from llama_cpp import Llama
 from common.utils import get_logger, normalize_stop_tokens
@@ -64,6 +65,9 @@ class LlamaWrapper:
         self.config = config
         self.metrics_manager = MetricsManager()
         
+        # Add processing lock for thread safety
+        self._processing_lock = asyncio.Lock()
+        
         # Auto-detect chat format based on model name
         self.detected_chat_format = detect_chat_format_from_model_name(config.model_name)
         
@@ -109,6 +113,70 @@ class LlamaWrapper:
             })
         return formatted
     
+    def is_processing(self) -> bool:
+        """Check if the LLM is currently processing a request"""
+        return self._processing_lock.locked()
+        
+    async def generate_chat_safe(self, *args, **kwargs) -> Dict[str, Any]:
+        """Thread-safe version of generate_chat"""
+        async with self._processing_lock:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.generate_chat, *args, **kwargs)
+            
+    async def generate_safe(self, *args, **kwargs) -> Dict[str, Any]:
+        """Thread-safe version of generate"""
+        async with self._processing_lock:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.generate, *args, **kwargs)
+            
+    async def generate_chat_stream_safe(self, *args, **kwargs) -> Generator[Dict[str, Any], None, None]:
+        """Thread-safe version of generate_chat_stream"""
+        async with self._processing_lock:
+            loop = asyncio.get_event_loop()
+            
+            def create_stream():
+                return self.generate_chat_stream(*args, **kwargs)
+            
+            # Create the generator in a thread
+            stream_gen = await loop.run_in_executor(None, create_stream)
+            
+            # Yield chunks from the generator in thread executor
+            def get_next_chunk():
+                try:
+                    return next(stream_gen)
+                except StopIteration:
+                    return None
+            
+            while True:
+                chunk = await loop.run_in_executor(None, get_next_chunk)
+                if chunk is None:
+                    break
+                yield chunk
+                
+    async def generate_stream_safe(self, *args, **kwargs) -> Generator[Dict[str, Any], None, None]:
+        """Thread-safe version of generate_stream"""
+        async with self._processing_lock:
+            loop = asyncio.get_event_loop()
+            
+            def create_stream():
+                return self.generate_stream(*args, **kwargs)
+            
+            # Create the generator in a thread
+            stream_gen = await loop.run_in_executor(None, create_stream)
+            
+            # Yield chunks from the generator in thread executor
+            def get_next_chunk():
+                try:
+                    return next(stream_gen)
+                except StopIteration:
+                    return None
+            
+            while True:
+                chunk = await loop.run_in_executor(None, get_next_chunk)
+                if chunk is None:
+                    break
+                yield chunk
+
     def get_chat_template_info(self) -> Dict[str, Any]:
         """Get information about the current chat template"""
         try:

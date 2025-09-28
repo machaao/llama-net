@@ -8,7 +8,7 @@ import signal
 import sys
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from typing import Dict, Any, Union, List, Optional
 from contextlib import asynccontextmanager
 import json
@@ -34,6 +34,7 @@ from inference_node.dht_publisher import DHTPublisher
 from inference_node.event_publisher import EventBasedDHTPublisher
 from inference_node.heartbeat import HeartbeatManager
 from inference_node.p2p_handler import P2PRequestHandler
+from inference_node.request_queue import RequestQueueManager, RequestStatus
 from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
 from client.event_discovery import NodeEventType, NodeEvent, NodeEventListener
@@ -56,6 +57,7 @@ shutdown_handler = None
 signal_handler = None
 round_robin_state = {"index": 0}  # Global round robin state
 executor = None  # ProcessPoolExecutor for clean shutdown
+request_queue_manager = None  # Request queue manager
 
 class DiscoverySSEBridge(NodeEventListener):
     """Bridge discovery events to SSE broadcasting"""
@@ -104,8 +106,8 @@ class DiscoverySSEBridge(NodeEventListener):
         except Exception as e:
             logger.error(f"Error bridging discovery event to SSE: {e}")
 
-# Request concurrency limiting
-REQUEST_SEMAPHORE = asyncio.Semaphore(100)  # Max 100 concurrent requests
+# Request concurrency limiting - replaced with queue-based handling
+# REQUEST_SEMAPHORE = asyncio.Semaphore(100)  # Max 100 concurrent requests
 
 async def graceful_shutdown():
     """Graceful shutdown using the enhanced shutdown handler"""
@@ -167,7 +169,7 @@ async def basic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_manager, discovery_bridge, shutdown_handler, signal_handler, executor
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_manager, discovery_bridge, shutdown_handler, signal_handler, executor, request_queue_manager
     
     # Get service manager
     service_manager = get_service_manager()
@@ -200,6 +202,14 @@ async def lifespan(app: FastAPI):
         llm = LlamaWrapper(config)
         await service_manager.mark_service_ready("llm")
         logger.info("LLM initialized successfully")
+        
+        # 2.5. Initialize request queue manager after LLM
+        await service_manager.mark_service_initializing("request_queue")
+        request_queue_manager = RequestQueueManager(max_queue_size=50)
+        await request_queue_manager.start()
+        shutdown_handler.register_component('request_queue', request_queue_manager)
+        await service_manager.mark_service_ready("request_queue")
+        logger.info("Request queue manager initialized")
         
         # 3. Get system info
         await service_manager.mark_service_initializing("system_info")
@@ -603,51 +613,216 @@ async def get_models_statistics():
 
 @app.post("/v1/completions")
 async def create_completion(request: OpenAICompletionRequest):
-    """Create a completion (OpenAI-compatible)"""
-    async with REQUEST_SEMAPHORE:
-        if not llm:
-            raise HTTPException(status_code=503, detail="LLM not initialized")
-        
-        # Check if request has strategy parameter for routing
-        strategy = getattr(request, 'strategy', None)
-        target_model = getattr(request, 'target_model', None)
-        
-        # If strategy is specified and we have node selector, try to route request
-        if strategy and node_selector and strategy != "local":
-            try:
-                # Get available nodes
-                nodes = await dht_discovery.get_nodes(model=target_model)
-                if len(nodes) > 1:  # Only route if there are other nodes
-                    selected_node = await node_selector.select_node(
-                        model=request.model,
-                        strategy=strategy,
-                        target_model=target_model  # Pass target model
-                    )
-                    
-                    # Check if we should forward this request
-                    if selected_node and _should_forward_request(request, selected_node):
-                        # Increment forwarding count
-                        request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
-                        logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... (model: {selected_node.model}) via {strategy}")
-                        return await _forward_completion(request, selected_node)
-            except Exception as e:
-                logger.warning(f"Failed to route request, handling locally: {e}")
-        
-        # Check if we should handle locally based on target model
-        if target_model and target_model != config.model_name:
-            logger.warning(f"Target model {target_model} requested but this node runs {config.model_name}")
-            # Try to find a node with the target model
-            try:
-                nodes = await dht_discovery.get_nodes(model=target_model)
-                if nodes:
-                    selected_node = nodes[0]  # Use first available node with target model
-                    logger.info(f"🔄 Forwarding to node with target model {target_model}")
+    """Create a completion (OpenAI-compatible) with queue handling"""
+    if not llm or not request_queue_manager:
+        raise HTTPException(status_code=503, detail="Services not initialized")
+    
+    # Check if request has strategy parameter for routing
+    strategy = getattr(request, 'strategy', None)
+    target_model = getattr(request, 'target_model', None)
+    
+    # If strategy is specified and we have node selector, try to route request
+    if strategy and node_selector and strategy != "local":
+        try:
+            # Get available nodes
+            nodes = await dht_discovery.get_nodes(model=target_model)
+            if len(nodes) > 1:  # Only route if there are other nodes
+                selected_node = await node_selector.select_node(
+                    model=request.model,
+                    strategy=strategy,
+                    target_model=target_model
+                )
+                
+                # Check if we should forward this request
+                if selected_node and _should_forward_request(request, selected_node):
+                    # Increment forwarding count
+                    request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
+                    logger.info(f"🔄 Routing completion to node {selected_node.node_id[:8]}... (model: {selected_node.model}) via {strategy}")
                     return await _forward_completion(request, selected_node)
-            except Exception as e:
-                logger.warning(f"Failed to find node with target model {target_model}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to route request, handling locally: {e}")
+    
+    # Check if we should handle locally based on target model
+    if target_model and target_model != config.model_name:
+        logger.warning(f"Target model {target_model} requested but this node runs {config.model_name}")
+        # Try to find a node with the target model
+        try:
+            nodes = await dht_discovery.get_nodes(model=target_model)
+            if nodes:
+                selected_node = nodes[0]  # Use first available node with target model
+                logger.info(f"🔄 Forwarding to node with target model {target_model}")
+                return await _forward_completion(request, selected_node)
+        except Exception as e:
+            logger.warning(f"Failed to find node with target model {target_model}: {e}")
+    
+    # Handle locally with queue
+    try:
+        # Check if queue is full
+        if request_queue_manager.request_queue.qsize() >= request_queue_manager.max_queue_size:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": "Server is busy, please try again later",
+                        "type": "server_busy",
+                        "code": "queue_full"
+                    },
+                    "queue_status": {
+                        "queue_size": request_queue_manager.request_queue.qsize(),
+                        "max_queue_size": request_queue_manager.max_queue_size
+                    }
+                }
+            )
         
-        # Handle locally (original logic)
-        return await _handle_completion_locally(request)
+        # Submit to queue
+        async def process_completion_request(request_data):
+            return await _handle_completion_locally_queued(request_data["request"])
+        
+        result = await request_queue_manager.submit_request(
+            request_type="completion",
+            request_data={"request": request},
+            processor=process_completion_request
+        )
+        
+        return result
+        
+    except asyncio.QueueFull:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": "Server is busy, please try again later",
+                    "type": "server_busy",
+                    "code": "queue_full"
+                }
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error processing completion: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
+    """Handle completion locally through the queue system"""
+    # Handle prompt (can be string or list)
+    if isinstance(request.prompt, list):
+        if len(request.prompt) == 0:
+            raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+        prompt = request.prompt[0]  # Use first prompt for now
+    else:
+        prompt = request.prompt
+    
+    # Normalize stop tokens for consistent handling
+    stop_tokens = None
+    if request.stop:
+        if isinstance(request.stop, str):
+            stop_tokens = [request.stop] if request.stop.strip() else None
+        elif isinstance(request.stop, list):
+            stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
+            stop_tokens = stop_tokens if stop_tokens else None
+        else:
+            stop_tokens = None
+    
+    try:
+        # Handle streaming with robust error handling
+        if request.stream:
+            request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+            
+            async def local_stream_generator():
+                try:
+                    # Use the thread-safe streaming method
+                    async for chunk in llm.generate_stream_safe(
+                        prompt=prompt,
+                        max_tokens=request.max_tokens or 100,
+                        temperature=request.temperature or 0.7,
+                        top_p=request.top_p or 0.9,
+                        stop=stop_tokens,
+                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                    ):
+                        yield {
+                            "text": chunk.get("text", ""),
+                            "finished": chunk.get("finished", False)
+                        }
+                        
+                except asyncio.CancelledError:
+                    logger.info("Local streaming cancelled")
+                    raise
+                except Exception as e:
+                    logger.error(f"Error in local streaming: {e}")
+            
+            # Create node info for streaming
+            node_info = {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "model": config.model_name,
+                "processing_node": "local",
+                "queued": True
+            }
+            
+            return StreamingResponse(
+                create_streaming_completion_response(
+                    request_id=request_id,
+                    model=request.model,
+                    stream_generator=local_stream_generator(),
+                    node_info=node_info
+                ),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
+            )
+        
+        # NON-STREAMING: Use thread-safe method
+        result = await llm.generate_safe(
+            prompt,
+            request.max_tokens or 100,
+            request.temperature or 0.7,
+            request.top_p or 0.9,
+            stop_tokens,
+            1.0 + (request.frequency_penalty or 0.0)
+        )
+        
+        # Calculate token counts (approximate)
+        prompt_tokens = len(prompt.split())
+        completion_tokens = result["tokens_generated"]
+        
+        # Create response
+        choice = OpenAIChoice(
+            text=result["text"],
+            index=0,
+            finish_reason="stop"
+        )
+        
+        usage = OpenAIUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        # Create node info
+        node_info = {
+            "node_id": config.node_id,
+            "ip": get_host_ip(),
+            "port": config.port,
+            "model": config.model_name,
+            "processing_node": "local",
+            "queued": True
+        }
+        
+        return OpenAICompletionResponse(
+            id=f"cmpl-{uuid.uuid4().hex[:8]}",
+            created=int(time.time()),
+            model=request.model,
+            choices=[choice],
+            usage=usage,
+            node_info=node_info
+        )
+        
+    except Exception as e:
+        logger.error(f"Local completion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def _handle_completion_locally(request: OpenAICompletionRequest):
     """Handle completion on this node - NON-BLOCKING"""
@@ -867,51 +1042,221 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: OpenAIChatCompletionRequest):
-    """Create a chat completion (OpenAI-compatible)"""
-    async with REQUEST_SEMAPHORE:
-        if not llm:
-            raise HTTPException(status_code=503, detail="LLM not initialized")
-        
-        # Check if request has strategy parameter for routing
-        strategy = getattr(request, 'strategy', None)
-        target_model = getattr(request, 'target_model', None)
-        
-        # If strategy is specified and we have node selector, try to route request
-        if strategy and node_selector and strategy != "local":
-            try:
-                # Get available nodes
-                nodes = await dht_discovery.get_nodes(model=target_model)
-                if len(nodes) > 1:  # Only route if there are other nodes
-                    selected_node = await node_selector.select_node(
-                        model=request.model,
-                        strategy=strategy,
-                        target_model=target_model  # Pass target model
-                    )
-                    
-                    # Check if we should forward this request
-                    if selected_node and _should_forward_request(request, selected_node):
-                        # Increment forwarding count
-                        request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
-                        logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... (model: {selected_node.model}) via {strategy}")
-                        return await _forward_chat_completion(request, selected_node)
-            except Exception as e:
-                logger.warning(f"Failed to route request, handling locally: {e}")
-        
-        # Check if we should handle locally based on target model
-        if target_model and target_model != config.model_name:
-            logger.warning(f"Target model {target_model} requested but this node runs {config.model_name}")
-            # Try to find a node with the target model
-            try:
-                nodes = await dht_discovery.get_nodes(model=target_model)
-                if nodes:
-                    selected_node = nodes[0]  # Use first available node with target model
-                    logger.info(f"🔄 Forwarding to node with target model {target_model}")
+    """Create a chat completion (OpenAI-compatible) with queue handling"""
+    if not llm or not request_queue_manager:
+        raise HTTPException(status_code=503, detail="Services not initialized")
+    
+    # Check if request has strategy parameter for routing
+    strategy = getattr(request, 'strategy', None)
+    target_model = getattr(request, 'target_model', None)
+    
+    # If strategy is specified and we have node selector, try to route request
+    if strategy and node_selector and strategy != "local":
+        try:
+            # Get available nodes
+            nodes = await dht_discovery.get_nodes(model=target_model)
+            if len(nodes) > 1:  # Only route if there are other nodes
+                selected_node = await node_selector.select_node(
+                    model=request.model,
+                    strategy=strategy,
+                    target_model=target_model
+                )
+                
+                # Check if we should forward this request
+                if selected_node and _should_forward_request(request, selected_node):
+                    # Increment forwarding count
+                    request._forwarded_count = getattr(request, '_forwarded_count', 0) + 1
+                    logger.info(f"🔄 Routing chat completion to node {selected_node.node_id[:8]}... (model: {selected_node.model}) via {strategy}")
                     return await _forward_chat_completion(request, selected_node)
-            except Exception as e:
-                logger.warning(f"Failed to find node with target model {target_model}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to route request, handling locally: {e}")
+    
+    # Check if we should handle locally based on target model
+    if target_model and target_model != config.model_name:
+        logger.warning(f"Target model {target_model} requested but this node runs {config.model_name}")
+        # Try to find a node with the target model
+        try:
+            nodes = await dht_discovery.get_nodes(model=target_model)
+            if nodes:
+                selected_node = nodes[0]  # Use first available node with target model
+                logger.info(f"🔄 Forwarding to node with target model {target_model}")
+                return await _forward_chat_completion(request, selected_node)
+        except Exception as e:
+            logger.warning(f"Failed to find node with target model {target_model}: {e}")
+    
+    # Handle locally with queue
+    try:
+        # Check if queue is full and return appropriate status
+        if request_queue_manager.request_queue.qsize() >= request_queue_manager.max_queue_size:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": "Server is busy, please try again later",
+                        "type": "server_busy",
+                        "code": "queue_full"
+                    },
+                    "queue_status": {
+                        "queue_size": request_queue_manager.request_queue.qsize(),
+                        "max_queue_size": request_queue_manager.max_queue_size,
+                        "estimated_wait_time": request_queue_manager.request_queue.qsize() * 5  # Rough estimate
+                    }
+                }
+            )
         
-        # Handle locally (original logic)
-        return await _handle_chat_completion_locally(request)
+        # Submit to queue
+        async def process_chat_request(request_data):
+            return await _handle_chat_completion_locally_queued(request_data["request"])
+        
+        result = await request_queue_manager.submit_request(
+            request_type="chat_completion",
+            request_data={"request": request},
+            processor=process_chat_request
+        )
+        
+        return result
+        
+    except asyncio.QueueFull:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": "Server is busy, please try again later",
+                    "type": "server_busy", 
+                    "code": "queue_full"
+                }
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error processing chat completion: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRequest):
+    """Handle chat completion locally through the queue system"""
+    # Convert OpenAI messages to our format
+    messages = []
+    for message in request.messages:
+        messages.append({
+            "role": message.role,
+            "content": message.content
+        })
+    
+    # Prepare stop tokens
+    stop_tokens = None
+    if request.stop:
+        if isinstance(request.stop, str):
+            stop_tokens = [request.stop] if request.stop.strip() else None
+        elif isinstance(request.stop, list):
+            stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
+            stop_tokens = stop_tokens if stop_tokens else None
+    
+    try:
+        if request.stream:
+            request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+            
+            async def local_stream_generator():
+                try:
+                    # Use the thread-safe streaming method
+                    async for chunk in llm.generate_chat_stream_safe(
+                        messages=messages,
+                        max_tokens=request.max_tokens or 100,
+                        temperature=request.temperature or 0.7,
+                        top_p=request.top_p or 0.9,
+                        stop=stop_tokens,
+                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                    ):
+                        yield {
+                            "text": chunk.get("text", ""),
+                            "finished": chunk.get("finished", False)
+                        }
+                        
+                except asyncio.CancelledError:
+                    logger.info("Local chat streaming cancelled")
+                    raise
+                except Exception as e:
+                    logger.error(f"Error in local chat streaming: {e}")
+            
+            # Create node info for streaming
+            node_info = {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "model": config.model_name,
+                "processing_node": "local",
+                "chat_template": "auto",
+                "queued": True
+            }
+            
+            return StreamingResponse(
+                create_streaming_chat_response(
+                    request_id=request_id,
+                    model=request.model,
+                    stream_generator=local_stream_generator(),
+                    node_info=node_info
+                ),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
+            )
+        
+        # NON-STREAMING: Use thread-safe method
+        result = await llm.generate_chat_safe(
+            messages,
+            request.max_tokens or 100,
+            request.temperature or 0.7,
+            request.top_p or 0.9,
+            stop_tokens,
+            1.0 + (request.frequency_penalty or 0.0)
+        )
+        
+        # Calculate token counts
+        prompt_tokens = sum(len(msg["content"].split()) for msg in messages)
+        completion_tokens = result["tokens_generated"]
+        
+        # Create response message
+        response_message = OpenAIMessage(
+            role="assistant",
+            content=result["text"].strip()
+        )
+        
+        choice = OpenAIChoice(
+            message=response_message,
+            index=0,
+            finish_reason="stop"
+        )
+        
+        usage = OpenAIUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        # Create node info
+        node_info = {
+            "node_id": config.node_id,
+            "ip": get_host_ip(),
+            "port": config.port,
+            "model": config.model_name,
+            "processing_node": "local",
+            "chat_template": "auto",
+            "queued": True
+        }
+        
+        return OpenAIChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+            created=int(time.time()),
+            model=request.model,
+            choices=[choice],
+            usage=usage,
+            node_info=node_info
+        )
+        
+    except Exception as e:
+        logger.error(f"Local chat completion error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
     """Handle chat completion using proper chat templates - NON-BLOCKING"""
@@ -1840,6 +2185,14 @@ async def hardware_info():
     except Exception as e:
         logger.error(f"Error getting hardware info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/queue/status")
+async def get_queue_status():
+    """Get current request queue status"""
+    if not request_queue_manager:
+        raise HTTPException(status_code=503, detail="Request queue not initialized")
+    
+    return request_queue_manager.get_status()
 
 @app.get("/hardware/validate")
 async def validate_hardware_consistency():
