@@ -56,6 +56,167 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 - **LLM models in GGUF format** (compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp))
 - Docker (optional, for containerized deployment)
 
+## Use Cases & Scenarios
+
+LlamaNet's decentralized architecture makes it ideal for various scenarios where traditional centralized AI services fall short. Here are key use cases where LlamaNet provides significant advantages:
+
+### 🏢 Enterprise & Corporate Environments
+
+#### **Scenario: Multi-Office AI Infrastructure**
+A global company with offices in New York, London, Tokyo, and São Paulo wants to provide AI assistance to employees while maintaining data sovereignty and reducing latency.
+
+**LlamaNet Solution:**
+- Deploy inference nodes in each office location
+- Employees automatically connect to the nearest/fastest node
+- No data leaves regional boundaries (GDPR/compliance friendly)
+- Automatic failover if one office's node goes down
+- Cost-effective scaling without vendor lock-in
+
+```bash
+# New York Office
+python -m inference_node.server --model-path ./models/company-model.gguf --port 8000
+
+# London Office  
+python -m inference_node.server --model-path ./models/company-model.gguf --port 8000 --bootstrap-nodes ny-office.company.com:8001
+
+# Employees use OpenAI-compatible endpoint
+openai.api_base = "http://local-llamanet.company.com/v1"
+```
+
+#### **Scenario: Hybrid Cloud-Edge Deployment**
+A manufacturing company needs AI for both cloud analytics and edge device monitoring, with seamless integration between environments.
+
+**LlamaNet Solution:**
+- Cloud nodes for heavy analytics workloads
+- Edge nodes for real-time device monitoring
+- Automatic load balancing based on request type
+- Unified API across all environments
+
+### 🎓 Research & Academic Institutions
+
+#### **Scenario: University Research Cluster**
+A university research department wants to share AI resources across multiple labs while allowing each lab to contribute their own compute resources.
+
+**LlamaNet Solution:**
+- Each lab contributes nodes with their available hardware
+- Researchers access a unified AI service regardless of which lab's hardware is used
+- Fair resource sharing with automatic load balancing
+- Easy addition of new labs/nodes without central coordination
+
+```python
+# Research Lab A contributes GPU node
+python -m inference_node.server --model-path ./models/research-model.gguf --n-gpu-layers 35
+
+# Research Lab B contributes CPU node
+python -m inference_node.server --model-path ./models/research-model.gguf --bootstrap-nodes lab-a.university.edu:8001
+
+# Researchers use unified client
+client = Client(bootstrap_nodes="lab-a.university.edu:8001,lab-b.university.edu:8001")
+```
+
+### 🌐 Community & Open Source Projects
+
+#### **Scenario: Community-Driven AI Network**
+An open-source community wants to create a shared AI inference network where members contribute compute resources and everyone benefits.
+
+**LlamaNet Solution:**
+- Community members run nodes with their spare compute
+- Automatic discovery and load balancing
+- No central authority or single point of failure
+- Contributors can prioritize their own requests
+
+#### **Scenario: Regional AI Cooperatives**
+Local businesses in a region want to share AI infrastructure costs while maintaining independence.
+
+**LlamaNet Solution:**
+- Each business runs nodes during their off-hours
+- Shared access to AI capabilities without individual infrastructure costs
+- Data stays within the cooperative network
+- Easy scaling as more businesses join
+
+### 🏥 Healthcare & Regulated Industries
+
+#### **Scenario: Hospital Network AI**
+A hospital network needs AI for medical imaging analysis while ensuring patient data never leaves their secure network.
+
+**LlamaNet Solution:**
+- Deploy nodes within each hospital's secure network
+- AI processing happens locally with no external data transfer
+- Automatic failover between hospitals in the network
+- Compliance with HIPAA and other healthcare regulations
+
+```bash
+# Hospital A - Primary node
+python -m inference_node.server --model-path ./models/medical-imaging.gguf
+
+# Hospital B - Backup node
+python -m inference_node.server --model-path ./models/medical-imaging.gguf --bootstrap-nodes hospital-a.network:8001
+
+# Medical staff use secure internal endpoint
+curl -X POST http://internal-ai.hospital.network/v1/chat/completions \
+  -d '{"messages": [{"role": "user", "content": "Analyze this X-ray image"}]}'
+```
+
+### 🚀 Startups & Small Businesses
+
+#### **Scenario: Cost-Effective AI for Startups**
+A startup needs AI capabilities but cannot afford expensive cloud AI services or dedicated infrastructure.
+
+**LlamaNet Solution:**
+- Start with a single node on existing hardware
+- Scale by adding nodes as the business grows
+- No vendor lock-in or expensive API costs
+- OpenAI-compatible API for easy integration with existing tools
+
+#### **Scenario: Development Team Collaboration**
+A distributed development team needs shared AI assistance for coding, documentation, and brainstorming.
+
+**LlamaNet Solution:**
+- Team members contribute nodes from their development machines
+- Shared AI assistant available to all team members
+- No external dependencies or API costs
+- Works offline or in restricted network environments
+
+### 🌍 Geographic & Network Constraints
+
+#### **Scenario: Remote Locations with Limited Internet**
+Research stations, ships, or remote facilities need AI capabilities but have limited or unreliable internet connectivity.
+
+**LlamaNet Solution:**
+- Local nodes provide AI services without internet dependency
+- Mesh network topology for redundancy
+- Automatic synchronization when connectivity is available
+- Works in completely offline environments
+
+#### **Scenario: Countries with AI Service Restrictions**
+Organizations in regions where major AI services are blocked or restricted need local AI capabilities.
+
+**LlamaNet Solution:**
+- Completely self-hosted with no external dependencies
+- Local language models and cultural customization
+- No data sent to foreign servers
+- Full control over AI capabilities and policies
+
+### 🔬 Specialized Applications
+
+#### **Scenario: Scientific Computing Clusters**
+Research institutions need AI integrated with their existing HPC clusters for scientific workloads.
+
+**LlamaNet Solution:**
+- Deploy nodes on HPC cluster nodes during idle time
+- Integrate with existing job schedulers
+- Specialized models for scientific domains
+- Seamless scaling with cluster resources
+
+#### **Scenario: Gaming & Entertainment**
+Game developers want to provide AI-powered NPCs and content generation without relying on external services.
+
+**LlamaNet Solution:**
+- Deploy nodes in game server infrastructure
+- Low-latency AI for real-time game interactions
+- No external API dependencies or costs
+- Custom models trained on game-specific content
+
 ## Installation
 
 ### From Source
@@ -787,167 +948,6 @@ The server implements streaming via:
 - **FastAPI StreamingResponse** for HTTP streaming
 - **OpenAI-compatible format** for existing client compatibility
 - **Functional programming patterns** avoiding blocking loops
-
-## Use Cases & Scenarios
-
-LlamaNet's decentralized architecture makes it ideal for various scenarios where traditional centralized AI services fall short. Here are key use cases where LlamaNet provides significant advantages:
-
-### 🏢 Enterprise & Corporate Environments
-
-#### **Scenario: Multi-Office AI Infrastructure**
-A global company with offices in New York, London, Tokyo, and São Paulo wants to provide AI assistance to employees while maintaining data sovereignty and reducing latency.
-
-**LlamaNet Solution:**
-- Deploy inference nodes in each office location
-- Employees automatically connect to the nearest/fastest node
-- No data leaves regional boundaries (GDPR/compliance friendly)
-- Automatic failover if one office's node goes down
-- Cost-effective scaling without vendor lock-in
-
-```bash
-# New York Office
-python -m inference_node.server --model-path ./models/company-model.gguf --port 8000
-
-# London Office  
-python -m inference_node.server --model-path ./models/company-model.gguf --port 8000 --bootstrap-nodes ny-office.company.com:8001
-
-# Employees use OpenAI-compatible endpoint
-openai.api_base = "http://local-llamanet.company.com/v1"
-```
-
-#### **Scenario: Hybrid Cloud-Edge Deployment**
-A manufacturing company needs AI for both cloud analytics and edge device monitoring, with seamless integration between environments.
-
-**LlamaNet Solution:**
-- Cloud nodes for heavy analytics workloads
-- Edge nodes for real-time device monitoring
-- Automatic load balancing based on request type
-- Unified API across all environments
-
-### 🎓 Research & Academic Institutions
-
-#### **Scenario: University Research Cluster**
-A university research department wants to share AI resources across multiple labs while allowing each lab to contribute their own compute resources.
-
-**LlamaNet Solution:**
-- Each lab contributes nodes with their available hardware
-- Researchers access a unified AI service regardless of which lab's hardware is used
-- Fair resource sharing with automatic load balancing
-- Easy addition of new labs/nodes without central coordination
-
-```python
-# Research Lab A contributes GPU node
-python -m inference_node.server --model-path ./models/research-model.gguf --n-gpu-layers 35
-
-# Research Lab B contributes CPU node
-python -m inference_node.server --model-path ./models/research-model.gguf --bootstrap-nodes lab-a.university.edu:8001
-
-# Researchers use unified client
-client = Client(bootstrap_nodes="lab-a.university.edu:8001,lab-b.university.edu:8001")
-```
-
-### 🌐 Community & Open Source Projects
-
-#### **Scenario: Community-Driven AI Network**
-An open-source community wants to create a shared AI inference network where members contribute compute resources and everyone benefits.
-
-**LlamaNet Solution:**
-- Community members run nodes with their spare compute
-- Automatic discovery and load balancing
-- No central authority or single point of failure
-- Contributors can prioritize their own requests
-
-#### **Scenario: Regional AI Cooperatives**
-Local businesses in a region want to share AI infrastructure costs while maintaining independence.
-
-**LlamaNet Solution:**
-- Each business runs nodes during their off-hours
-- Shared access to AI capabilities without individual infrastructure costs
-- Data stays within the cooperative network
-- Easy scaling as more businesses join
-
-### 🏥 Healthcare & Regulated Industries
-
-#### **Scenario: Hospital Network AI**
-A hospital network needs AI for medical imaging analysis while ensuring patient data never leaves their secure network.
-
-**LlamaNet Solution:**
-- Deploy nodes within each hospital's secure network
-- AI processing happens locally with no external data transfer
-- Automatic failover between hospitals in the network
-- Compliance with HIPAA and other healthcare regulations
-
-```bash
-# Hospital A - Primary node
-python -m inference_node.server --model-path ./models/medical-imaging.gguf
-
-# Hospital B - Backup node
-python -m inference_node.server --model-path ./models/medical-imaging.gguf --bootstrap-nodes hospital-a.network:8001
-
-# Medical staff use secure internal endpoint
-curl -X POST http://internal-ai.hospital.network/v1/chat/completions \
-  -d '{"messages": [{"role": "user", "content": "Analyze this X-ray image"}]}'
-```
-
-### 🚀 Startups & Small Businesses
-
-#### **Scenario: Cost-Effective AI for Startups**
-A startup needs AI capabilities but cannot afford expensive cloud AI services or dedicated infrastructure.
-
-**LlamaNet Solution:**
-- Start with a single node on existing hardware
-- Scale by adding nodes as the business grows
-- No vendor lock-in or expensive API costs
-- OpenAI-compatible API for easy integration with existing tools
-
-#### **Scenario: Development Team Collaboration**
-A distributed development team needs shared AI assistance for coding, documentation, and brainstorming.
-
-**LlamaNet Solution:**
-- Team members contribute nodes from their development machines
-- Shared AI assistant available to all team members
-- No external dependencies or API costs
-- Works offline or in restricted network environments
-
-### 🌍 Geographic & Network Constraints
-
-#### **Scenario: Remote Locations with Limited Internet**
-Research stations, ships, or remote facilities need AI capabilities but have limited or unreliable internet connectivity.
-
-**LlamaNet Solution:**
-- Local nodes provide AI services without internet dependency
-- Mesh network topology for redundancy
-- Automatic synchronization when connectivity is available
-- Works in completely offline environments
-
-#### **Scenario: Countries with AI Service Restrictions**
-Organizations in regions where major AI services are blocked or restricted need local AI capabilities.
-
-**LlamaNet Solution:**
-- Completely self-hosted with no external dependencies
-- Local language models and cultural customization
-- No data sent to foreign servers
-- Full control over AI capabilities and policies
-
-### 🔬 Specialized Applications
-
-#### **Scenario: Scientific Computing Clusters**
-Research institutions need AI integrated with their existing HPC clusters for scientific workloads.
-
-**LlamaNet Solution:**
-- Deploy nodes on HPC cluster nodes during idle time
-- Integrate with existing job schedulers
-- Specialized models for scientific domains
-- Seamless scaling with cluster resources
-
-#### **Scenario: Gaming & Entertainment**
-Game developers want to provide AI-powered NPCs and content generation without relying on external services.
-
-**LlamaNet Solution:**
-- Deploy nodes in game server infrastructure
-- Low-latency AI for real-time game interactions
-- No external API dependencies or costs
-- Custom models trained on game-specific content
 
 ### 💡 Development & Testing
 
