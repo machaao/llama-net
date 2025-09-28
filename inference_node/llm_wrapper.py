@@ -8,6 +8,55 @@ from inference_node.config import InferenceConfig
 
 logger = get_logger(__name__)
 
+def detect_chat_format_from_model_name(model_name: str) -> str:
+    """
+    Detect appropriate chat format based on model name patterns.
+    Returns the best matching chat format or 'chatml' as fallback.
+    """
+    model_name_lower = model_name.lower()
+    
+    # Model name to chat format mapping (ordered by specificity)
+    format_patterns = {
+        'llama-3': ['llama-3', 'llama3', 'meta-llama-3'],
+        'llama-2': ['llama-2', 'llama2', 'meta-llama-2'],
+        'mistral-instruct': ['mistral-instruct', 'mistral-7b-instruct', 'mixtral-instruct'],
+        'gemma': ['gemma', 'google/gemma'],
+        'zephyr': ['zephyr', 'huggingfaceh4/zephyr'],
+        'openchat': ['openchat', 'openchat-3'],
+        'functionary-v2': ['functionary-v2'],
+        'functionary-v1': ['functionary-v1'],
+        'functionary': ['functionary', 'meetkai/functionary'],
+        'chatglm3': ['chatglm3', 'chatglm-3'],
+        'qwen': ['qwen-', 'qwen1.5', 'alibaba/qwen'],
+        'baichuan-2': ['baichuan-2', 'baichuan2'],
+        'baichuan': ['baichuan'],
+        'phind': ['phind', 'phind-codellama'],
+        'intel': ['neural-chat', 'intel/neural-chat'],
+        'saiga': ['saiga', 'ilyagusev/saiga'],
+        'pygmalion': ['pygmalion', 'pygmalion-'],
+        'open-orca': ['open-orca', 'openorca'],
+        'redpajama-incite': ['redpajama-incite', 'togethercomputer/redpajama'],
+        'snoozy': ['snoozy'],
+        'openbuddy': ['openbuddy', 'openbuddy-'],
+        'oasst_llama': ['oasst', 'openassistant'],
+        'mistrallite': ['mistrallite', 'amazon/mistrallite'],
+        'chatml-function-calling': ['chatml-function-calling'],
+        'vicuna': ['vicuna'],
+        'alpaca': ['alpaca', 'wizard'],
+        'chatml': ['chatml', 'openai', 'gpt', 'yi-', 'qwen2']  # Keep chatml patterns last as fallback
+    }
+    
+    # Check each format pattern (order matters for specificity)
+    for chat_format, patterns in format_patterns.items():
+        for pattern in patterns:
+            if pattern in model_name_lower:
+                logger.info(f"Detected chat format '{chat_format}' for model '{model_name}' (matched pattern: '{pattern}')")
+                return chat_format
+    
+    # Fallback to chatml for unknown models
+    logger.info(f"No specific chat format detected for model '{model_name}', using 'chatml' as fallback")
+    return 'chatml'
+
 class LlamaWrapper:
     """Wrapper for llama-cpp-python with chat template support"""
     
@@ -15,13 +64,18 @@ class LlamaWrapper:
         self.config = config
         self.metrics_manager = MetricsManager()
         
+        # Auto-detect chat format based on model name
+        self.detected_chat_format = detect_chat_format_from_model_name(config.model_name)
+        
         logger.info(f"Loading model from {config.model_path}")
+        logger.info(f"Using detected chat format: {self.detected_chat_format}")
+        
         self.llm = Llama(
             model_path=config.model_path,
             n_ctx=config.n_ctx,
             n_batch=config.n_batch,
             n_gpu_layers=config.n_gpu_layers,
-            chat_format="auto"  # Auto-detect chat format from model
+            chat_format=self.detected_chat_format  # Use detected format instead of "auto"
         )
         
         # Detect and log the chat template being used
@@ -59,10 +113,18 @@ class LlamaWrapper:
         """Get information about the current chat template"""
         try:
             info = {
-                "chat_format": getattr(self.llm, 'chat_format', 'unknown'),
+                "chat_format": getattr(self.llm, 'chat_format', self.detected_chat_format),
+                "detected_format": self.detected_chat_format,
                 "supports_chat": True,
                 "template_auto_detected": True,
-                "supported_roles": ["system", "user", "assistant"]
+                "supported_roles": ["system", "user", "assistant"],
+                "available_formats": [
+                    'llama-2', 'llama-3', 'alpaca', 'qwen', 'vicuna', 'oasst_llama', 
+                    'baichuan-2', 'baichuan', 'openbuddy', 'redpajama-incite', 'snoozy', 
+                    'phind', 'intel', 'open-orca', 'mistrallite', 'zephyr', 'pygmalion', 
+                    'chatml', 'mistral-instruct', 'chatglm3', 'openchat', 'saiga', 'gemma', 
+                    'functionary', 'functionary-v2', 'functionary-v1', 'chatml-function-calling'
+                ]
             }
             
             if hasattr(self.llm, '_chat_handler') and self.llm._chat_handler:

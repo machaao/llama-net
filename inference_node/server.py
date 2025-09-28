@@ -1763,6 +1763,56 @@ async def get_model_template_info(model_name: str):
         logger.error(f"Error getting template info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/v1/models/{model_name}/formats")
+async def get_available_chat_formats(model_name: str):
+    """Get available chat formats and current selection for a model"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    try:
+        template_info = llm.get_chat_template_info()
+        
+        return {
+            "model": config.model_name,
+            "current_format": template_info.get("chat_format", "unknown"),
+            "detected_format": template_info.get("detected_format", "unknown"),
+            "available_formats": template_info.get("available_formats", []),
+            "auto_detection_enabled": True,
+            "supports_format_switching": False,  # Would require model reload
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available formats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/models/{model_name}/format")
+async def set_chat_format(model_name: str, format_request: dict):
+    """Set chat format for a model (requires restart)"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    requested_format = format_request.get("format")
+    if not requested_format:
+        raise HTTPException(status_code=400, detail="Format parameter required")
+    
+    template_info = llm.get_chat_template_info()
+    available_formats = template_info.get("available_formats", [])
+    
+    if requested_format not in available_formats:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid format '{requested_format}'. Available: {available_formats}"
+        )
+    
+    return {
+        "message": f"Format change to '{requested_format}' requires server restart",
+        "current_format": template_info.get("chat_format"),
+        "requested_format": requested_format,
+        "restart_required": True,
+        "timestamp": time.time()
+    }
+
 @app.get("/chat/template")
 async def get_chat_template():
     """Get current chat template information"""

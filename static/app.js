@@ -206,9 +206,10 @@ class LlamaNetUI {
         if (!this.templateInfo) return '';
         
         const format = this.templateInfo.chat_format || 'unknown';
+        const detectedFormat = this.templateInfo.detected_format || format;
         const badgeClass = format === 'unknown' ? 'secondary' : 'success';
         
-        return `<span class="badge bg-${badgeClass} ms-2" title="Chat template: ${format}">
+        return `<span class="badge bg-${badgeClass} ms-2" title="Chat format: ${format} (detected: ${detectedFormat})">
             <i class="fas fa-robot"></i> ${format}
         </span>`;
     }
@@ -1445,17 +1446,23 @@ class LlamaNetUI {
             'unknown': 'secondary'
         }[availability] || 'secondary';
         
-        // Template information section
+        // Enhanced template information section
         let templateSection = '';
         if (templateInfo) {
             const features = templateInfo.features || [];
+            const availableFormats = templateInfo.available_formats || [];
+            const currentFormat = templateInfo.chat_format || 'unknown';
+            const detectedFormat = templateInfo.detected_format || currentFormat;
+            
             templateSection = `
                 <h6 class="mt-3"><i class="fas fa-robot"></i> Chat Template Support</h6>
                 <div class="network-detail-item">
-                    <strong>Template Format:</strong> ${templateInfo.chat_format}<br>
-                    <strong>Auto-detected:</strong> ${templateInfo.template_auto_detected ? 'Yes' : 'No'}<br>
+                    <strong>Current Format:</strong> <span class="badge bg-success">${currentFormat}</span><br>
+                    <strong>Detected Format:</strong> <span class="badge bg-info">${detectedFormat}</span><br>
+                    <strong>Auto-detection:</strong> ${templateInfo.template_auto_detected ? 'Enabled' : 'Disabled'}<br>
                     <strong>Supported Roles:</strong> ${templateInfo.supported_roles?.join(', ') || 'Unknown'}<br>
-                    <strong>Features:</strong> ${features.length > 0 ? features.join(', ') : 'Basic chat support'}
+                    <strong>Features:</strong> ${features.length > 0 ? features.join(', ') : 'Basic chat support'}<br>
+                    <strong>Available Formats:</strong> <small>${availableFormats.slice(0, 8).join(', ')}${availableFormats.length > 8 ? '...' : ''}</small>
                 </div>
             `;
         }
@@ -1519,7 +1526,7 @@ class LlamaNetUI {
                     </button>
                     ${templateInfo ? `
                     <button class="btn btn-outline-info" onclick="llamaNetUI.showTemplateDetails('${modelId}')" title="View chat template details">
-                        <i class="fas fa-robot"></i> Template Info
+                        <i class="fas fa-robot"></i> Format Details
                     </button>
                     ` : ''}
                 </div>
@@ -1530,23 +1537,32 @@ class LlamaNetUI {
     async showTemplateDetails(modelId) {
         // Show detailed chat template information
         try {
-            const response = await fetch(`${this.baseUrl}/v1/models/${modelId}/template`);
-            if (response.ok) {
-                const templateInfo = await response.json();
+            const [templateResponse, formatsResponse] = await Promise.all([
+                fetch(`${this.baseUrl}/v1/models/${modelId}/template`),
+                fetch(`${this.baseUrl}/v1/models/${modelId}/formats`)
+            ]);
+            
+            if (templateResponse.ok && formatsResponse.ok) {
+                const templateInfo = await templateResponse.json();
+                const formatsInfo = await formatsResponse.json();
                 
-                // Create a simple alert with template details
                 const features = templateInfo.features || [];
                 const roles = templateInfo.supported_roles || [];
+                const availableFormats = formatsInfo.available_formats || [];
                 
                 const message = `
 Chat Template Details for ${modelId}:
 
-Format: ${templateInfo.chat_format}
-Auto-detected: ${templateInfo.template_auto_detected ? 'Yes' : 'No'}
+Current Format: ${formatsInfo.current_format}
+Detected Format: ${formatsInfo.detected_format}
+Auto-detection: ${templateInfo.template_auto_detected ? 'Enabled' : 'Disabled'}
 Supported Roles: ${roles.join(', ')}
 Features: ${features.join(', ')}
 
+Available Formats: ${availableFormats.join(', ')}
+
 This model supports proper chat formatting with role-based message handling.
+Format was automatically detected based on the model name.
                 `.trim();
                 
                 alert(message);
