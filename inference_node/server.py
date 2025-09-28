@@ -817,21 +817,17 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         return await _handle_chat_completion_locally(request)
 
 async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
-    """Handle chat completion on this node with robust SSE handling"""
-    # Convert messages to a single prompt - IMPROVED FORMAT
-    prompt_parts = []
+    """Handle chat completion using proper chat templates"""
+    
+    # Convert OpenAI messages to our format
+    messages = []
     for message in request.messages:
-        if message.role == "system":
-            prompt_parts.append(f"System: {message.content}")
-        elif message.role == "user":
-            prompt_parts.append(f"Human: {message.content}")
-        elif message.role == "assistant":
-            prompt_parts.append(f"Assistant: {message.content}")
+        messages.append({
+            "role": message.role,
+            "content": message.content
+        })
     
-    # Use a more standard chat format
-    prompt = "\n\n".join(prompt_parts) + "\n\nAssistant:"
-    
-    # IMPROVED: Add proper stop tokens for chat format
+    # Prepare stop tokens
     stop_tokens = None
     if request.stop:
         if isinstance(request.stop, str):
@@ -839,26 +835,22 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         elif isinstance(request.stop, list):
             stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
             stop_tokens = stop_tokens if stop_tokens else None
-    else:
-        # Default stop tokens for chat format to prevent bleeding
-        stop_tokens = ["\n\nHuman:", "\n\nUser:", "\nHuman:", "\nUser:", "Human:", "User:"]
     
     try:
-        # Handle streaming with robust error handling
         if request.stream:
             request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
             
             async def local_stream_generator():
                 try:
-                    async for chunk in llm.generate_stream_async(
-                        prompt=prompt,
+                    # Use the new chat streaming method
+                    async for chunk in llm.generate_chat_stream_async(
+                        messages=messages,
                         max_tokens=request.max_tokens or 100,
                         temperature=request.temperature or 0.7,
                         top_p=request.top_p or 0.9,
                         stop=stop_tokens,
                         repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
                     ):
-                        # Transform to consistent format
                         yield {
                             "text": chunk.get("text", ""),
                             "finished": chunk.get("finished", False)
@@ -868,7 +860,6 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                     raise
                 except Exception as e:
                     logger.error(f"Error in local chat streaming: {e}")
-                    # Don't re-raise, just end the stream gracefully
             
             # Create node info for streaming
             node_info = {
@@ -876,7 +867,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                 "ip": get_host_ip(),
                 "port": config.port,
                 "model": config.model_name,
-                "processing_node": "local"
+                "processing_node": "local",
+                "chat_template": "auto"  # Indicate template support
             }
             
             return StreamingResponse(
@@ -894,9 +886,9 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                 }
             )
         
-        # Non-streaming response
-        result = llm.generate(
-            prompt=prompt,
+        # Non-streaming response using chat method
+        result = llm.generate_chat(
+            messages=messages,
             max_tokens=request.max_tokens or 100,
             temperature=request.temperature or 0.7,
             top_p=request.top_p or 0.9,
@@ -904,8 +896,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
         )
         
-        # Calculate token counts (approximate)
-        prompt_tokens = len(prompt.split())
+        # Calculate token counts
+        prompt_tokens = sum(len(msg["content"].split()) for msg in messages)
         completion_tokens = result["tokens_generated"]
         
         # Create response message
@@ -932,7 +924,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             "ip": get_host_ip(),
             "port": config.port,
             "model": config.model_name,
-            "processing_node": "local"
+            "processing_node": "local",
+            "chat_template": "auto"
         }
         
         return OpenAIChatCompletionResponse(
@@ -1043,6 +1036,15 @@ async def info():
     
     # Get hardware fingerprint info
     hardware_info = config.get_hardware_info()
+    
+    # Get chat template info
+    chat_template_info = {}
+    if llm:
+        try:
+            chat_template_info = llm.get_chat_template_info()
+        except Exception as e:
+            logger.warning(f"Could not get chat template info: {e}")
+            chat_template_info = {"error": str(e)}
         
     return {
         "node_id": config.node_id,
@@ -1051,6 +1053,7 @@ async def info():
         "system": system_info,
         "dht_port": config.dht_port,
         "openai_compatible": True,
+        "chat_template": chat_template_info,
         "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"],
         "p2p_enabled": bool(p2p_handler),
         "hardware_based_id": True,
@@ -1733,6 +1736,43 @@ async def validate_hardware_consistency():
         
     except Exception as e:
         logger.error(f"Error validating hardware consistency: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/models/{model_name}/template")
+async def get_model_template_info(model_name: str):
+    """Get chat template information for a model"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    try:
+        template_info = llm.get_chat_template_info()
+        template_info.update({
+            "model": config.model_name,
+            "features": [
+                "auto_template_detection",
+                "streaming_chat",
+                "role_based_formatting",
+                "proper_stop_tokens"
+            ],
+            "timestamp": time.time()
+        })
+        
+        return template_info
+        
+    except Exception as e:
+        logger.error(f"Error getting template info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/chat/template")
+async def get_chat_template():
+    """Get current chat template information"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not initialized")
+    
+    try:
+        return llm.get_chat_template_info()
+    except Exception as e:
+        logger.error(f"Error getting chat template: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/services/status")
