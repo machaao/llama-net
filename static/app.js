@@ -1877,7 +1877,6 @@ Format was automatically detected based on the model name.
             max_tokens: maxTokens,
             temperature: temperature,
             stream: streamingEnabled,
-            stop: ["Human:", "User:", "\nHuman:", "\nUser:", "\n\nHuman:", "\n\nUser:"],
             strategy: strategy,
             target_model: this.selectedModel  // Add explicit target model parameter
         };
