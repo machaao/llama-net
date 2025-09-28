@@ -769,6 +769,201 @@ pre {
     opacity: 0.7;
 }
 
+/* Chat template support styles */
+.template-info {
+    color: var(--info-color);
+    font-weight: 500;
+    background-color: rgba(13, 202, 240, 0.1);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    border: 1px solid rgba(13, 202, 240, 0.3);
+}
+
+.template-support {
+    color: var(--success-color);
+    font-weight: 500;
+    background-color: rgba(25, 135, 84, 0.1);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    border: 1px solid rgba(25, 135, 84, 0.3);
+}
+
+.message-meta .template-info,
+.message-meta .template-support {
+    display: inline-block;
+    margin: 0 0.125rem;
+}
+
+/* Template badge in model groups */
+.model-group .badge.bg-info {
+    background-color: var(--info-color) !important;
+    color: white;
+    font-size: 0.6rem;
+    padding: 0.2rem 0.4rem;
+}
+
+/* Enhanced chat interface for template support */
+.chat-template-indicator {
+    background-color: rgba(25, 135, 84, 0.1);
+    border: 1px solid rgba(25, 135, 84, 0.3);
+    color: var(--success-color);
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: 0.5rem;
+}
+
+/* Template format indicator */
+.template-format-badge {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+    margin-left: 0.25rem;
+}
+
+/* Enhanced message bubbles for template-aware responses */
+.message.assistant .message-bubble.template-aware {
+    border-left: 3px solid var(--success-color);
+    background-color: rgba(25, 135, 84, 0.02);
+}
+
+/* Template feature indicators */
+.template-features {
+    font-size: 0.7rem;
+    color: var(--secondary-color);
+    margin-top: 0.25rem;
+}
+
+.template-features .feature-tag {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+    margin-right: 0.25rem;
+    font-size: 0.65rem;
+}
+
+/* Model selection enhancements for template support */
+.model-group.template-supported {
+    border-left-color: var(--success-color);
+}
+
+.model-group.template-supported::before {
+    content: "✓";
+    position: absolute;
+    left: -0.75rem;
+    top: 0.25rem;
+    color: var(--success-color);
+    font-weight: bold;
+    font-size: 0.8rem;
+}
+
+/* Chat template status in network display */
+.template-status-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: 0.25rem;
+}
+
+.template-status-indicator.supported {
+    background-color: var(--success-color);
+    animation: templatePulse 2s infinite;
+}
+
+.template-status-indicator.unknown {
+    background-color: var(--secondary-color);
+    opacity: 0.6;
+}
+
+@keyframes templatePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Enhanced streaming indicators for template-aware responses */
+.streaming-template-indicator {
+    color: var(--success-color);
+    font-size: 0.7rem;
+    margin-left: 0.5rem;
+    animation: templateStreamPulse 1.5s infinite;
+}
+
+@keyframes templateStreamPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Template compatibility indicators */
+.compatibility-badge {
+    background-color: var(--success-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+    margin-left: 0.25rem;
+}
+
+.compatibility-badge.partial {
+    background-color: var(--warning-color);
+    color: #000;
+}
+
+.compatibility-badge.none {
+    background-color: var(--secondary-color);
+}
+
+/* Enhanced model details for template information */
+.template-details-section {
+    background-color: rgba(25, 135, 84, 0.05);
+    border: 1px solid rgba(25, 135, 84, 0.2);
+    border-radius: 0.375rem;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.template-details-section h6 {
+    color: var(--success-color);
+    margin-bottom: 0.75rem;
+}
+
+/* Role support indicators */
+.role-support-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.role-badge {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+}
+
+.role-badge.system {
+    background-color: var(--info-color);
+}
+
+.role-badge.user {
+    background-color: var(--primary-color);
+}
+
+.role-badge.assistant {
+    background-color: var(--success-color);
+}
+
 /* Connection status indicators */
 .connection-status {
     font-size: 0.7rem;
