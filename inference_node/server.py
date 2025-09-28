@@ -293,6 +293,9 @@ async def lifespan(app: FastAPI):
         #     logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
         #     p2p_handler = None
         
+        # Schedule post-uvicorn join event trigger
+        asyncio.create_task(trigger_post_uvicorn_join())
+        
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
         # Cleanup any partially started services
@@ -333,6 +336,22 @@ async def lifespan(app: FastAPI):
     # IMPORTANT: Give additional time for final event propagation
     logger.info("⏳ Final wait for event propagation...")
     await asyncio.sleep(1.0)
+
+async def trigger_post_uvicorn_join():
+    """Trigger the delayed DHT join event after uvicorn is fully ready"""
+    try:
+        # Wait for uvicorn to be fully ready
+        await asyncio.sleep(3.0)
+        
+        if dht_publisher and hasattr(dht_publisher, 'send_post_uvicorn_join_event'):
+            logger.info("🎉 Triggering post-uvicorn DHT join event...")
+            await dht_publisher.send_post_uvicorn_join_event()
+            logger.info("✅ Post-uvicorn DHT join event triggered successfully")
+        else:
+            logger.warning("⚠️ DHT publisher not available for post-uvicorn join event")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to trigger post-uvicorn join event: {e}")
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
