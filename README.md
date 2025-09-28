@@ -56,6 +56,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 - **LLM models in GGUF format** (compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp))
 - Docker (optional, for containerized deployment)
 
+
 ## Use Cases & Scenarios
 
 LlamaNet's decentralized architecture makes it ideal for various scenarios where traditional centralized AI services fall short. Here are key use cases where LlamaNet provides significant advantages:
