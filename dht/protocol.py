@@ -120,25 +120,6 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             logger.debug(f"Unknown DHT message type: {msg_type}")
     
     async def _handle_ping(self, message: Dict[str, Any], addr: Tuple[str, int]):
-        """Handle ping message"""
-        sender_id = message.get('sender_id')
-        if sender_id:
-            from dht.kademlia_node import Contact
-            contact = Contact(sender_id, addr[0], addr[1])
-            self.node.routing_table.add_contact(contact)
-        
-        response = {
-            'type': 'response',
-            'id': message.get('id'),
-            'sender_id': self.node.node_id,
-            'data': {
-                'pong': True,
-                'sender_id': self.node.node_id
-            }
-        }
-        await self._send_message(response, addr)
-
-    async def _handle_ping(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle ping message - basic DHT operation only"""
         sender_id = message.get('sender_id')
         if sender_id:

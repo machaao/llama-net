@@ -727,14 +727,9 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                                 ))
                                 logger.debug(f"✅ Emitted NODE_UPDATED event for {node_id[:8]}... (updated in data refresh)")
                         
-                        # Set status based on last_seen time
+                        # Update node tracking (removed invalid attribute references)
                         time_since_last_seen = (time.time() - node_info.last_seen)
-                        if time_since_last_seen < 60:
-                            self.nodeStatuses.set(node_id, 'online')
-                            self.nodeLastEvent.set(node_id, time.time() * 1000)  # Convert to milliseconds
-                            self.nodeEventTypes.set(node_id, 'topology_refresh')
-                        else:
-                            self.nodeStatuses.set(node_id, 'unknown')
+                        logger.debug(f"Node {node_id[:8]}... last seen {time_since_last_seen:.1f}s ago")
                             
                 except Exception as e:
                     logger.debug(f"Failed to process node data: {e}")

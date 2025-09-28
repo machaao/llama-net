@@ -31,6 +31,7 @@ from inference_node.config import InferenceConfig
 from inference_node.llm_wrapper import LlamaWrapper
 from inference_node.metrics import SystemInfo
 from inference_node.dht_publisher import DHTPublisher
+from inference_node.event_publisher import EventBasedDHTPublisher
 from inference_node.heartbeat import HeartbeatManager
 from inference_node.p2p_handler import P2PRequestHandler
 from client.dht_discovery import DHTDiscovery
