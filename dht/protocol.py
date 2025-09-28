@@ -234,15 +234,33 @@ class KademliaProtocol(asyncio.DatagramProtocol):
     
     async def send_request(self, message: Dict[str, Any], addr: Tuple[str, int], timeout: float = 5.0) -> Optional[Dict[str, Any]]:
         """Send a request and wait for response"""
-        msg_id = message['id']
+        if not self.transport:
+            logger.error("Cannot send request: transport not available")
+            return None
+        
+        msg_id = message.get('id')
+        if not msg_id:
+            msg_id = str(uuid.uuid4())
+            message['id'] = msg_id
+        
+        # Create future for response
         future = asyncio.Future()
         self.pending_requests[msg_id] = future
         
-        await self._send_message(message, addr)
-        
         try:
-            result = await asyncio.wait_for(future, timeout=timeout)
-            return result
+            # Send message
+            await self._send_message(message, addr)
+            
+            # Wait for response with timeout
+            response = await asyncio.wait_for(future, timeout=timeout)
+            return response
+            
         except asyncio.TimeoutError:
-            self.pending_requests.pop(msg_id, None)
+            logger.debug(f"Request timeout to {addr}: {message.get('type')}")
             return None
+        except Exception as e:
+            logger.error(f"Error sending request to {addr}: {e}")
+            return None
+        finally:
+            # Clean up pending request
+            self.pending_requests.pop(msg_id, None)

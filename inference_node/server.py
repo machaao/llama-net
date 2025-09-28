@@ -738,7 +738,7 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
                 }
             )
         else:
-            # Non-streaming request (unchanged)
+            # Non-streaming request
             timeout = aiohttp.ClientTimeout(total=30, connect=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
@@ -991,7 +991,7 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
                 }
             )
         else:
-            # Non-streaming request (unchanged)
+            # Non-streaming request
             timeout = aiohttp.ClientTimeout(total=30, connect=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(

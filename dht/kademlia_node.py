@@ -434,8 +434,12 @@ class KademliaNode:
             'value': value
         }
         
-        response = await self.protocol.send_request(message, (contact.ip, contact.port))
-        return response and response.get('stored', False)
+        try:
+            response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            return response and response.get('stored', False)
+        except Exception as e:
+            logger.error(f"Error storing on node {contact.node_id[:8]}...: {e}")
+            return False
     
     async def _find_value_on_node(self, contact: Contact, key: str) -> Optional[Any]:
         """Find value on a specific node"""
@@ -446,9 +450,13 @@ class KademliaNode:
             'key': key
         }
         
-        response = await self.protocol.send_request(message, (contact.ip, contact.port))
-        if response and 'value' in response:
-            return response['value']
+        try:
+            response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            if response and 'value' in response:
+                return response['value']
+        except Exception as e:
+            logger.error(f"Error finding value on node {contact.node_id[:8]}...: {e}")
+        
         return None
     
     async def handle_network_join_event(self, node_id: str, ip: str, port: int, join_source: str = 'network') -> bool:
@@ -486,15 +494,25 @@ class KademliaNode:
             'target_id': target_id
         }
         
-        response = await self.protocol.send_request(message, (contact.ip, contact.port))
-        if response and 'contacts' in response:
-            contacts = []
-            for contact_data in response['contacts']:
-                contacts.append(Contact(
-                    contact_data['node_id'],
-                    contact_data['ip'],
-                    contact_data['port']
-                ))
-            return contacts
+        try:
+            response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            if response and 'contacts' in response:
+                contacts = []
+                for contact_data in response['contacts']:
+                    try:
+                        new_contact = Contact(
+                            contact_data['node_id'],
+                            contact_data['ip'],
+                            contact_data['port']
+                        )
+                        # Validate contact before adding
+                        if NodeValidator.validate_contact(new_contact):
+                            contacts.append(new_contact)
+                    except Exception as e:
+                        logger.warning(f"Invalid contact data in find_node response: {e}")
+                return contacts
+        except Exception as e:
+            logger.error(f"Error finding nodes on contact {contact.node_id[:8]}...: {e}")
+        
         return []
 
