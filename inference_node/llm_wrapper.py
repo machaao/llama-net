@@ -213,7 +213,8 @@ class LlamaWrapper:
                      top_p: float = 0.9,
                      top_k: int = 40,
                      stop: Optional[List[str]] = None,
-                     repeat_penalty: float = 1.1) -> Dict[str, Any]:
+                     repeat_penalty: float = 1.1,
+                     reasoning: bool = True) -> Dict[str, Any]:
         """Generate chat completion using proper chat formatting"""
         self.metrics_manager.record_request_start()
         start_time = time.time()
@@ -232,25 +233,35 @@ class LlamaWrapper:
             
             generation_time = time.time() - start_time
             
-            # Extract response
+            # Extract response with reasoning support
             response_content = ""
+            reasoning_content = ""
             tokens_generated = 0
             
             if 'choices' in output and len(output['choices']) > 0:
                 choice = output['choices'][0]
                 if 'message' in choice and 'content' in choice['message']:
                     response_content = choice['message']['content']
+                    
+                    # Extract reasoning if present (for reasoning models)
+                    if reasoning and hasattr(choice['message'], 'reasoning'):
+                        reasoning_content = choice['message'].get('reasoning', '')
                 
             if 'usage' in output:
                 tokens_generated = output['usage'].get('completion_tokens', 0)
             else:
                 tokens_generated = len(response_content.split())
             
-            return {
+            result = {
                 "text": response_content,
                 "tokens_generated": tokens_generated,
                 "generation_time": generation_time
             }
+            
+            if reasoning_content:
+                result["reasoning"] = reasoning_content
+                
+            return result
             
         finally:
             generation_time = time.time() - start_time
@@ -264,7 +275,8 @@ class LlamaWrapper:
                            top_p: float = 0.9,
                            top_k: int = 40,
                            stop: Optional[List[str]] = None,
-                           repeat_penalty: float = 1.1) -> Generator[Dict[str, Any], None, None]:
+                           repeat_penalty: float = 1.1,
+                           reasoning: bool = True) -> Generator[Dict[str, Any], None, None]:
         """Generate streaming chat completion"""
         self.metrics_manager.record_request_start()
         start_time = time.time()
@@ -290,18 +302,27 @@ class LlamaWrapper:
                     choice = chunk['choices'][0]
                     delta = choice.get('delta', {})
                     
+                    chunk_data = {}
+                    
                     if 'content' in delta and delta['content']:
                         total_tokens += 1
                         accumulated_text += delta['content']
+                        chunk_data["text"] = delta['content']
+                        chunk_data["accumulated_text"] = accumulated_text
+                    
+                    # Handle reasoning content if present
+                    if reasoning and 'reasoning' in delta and delta['reasoning']:
+                        chunk_data["reasoning"] = delta['reasoning']
+                    
+                    if chunk_data:
                         generation_time = time.time() - start_time
-                        
-                        yield {
-                            "text": delta['content'],
-                            "accumulated_text": accumulated_text,
+                        chunk_data.update({
                             "tokens_generated": total_tokens,
                             "generation_time": generation_time,
                             "finished": choice.get('finish_reason') is not None
-                        }
+                        })
+                        
+                        yield chunk_data
                         
                         if choice.get('finish_reason') is not None:
                             break
@@ -316,7 +337,8 @@ class LlamaWrapper:
                                        top_p: float = 0.9,
                                        top_k: int = 40,
                                        stop: Optional[List[str]] = None,
-                                       repeat_penalty: float = 1.1) -> Generator[Dict[str, Any], None, None]:
+                                       repeat_penalty: float = 1.1,
+                                       reasoning: bool = True) -> Generator[Dict[str, Any], None, None]:
         """Async wrapper for streaming chat generation"""
         for chunk in self.generate_chat_stream(
             messages=messages,
@@ -325,7 +347,8 @@ class LlamaWrapper:
             top_p=top_p,
             top_k=top_k,
             stop=stop,
-            repeat_penalty=repeat_penalty
+            repeat_penalty=repeat_penalty,
+            reasoning=reasoning
         ):
             yield chunk
         

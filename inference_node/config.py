@@ -38,7 +38,10 @@ class InferenceConfig:
                                 help='Llama Server Batch Size (in tokens)')
 
             parser.add_argument('--gpu-layers', default=-1, type=int,
-                                help='Llama Server Batch Size (in tokens)')
+                                help='Llama Server GPU Layers')
+
+            parser.add_argument('--verbose', action='store_true',
+                                help='Enable verbose logging for llama-cpp-python')
 
             args = parser.parse_args()
             
@@ -49,6 +52,7 @@ class InferenceConfig:
             self.n_batch = int(load_env_var("N_BATCH", args.batch_size))
             # LLM configuration
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
+            self.verbose = args.verbose or bool(load_env_var("VERBOSE", False))
 
             # Handle HTTP port using consolidated utilities
             preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))
@@ -77,6 +81,12 @@ class InferenceConfig:
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(None, self.port)
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
+            
+            # LLM configuration from environment
+            self.n_ctx = int(load_env_var("N_CTX", 4096))
+            self.n_batch = int(load_env_var("N_BATCH", 4096))
+            self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
+            self.verbose = bool(load_env_var("VERBOSE", False))
         
         # Validate model path
         if not self.model_path:
@@ -271,6 +281,10 @@ class InferenceConfig:
             "dht_port": self.dht_port,
             "bootstrap_nodes": self.bootstrap_nodes,
             "heartbeat_interval": self.heartbeat_interval,
+            "n_ctx": self.n_ctx,
+            "n_batch": self.n_batch,
+            "n_gpu_layers": self.n_gpu_layers,
+            "verbose": self.verbose,
             "hardware_based": True
         }
         
@@ -278,5 +292,5 @@ class InferenceConfig:
         return (
             f"InferenceConfig(model_path={self.model_path}, "
             f"host={self.host}, port={self.port}, node_id={self.node_id}, "
-            f"dht_port={self.dht_port})"
+            f"dht_port={self.dht_port}, verbose={self.verbose})"
         )

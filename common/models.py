@@ -58,11 +58,12 @@ class NodeInfo(BaseModel):
         
         return self.ip  # Fallback to primary IP
 
-# OpenAI-compatible models only
+# OpenAI-compatible models with reasoning support
 class OpenAIMessage(BaseModel):
-    """OpenAI chat message format"""
+    """OpenAI chat message format with reasoning support"""
     role: str  # "system", "user", "assistant"
     content: str
+    reasoning: Optional[str] = None  # Add reasoning field for reasoning models
 
 class OpenAICompletionRequest(BaseModel):
     """OpenAI-compatible completion request"""
@@ -82,9 +83,10 @@ class OpenAICompletionRequest(BaseModel):
     echo: Optional[bool] = False
     strategy: Optional[str] = "round_robin"
     target_model: Optional[str] = None  # Add target model parameter
+    reasoning: Optional[bool] = True  # Add reasoning parameter
 
 class OpenAIChatCompletionRequest(BaseModel):
-    """OpenAI-compatible chat completion request"""
+    """OpenAI-compatible chat completion request with reasoning support"""
     model: str = "llamanet"
     messages: List[OpenAIMessage]
     max_tokens: Optional[int] = 100
@@ -98,7 +100,8 @@ class OpenAIChatCompletionRequest(BaseModel):
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
     strategy: Optional[str] = "round_robin"
-    target_model: Optional[str] = None  # Add target model parameter
+    target_model: Optional[str] = None
+    reasoning: Optional[bool] = True  # Add reasoning parameter
 
 class OpenAIChoice(BaseModel):
     """OpenAI choice object"""
@@ -146,11 +149,12 @@ class OpenAIModelList(BaseModel):
     object: str = "list"
     data: List[OpenAIModel]
 
-# Streaming OpenAI models
+# Streaming OpenAI models with reasoning support
 class OpenAIStreamingDelta(BaseModel):
-    """OpenAI streaming delta object"""
+    """OpenAI streaming delta object with reasoning support"""
     content: Optional[str] = None
     role: Optional[str] = None
+    reasoning: Optional[str] = None  # Add reasoning field
 
 class OpenAIStreamingChoice(BaseModel):
     """OpenAI streaming choice object"""
@@ -201,7 +205,7 @@ async def create_streaming_chat_response(
         stream_generator: AsyncGenerator[Dict[str, Any], None],
         node_info: Optional[Dict[str, Any]] = None
 ) -> AsyncGenerator[str, None]:
-    """Create OpenAI-compatible streaming chat completion response"""
+    """Create OpenAI-compatible streaming chat completion response with reasoning support"""
     created = int(time.time())
 
     # Send initial chunk with role and node info
@@ -217,15 +221,23 @@ async def create_streaming_chat_response(
     )
     yield create_sse_data(initial_chunk.dict())
 
-    # Stream content chunks
+    # Stream content chunks with reasoning support
     async for chunk in stream_generator:
+        delta_content = {}
+        
         if chunk.get("text"):
+            delta_content["content"] = chunk["text"]
+        
+        if chunk.get("reasoning"):
+            delta_content["reasoning"] = chunk["reasoning"]
+        
+        if delta_content:
             streaming_chunk = OpenAIStreamingChatResponse(
                 id=request_id,
                 created=created,
                 model=model,
                 choices=[OpenAIStreamingChoice(
-                    delta=OpenAIStreamingDelta(content=chunk["text"]),
+                    delta=OpenAIStreamingDelta(**delta_content),
                     index=0,
                     finish_reason=None if not chunk.get("finished") else "stop"
                 )]
