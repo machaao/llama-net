@@ -30,13 +30,17 @@ class InferenceConfig:
                               help='Unique identifier for this node')
             parser.add_argument('--bootstrap-nodes', default='',
                               help='Comma-separated list of bootstrap nodes (ip:port)')
+
+            parser.add_argument('--ctx-size', default=4096, type=int,
+                                help='Context Size (in tokens)')
             
             args = parser.parse_args()
             
             # Use command line args or fall back to environment variables
             self.model_path = args.model_path or load_env_var("MODEL_PATH", "")
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
-            
+            self.n_ctx = int(load_env_var("N_CTX", args.ctx_size))
+
             # Handle HTTP port using consolidated utilities
             preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))
             self.port = PortManager.get_port_with_fallback(preferred_http_port, 'tcp')
@@ -78,7 +82,6 @@ class InferenceConfig:
         self.heartbeat_interval = int(load_env_var("HEARTBEAT_INTERVAL", 10))
         
         # LLM configuration
-        self.n_ctx = int(load_env_var("N_CTX", 2048))
         self.n_batch = int(load_env_var("N_BATCH", 8))
         self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
         
