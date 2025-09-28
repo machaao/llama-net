@@ -171,7 +171,7 @@ class LlamaNetUI {
     }
     
     async loadChatTemplateInfo() {
-        """Load chat template information from the server"""
+        // Load chat template information from the server
         try {
             const response = await fetch(`${this.baseUrl}/chat/template`);
             if (response.ok) {
@@ -189,7 +189,7 @@ class LlamaNetUI {
     }
     
     updateTemplateIndicator() {
-        """Update the UI to show chat template information"""
+        // Update the UI to show chat template information
         const chatHeader = document.querySelector('.card-header h5');
         if (chatHeader && this.templateInfo) {
             const templateBadge = this.getTemplateBadge();
@@ -202,7 +202,7 @@ class LlamaNetUI {
     }
     
     getTemplateBadge() {
-        """Generate a badge showing chat template support"""
+        // Generate a badge showing chat template support
         if (!this.templateInfo) return '';
         
         const format = this.templateInfo.chat_format || 'unknown';
@@ -1336,7 +1336,7 @@ class LlamaNetUI {
     }
     
     async loadModelTemplateInfo(modelId) {
-        """Load template information for a specific model"""
+        // Load template information for a specific model
         try {
             const response = await fetch(`${this.baseUrl}/v1/models/${modelId}/template`);
             if (response.ok) {
@@ -1528,7 +1528,7 @@ class LlamaNetUI {
     }
     
     async showTemplateDetails(modelId) {
-        """Show detailed chat template information"""
+        // Show detailed chat template information
         try {
             const response = await fetch(`${this.baseUrl}/v1/models/${modelId}/template`);
             if (response.ok) {
