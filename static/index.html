@@ -61,6 +61,54 @@
                 <div class="card h-100">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5><i class="fas fa-comments"></i> Chat Interface</h5>
+                        <button class="btn btn-outline-primary btn-sm" onclick="toggleSystemPrompt()" id="system-prompt-toggle">
+                            <i class="fas fa-cog"></i> System Prompt
+                        </button>
+                    </div>
+                    
+                    <!-- System Prompt Section (Initially Hidden) -->
+                    <div id="system-prompt-section" class="card-body border-bottom bg-light" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <label for="system-prompt-input" class="form-label">
+                                    <i class="fas fa-robot"></i> System Prompt
+                                    <span class="system-prompt-indicator ms-2" id="system-prompt-status">
+                                        <i class="fas fa-circle text-secondary" style="font-size: 0.5rem;"></i>
+                                        <small class="text-muted">Default</small>
+                                    </span>
+                                </label>
+                                <textarea 
+                                    id="system-prompt-input" 
+                                    class="form-control" 
+                                    rows="3" 
+                                    placeholder="Enter a custom system prompt to guide the AI's behavior..."
+                                ></textarea>
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle"></i> 
+                                    The system prompt defines how the AI should behave and respond. Leave empty for default behavior.
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Quick Presets</label>
+                                <select id="system-prompt-presets" class="form-select mb-2">
+                                    <option value="">Select a preset...</option>
+                                    <option value="helpful">Helpful Assistant</option>
+                                    <option value="creative">Creative Writer</option>
+                                    <option value="technical">Technical Expert</option>
+                                    <option value="teacher">Patient Teacher</option>
+                                    <option value="analyst">Data Analyst</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-primary btn-sm" onclick="applySystemPrompt()">
+                                        <i class="fas fa-check"></i> Apply
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearSystemPrompt()">
+                                        <i class="fas fa-times"></i> Clear
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="card-body d-flex flex-column">
                         <!-- Chat Messages -->

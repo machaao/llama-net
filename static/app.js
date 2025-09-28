@@ -92,6 +92,16 @@ class LlamaNetUI {
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
         
+        // System prompt properties
+        this.systemPrompt = '';
+        this.systemPromptPresets = {
+            'helpful': 'You are a helpful AI assistant. Provide clear, accurate, and useful responses to help users with their questions and tasks.',
+            'creative': 'You are a creative writing assistant. Help users with storytelling, creative writing, brainstorming ideas, and artistic expression. Be imaginative and inspiring.',
+            'technical': 'You are a technical expert and programming assistant. Provide detailed, accurate technical information, code examples, and solutions to programming problems.',
+            'teacher': 'You are a patient and encouraging teacher. Explain concepts clearly, break down complex topics into simple steps, and help users learn effectively.',
+            'analyst': 'You are a data analyst and research assistant. Help users analyze information, interpret data, identify patterns, and draw meaningful conclusions.'
+        };
+        
         // SSE-only properties (NO POLLING) - Updated for unified SSE manager
         this.eventSource = null;
         this.isConnected = false;
@@ -125,6 +135,9 @@ class LlamaNetUI {
     }
     
     async init() {
+        // Load system prompt from localStorage
+        this.loadSystemPrompt();
+        
         // Start ONLY SSE-based network monitoring using unified SSE manager
         this.startUnifiedSSENetworkMonitoring();
         
@@ -160,6 +173,107 @@ class LlamaNetUI {
                 }
             }
         });
+    }
+    
+    // System Prompt Methods
+    loadSystemPrompt() {
+        try {
+            const saved = localStorage.getItem('llamanet_system_prompt');
+            if (saved) {
+                this.systemPrompt = saved;
+                const input = document.getElementById('system-prompt-input');
+                if (input) {
+                    input.value = this.systemPrompt;
+                    this.updateSystemPromptUI();
+                }
+            }
+        } catch (error) {
+            console.warn('Could not load system prompt from localStorage:', error);
+        }
+    }
+    
+    saveSystemPrompt() {
+        try {
+            localStorage.setItem('llamanet_system_prompt', this.systemPrompt);
+        } catch (error) {
+            console.warn('Could not save system prompt to localStorage:', error);
+        }
+    }
+    
+    updateSystemPromptUI() {
+        const input = document.getElementById('system-prompt-input');
+        const status = document.getElementById('system-prompt-status');
+        const toggle = document.getElementById('system-prompt-toggle');
+        const chatMessages = document.getElementById('chat-messages');
+        
+        if (input) {
+            if (this.systemPrompt.trim()) {
+                input.classList.add('has-content');
+            } else {
+                input.classList.remove('has-content');
+            }
+        }
+        
+        if (status) {
+            if (this.systemPrompt.trim()) {
+                status.innerHTML = '<i class="fas fa-circle text-primary" style="font-size: 0.5rem;"></i><small class="text-primary">Custom Active</small>';
+                status.classList.add('active');
+            } else {
+                status.innerHTML = '<i class="fas fa-circle text-secondary" style="font-size: 0.5rem;"></i><small class="text-muted">Default</small>';
+                status.classList.remove('active');
+            }
+        }
+        
+        if (toggle) {
+            if (this.systemPrompt.trim()) {
+                toggle.classList.add('active');
+                toggle.innerHTML = '<i class="fas fa-cog"></i> System Prompt <i class="fas fa-check-circle ms-1"></i>';
+            } else {
+                toggle.classList.remove('active');
+                toggle.innerHTML = '<i class="fas fa-cog"></i> System Prompt';
+            }
+        }
+        
+        // Update chat container visual indicator
+        if (chatMessages) {
+            if (this.systemPrompt.trim()) {
+                chatMessages.classList.add('chat-system-prompt-active');
+            } else {
+                chatMessages.classList.remove('chat-system-prompt-active');
+            }
+        }
+        
+        // Update character count
+        this.updateCharacterCount();
+    }
+    
+    updateCharacterCount() {
+        const input = document.getElementById('system-prompt-input');
+        if (!input) return;
+        
+        const length = input.value.length;
+        const maxLength = 2000; // Reasonable limit for system prompts
+        
+        // Remove existing character count
+        const existingCount = input.parentNode.querySelector('.system-prompt-char-count');
+        if (existingCount) {
+            existingCount.remove();
+        }
+        
+        // Add character count if there's content
+        if (length > 0) {
+            const countDiv = document.createElement('div');
+            countDiv.className = 'system-prompt-char-count';
+            
+            if (length > maxLength * 0.9) {
+                countDiv.classList.add('danger');
+            } else if (length > maxLength * 0.7) {
+                countDiv.classList.add('warning');
+            }
+            
+            countDiv.textContent = `${length} / ${maxLength} characters`;
+            input.parentNode.appendChild(countDiv);
+        }
     }
     
     
@@ -1686,10 +1800,11 @@ class LlamaNetUI {
         // Build chat history for context
         const messages = [];
         
-        // Add system message
+        // Add system message (custom or default)
+        const systemMessage = this.systemPrompt.trim() || 'You are a helpful AI assistant. Provide clear, concise responses.';
         messages.push({ 
             role: 'system', 
-            content: 'You are a helpful AI assistant. Provide clear, concise responses.' 
+            content: systemMessage
         });
         
         // Add recent chat history (last 6 exchanges to keep context manageable)
@@ -1737,7 +1852,8 @@ class LlamaNetUI {
                 tokens: data.usage.total_tokens,
                 api: 'OpenAI Compatible',
                 node_info: data.node_info,
-                model_used: modelToUse
+                model_used: modelToUse,
+                system_prompt_used: this.systemPrompt.trim() ? 'Custom' : 'Default'
             };
             
             return {
@@ -2002,6 +2118,7 @@ class LlamaNetUI {
             if (metadata.tokens) parts.push(`Tokens: ${metadata.tokens}`);
             if (metadata.api) parts.push(`API: ${metadata.api}`);
             if (metadata.id) parts.push(`ID: ${metadata.id.substring(0, 8)}...`);
+            if (metadata.system_prompt_used) parts.push(`System: ${metadata.system_prompt_used}`);
             
             // Add node information display
             if (metadata.node_info) {
@@ -2607,10 +2724,14 @@ class LlamaNetUI {
                     // Clear all messages
                     chatContainer.innerHTML = '';
                     
-                    // Restore welcome message with current model info
-                    const welcomeMessage = this.selectedModel ? 
+                    // Restore welcome message with current model info and system prompt status
+                    let welcomeMessage = this.selectedModel ? 
                         `Welcome to LlamaNet! Using model: <strong>${this.selectedModel}</strong>` :
                         'Welcome to LlamaNet! Distributed AI inference network.';
+                    
+                    if (this.systemPrompt.trim()) {
+                        welcomeMessage += '<br><small class="text-primary"><i class="fas fa-cog"></i> Custom system prompt active</small>';
+                    }
                     
                     chatContainer.innerHTML = `
                         <div class="text-center text-muted">
@@ -2695,6 +2816,70 @@ class LlamaNetUI {
 // Global functions for HTML event handlers
 let llamaNetUI;
 
+// System Prompt Functions
+function toggleSystemPrompt() {
+    const section = document.getElementById('system-prompt-section');
+    const toggle = document.getElementById('system-prompt-toggle');
+    
+    if (section.style.display === 'none' || !section.style.display) {
+        section.style.display = 'block';
+        section.classList.add('show');
+        toggle.innerHTML = '<i class="fas fa-cog"></i> Hide System Prompt';
+        
+        // Focus on the textarea
+        setTimeout(() => {
+            const input = document.getElementById('system-prompt-input');
+            if (input) {
+                input.focus();
+            }
+        }, 100);
+    } else {
+        section.style.display = 'none';
+        section.classList.remove('show');
+        toggle.innerHTML = llamaNetUI.systemPrompt.trim() ? 
+            '<i class="fas fa-cog"></i> System Prompt <i class="fas fa-check-circle ms-1"></i>' :
+            '<i class="fas fa-cog"></i> System Prompt';
+    }
+}
+
+function applySystemPrompt() {
+    const input = document.getElementById('system-prompt-input');
+    if (input && llamaNetUI) {
+        llamaNetUI.systemPrompt = input.value.trim();
+        llamaNetUI.saveSystemPrompt();
+        llamaNetUI.updateSystemPromptUI();
+        
+        // Show confirmation
+        if (llamaNetUI.systemPrompt) {
+            llamaNetUI.showToast('success', 'Custom system prompt applied');
+        } else {
+            llamaNetUI.showToast('info', 'System prompt cleared - using default');
+        }
+        
+        // Hide the section
+        toggleSystemPrompt();
+    }
+}
+
+function clearSystemPrompt() {
+    const input = document.getElementById('system-prompt-input');
+    const presets = document.getElementById('system-prompt-presets');
+    
+    if (input) {
+        input.value = '';
+    }
+    if (presets) {
+        presets.value = '';
+    }
+    
+    if (llamaNetUI) {
+        llamaNetUI.systemPrompt = '';
+        llamaNetUI.saveSystemPrompt();
+        llamaNetUI.updateSystemPromptUI();
+        llamaNetUI.showToast('info', 'System prompt cleared');
+    }
+}
+
 function sendMessage() {
     llamaNetUI.sendMessage();
 }
@@ -2740,6 +2925,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 Initializing LlamaNet UI...');
     
     llamaNetUI = new LlamaNetUI();
+    
+    // Setup system prompt event listeners
+    const presets = document.getElementById('system-prompt-presets');
+    const input = document.getElementById('system-prompt-input');
+    
+    if (presets && input) {
+        presets.addEventListener('change', (e) => {
+            const selectedPreset = e.target.value;
+            if (selectedPreset && llamaNetUI && llamaNetUI.systemPromptPresets[selectedPreset]) {
+                input.value = llamaNetUI.systemPromptPresets[selectedPreset];
+                llamaNetUI.updateCharacterCount();
+            } else if (selectedPreset === 'custom') {
+                // Keep current content for custom option
+                input.focus();
+            }
+        });
+        
+        // Update character count on input
+        input.addEventListener('input', () => {
+            if (llamaNetUI) {
+                llamaNetUI.updateCharacterCount();
+            }
+        });
+    }
     
     // Ensure initial network status is loaded
     try {
