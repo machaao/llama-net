@@ -83,7 +83,7 @@ class InferenceConfig:
         self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
         
         # Extract model name from path
-        self.model_name = os.path.basename(self.model_path).split('.')[0]
+        self.model_name = os.path.basename(self.model_path)
         
         # Configure networking for better stability
         self._configure_networking()

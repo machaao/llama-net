@@ -100,15 +100,6 @@ class KademliaProtocol(asyncio.DatagramProtocol):
 
         logger.info(f"📡 DHT message received: {sender_id}, {msg_type}, {addr}")
 
-        # Update contact activity for any valid message (basic DHT operation)
-        if sender_id and msg_type not in ['response']:
-            from dht.kademlia_node import Contact
-            contact = Contact(sender_id, addr[0], addr[1])
-
-            if msg_type == 'ping':
-                self.node.routing_table.add_contact(contact)
-
-
         # Handle DHT protocol messages only
         # 'ping' acts like an act node
         if msg_type == 'ping':
@@ -121,6 +112,8 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             await self._handle_find_value(message, addr)
         elif msg_type == 'response':
             await self._handle_response(message, addr)
+        elif msg_type == 'leave_notification':
+            await self._handle_leave_notification(message, addr)
         else:
             logger.debug(f"Unknown DHT message type: {msg_type}")
     
@@ -131,7 +124,7 @@ class KademliaProtocol(asyncio.DatagramProtocol):
             from dht.kademlia_node import Contact
             contact = Contact(sender_id, addr[0], addr[1])
             self.node.routing_table.add_contact(contact)
-        
+
         response = {
             'type': 'response',
             'id': message.get('id'),
@@ -143,7 +136,11 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         }
         await self._send_message(response, addr)
 
-    
+    async def _handle_leave_notification(self, message: Dict[str, Any], addr: Tuple[str, int]):
+        """Handle ping message - basic DHT operation only"""
+        sender_id = message.get('sender_id')
+        await self.node.handle_network_leave_event(sender_id, 'interrupted')
+
     async def _handle_store(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Handle store message"""
         key = message.get('key')

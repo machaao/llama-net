@@ -85,6 +85,8 @@ class RoutingTable:
 
         logger.info(f"🔗 DHT contact removed: {node_id}")
 
+        self.cleanup_stale_contacts()
+
     def cleanup_stale_contacts(self):
         """Remove contacts that haven't been seen recently"""
         current_time = time.time()
