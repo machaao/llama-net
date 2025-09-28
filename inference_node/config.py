@@ -32,14 +32,23 @@ class InferenceConfig:
                               help='Comma-separated list of bootstrap nodes (ip:port)')
 
             parser.add_argument('--ctx-size', default=4096, type=int,
-                                help='Context Size (in tokens)')
-            
+                                help='Llama Server Context Size (in tokens)')
+
+            parser.add_argument('--batch-size', default=4096, type=int,
+                                help='Llama Server Batch Size (in tokens)')
+
+            parser.add_argument('--gpu-layers', default=-1, type=int,
+                                help='Llama Server Batch Size (in tokens)')
+
             args = parser.parse_args()
             
             # Use command line args or fall back to environment variables
             self.model_path = args.model_path or load_env_var("MODEL_PATH", "")
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
             self.n_ctx = int(load_env_var("N_CTX", args.ctx_size))
+            self.n_batch = int(load_env_var("N_BATCH", args.batch_size))
+            # LLM configuration
+            self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
 
             # Handle HTTP port using consolidated utilities
             preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))
@@ -81,9 +90,7 @@ class InferenceConfig:
         # DHT configuration
         self.heartbeat_interval = int(load_env_var("HEARTBEAT_INTERVAL", 10))
         
-        # LLM configuration
-        self.n_batch = int(load_env_var("N_BATCH", 8))
-        self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
+
         
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path)
