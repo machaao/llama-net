@@ -105,7 +105,7 @@ class DiscoverySSEBridge(NodeEventListener):
             logger.error(f"Error bridging discovery event to SSE: {e}")
 
 # Request concurrency limiting
-REQUEST_SEMAPHORE = asyncio.Semaphore(10)  # Max 10 concurrent requests
+REQUEST_SEMAPHORE = asyncio.Semaphore(100)  # Max 100 concurrent requests
 
 async def graceful_shutdown():
     """Graceful shutdown using the enhanced shutdown handler"""
@@ -650,7 +650,7 @@ async def create_completion(request: OpenAICompletionRequest):
         return await _handle_completion_locally(request)
 
 async def _handle_completion_locally(request: OpenAICompletionRequest):
-    """Handle completion on this node with robust SSE handling"""
+    """Handle completion on this node - NON-BLOCKING"""
     # Handle prompt (can be string or list)
     if isinstance(request.prompt, list):
         if len(request.prompt) == 0:
@@ -677,25 +677,43 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
             
             async def local_stream_generator():
                 try:
-                    async for chunk in llm.generate_stream_async(
-                        prompt=prompt,
-                        max_tokens=request.max_tokens or 100,
-                        temperature=request.temperature or 0.7,
-                        top_p=request.top_p or 0.9,
-                        stop=stop_tokens,
-                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
-                    ):
-                        # Transform to consistent format
+                    # Run streaming in thread to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    
+                    def create_stream():
+                        return llm.generate_stream(
+                            prompt=prompt,
+                            max_tokens=request.max_tokens or 100,
+                            temperature=request.temperature or 0.7,
+                            top_p=request.top_p or 0.9,
+                            stop=stop_tokens,
+                            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                        )
+                    
+                    # Create the generator in a thread
+                    stream_gen = await loop.run_in_executor(None, create_stream)
+                    
+                    # Yield chunks from the generator in thread executor
+                    def get_next_chunk():
+                        try:
+                            return next(stream_gen)
+                        except StopIteration:
+                            return None
+                    
+                    while True:
+                        chunk = await loop.run_in_executor(None, get_next_chunk)
+                        if chunk is None:
+                            break
                         yield {
                             "text": chunk.get("text", ""),
                             "finished": chunk.get("finished", False)
                         }
+                        
                 except asyncio.CancelledError:
                     logger.info("Local streaming cancelled")
                     raise
                 except Exception as e:
                     logger.error(f"Error in local streaming: {e}")
-                    # Don't re-raise, just end the stream gracefully
             
             # Create node info for streaming
             node_info = {
@@ -721,14 +739,18 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
                 }
             )
         
-        # Non-streaming response
-        result = llm.generate(
-            prompt=prompt,
-            max_tokens=request.max_tokens or 100,
-            temperature=request.temperature or 0.7,
-            top_p=request.top_p or 0.9,
-            stop=stop_tokens,
-            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+        # NON-STREAMING: Run in thread executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        
+        result = await loop.run_in_executor(
+            None,  # Use default thread pool
+            llm.generate,
+            prompt,
+            request.max_tokens or 100,
+            request.temperature or 0.7,
+            request.top_p or 0.9,
+            stop_tokens,
+            1.0 + (request.frequency_penalty or 0.0)
         )
         
         # Calculate token counts (approximate)
@@ -892,7 +914,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
         return await _handle_chat_completion_locally(request)
 
 async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
-    """Handle chat completion using proper chat templates"""
+    """Handle chat completion using proper chat templates - NON-BLOCKING"""
     
     # Convert OpenAI messages to our format
     messages = []
@@ -917,19 +939,38 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             
             async def local_stream_generator():
                 try:
-                    # Use the new chat streaming method
-                    async for chunk in llm.generate_chat_stream_async(
-                        messages=messages,
-                        max_tokens=request.max_tokens or 100,
-                        temperature=request.temperature or 0.7,
-                        top_p=request.top_p or 0.9,
-                        stop=stop_tokens,
-                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
-                    ):
+                    # Run streaming in thread to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    
+                    def create_stream():
+                        return llm.generate_chat_stream(
+                            messages=messages,
+                            max_tokens=request.max_tokens or 100,
+                            temperature=request.temperature or 0.7,
+                            top_p=request.top_p or 0.9,
+                            stop=stop_tokens,
+                            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                        )
+                    
+                    # Create the generator in a thread
+                    stream_gen = await loop.run_in_executor(None, create_stream)
+                    
+                    # Yield chunks from the generator in thread executor
+                    def get_next_chunk():
+                        try:
+                            return next(stream_gen)
+                        except StopIteration:
+                            return None
+                    
+                    while True:
+                        chunk = await loop.run_in_executor(None, get_next_chunk)
+                        if chunk is None:
+                            break
                         yield {
                             "text": chunk.get("text", ""),
                             "finished": chunk.get("finished", False)
                         }
+                        
                 except asyncio.CancelledError:
                     logger.info("Local chat streaming cancelled")
                     raise
@@ -961,14 +1002,18 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                 }
             )
         
-        # Non-streaming response using chat method
-        result = llm.generate_chat(
-            messages=messages,
-            max_tokens=request.max_tokens or 100,
-            temperature=request.temperature or 0.7,
-            top_p=request.top_p or 0.9,
-            stop=stop_tokens,
-            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+        # NON-STREAMING: Run in thread executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        
+        result = await loop.run_in_executor(
+            None,  # Use default thread pool
+            llm.generate_chat,
+            messages,
+            request.max_tokens or 100,
+            request.temperature or 0.7,
+            request.top_p or 0.9,
+            stop_tokens,
+            1.0 + (request.frequency_penalty or 0.0)
         )
         
         # Calculate token counts
