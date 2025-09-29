@@ -209,7 +209,7 @@ class LlamaWrapper:
                         max_tokens=int(max_tokens),
                         temperature=float(temperature),
                         top_p=float(top_p),
-                        top_k=int(top_k),
+                        top_k=int(top_k) if top_k is not None else 40,
                         stop=stop,
                         repeat_penalty=float(repeat_penalty),
                         reasoning=bool(reasoning)
@@ -232,7 +232,7 @@ class LlamaWrapper:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    top_k=top_k,
+                    top_k=top_k if top_k is not None else 40,
                     stop=stop,
                     repeat_penalty=repeat_penalty
                 )
