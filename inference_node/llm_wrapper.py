@@ -132,7 +132,7 @@ class LlamaWrapper:
             return await loop.run_in_executor(None, self.generate, *args, **kwargs)
             
     async def generate_chat_stream_safe(self, *args, **kwargs) -> Generator[Dict[str, Any], None, None]:
-        """Thread-safe version of generate_chat_stream with content filtering"""
+        """Thread-safe version of generate_chat_stream"""
         async with self._processing_lock:
             loop = asyncio.get_event_loop()
             
@@ -141,8 +141,6 @@ class LlamaWrapper:
             
             # Create the generator in a thread
             stream_gen = await loop.run_in_executor(None, create_stream)
-            
-            message_started = False
             
             # Yield chunks from the generator in thread executor
             def get_next_chunk():
@@ -156,33 +154,7 @@ class LlamaWrapper:
                 if chunk is None:
                     break
                 
-                text = chunk.get("text", "")
-                
-                if text:
-                    # Check for message start marker
-                    if not message_started and "<|message|>" in text and 'gpt-oss' in self.config.model_name:
-                        message_started = True
-                        # Extract content after marker
-                        actual_text = self._extract_actual_response(text)
-                        if actual_text:
-                            yield {
-                                "text": actual_text,
-                                "accumulated_text": chunk.get("accumulated_text", ""),
-                                "tokens_generated": chunk.get("tokens_generated", 0),
-                                "generation_time": chunk.get("generation_time", 0),
-                                "finished": chunk.get("finished", False)
-                            }
-                    elif message_started:
-                        # We're in actual content, pass through
-                        yield chunk
-                    elif self._should_filter_content(text):
-                        # Filter out reasoning/special tokens
-                        continue
-                    else:
-                        # Pass through other content
-                        yield chunk
-                else:
-                    yield chunk
+                yield chunk
                 
                 if chunk.get("finished"):
                     break
@@ -211,31 +183,6 @@ class LlamaWrapper:
                     break
                 yield chunk
 
-    def _should_filter_content(self, text: str) -> bool:
-        """Check if content should be filtered out (reasoning/special tokens)"""
-        if not text:
-            return False
-        
-        # Filter out reasoning markers and special tokens
-        filter_patterns = [
-            "<|end|>", "<|start|>", "<|channel|>", 
-            "assistant", "final", "user says", "instruction:",
-            "We need to respond", "The conversation:", "Let's answer"
-        ]
-        
-        # If text contains only filter patterns, filter it out
-        for pattern in filter_patterns:
-            if pattern in text and len(text.strip()) < 50:  # Short text with markers
-                return True
-        
-        return False
-
-    def _extract_actual_response(self, text: str) -> str:
-        """Extract actual response content after message marker"""
-        if "<|message|>" in text:
-            marker_idx = text.find("<|message|>")
-            return text[marker_idx + len("<|message|>"):]
-        return text
 
     def get_chat_template_info(self) -> Dict[str, Any]:
         """Get information about the current chat template"""
@@ -361,8 +308,6 @@ class LlamaWrapper:
         
         total_tokens = 0
         accumulated_text = ""
-        message_content_started = "gpt-oss" not in self.config.model_name
-        content_buffer = ""
         
         try:
             for chunk in stream:
@@ -374,39 +319,16 @@ class LlamaWrapper:
                     
                     if 'content' in delta and delta['content']:
                         content = delta['content']
-                        
-                        if not message_content_started:
-                            # Buffer content until we find the message marker
-                            content_buffer += content
-                            
-                            # Check if we've found the message start marker
-                            if "<|message|>" in content_buffer:
-                                message_content_started = True
-                                # Extract content after the marker
-                                marker_idx = content_buffer.find("<|message|>")
-                                actual_content = content_buffer[marker_idx + len("<|message|>"):]
-                                
-                                if actual_content:
-                                    total_tokens += len(actual_content.split())
-                                    accumulated_text += actual_content
-                                    chunk_data["text"] = actual_content
-                                    chunk_data["accumulated_text"] = accumulated_text
-                            
-                            # Skip yielding until we find the marker
-                            if not message_content_started:
-                                continue
-                        else:
-                            # We're in actual message content
-                            total_tokens += 1
-                            accumulated_text += content
-                            chunk_data["text"] = content
-                            chunk_data["accumulated_text"] = accumulated_text
+                        total_tokens += 1
+                        accumulated_text += content
+                        chunk_data["text"] = content
+                        chunk_data["accumulated_text"] = accumulated_text
                     
                     # Handle reasoning content if present (but don't include in main response)
                     if reasoning and 'reasoning' in delta and delta['reasoning']:
                         chunk_data["reasoning"] = delta['reasoning']
                     
-                    if chunk_data and message_content_started:
+                    if chunk_data:
                         generation_time = time.time() - start_time
                         chunk_data.update({
                             "tokens_generated": total_tokens,
