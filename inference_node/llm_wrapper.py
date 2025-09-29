@@ -160,7 +160,7 @@ class LlamaWrapper:
                 
                 if text:
                     # Check for message start marker
-                    if not message_started and "<|message|>" in text:
+                    if not message_started and "<|message|>" in text and 'gpt-oss' in self.config.model_name:
                         message_started = True
                         # Extract content after marker
                         actual_text = self._extract_actual_response(text)
@@ -357,7 +357,7 @@ class LlamaWrapper:
         
         total_tokens = 0
         accumulated_text = ""
-        message_content_started = False
+        message_content_started = "gpt-oss" not in self.config.model_name
         content_buffer = ""
         
         try:
