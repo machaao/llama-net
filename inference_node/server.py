@@ -1133,13 +1133,28 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
 
 async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRequest):
     """Handle chat completion locally through the queue system"""
-    # Convert OpenAI messages to our format
+    # Convert OpenAI messages to our format - ENSURE PROPER FORMAT
     messages = []
     for message in request.messages:
-        messages.append({
-            "role": message.role,
-            "content": message.content
-        })
+        # Ensure we're passing the right structure to llama-cpp-python
+        formatted_message = {
+            "role": str(message.role),  # Ensure string type
+            "content": str(message.content)  # Ensure string type
+        }
+        messages.append(formatted_message)
+    
+    # Validate messages format
+    if not messages:
+        raise HTTPException(status_code=400, detail="Messages cannot be empty")
+    
+    # Ensure all messages have required fields
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            raise HTTPException(status_code=400, detail=f"Message {i} must be a dictionary")
+        if "role" not in msg or "content" not in msg:
+            raise HTTPException(status_code=400, detail=f"Message {i} missing role or content")
+        if not isinstance(msg["role"], str) or not isinstance(msg["content"], str):
+            raise HTTPException(status_code=400, detail=f"Message {i} role and content must be strings")
     
     # Determine if reasoning should be enabled
     enable_reasoning = request.reasoning

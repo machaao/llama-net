@@ -185,20 +185,39 @@ class LlamaWrapper:
         async with self._processing_lock:
             loop = asyncio.get_event_loop()
             
-            # Use a lambda to properly pass all arguments including reasoning
-            return await loop.run_in_executor(
-                None, 
-                lambda: self.generate_chat(
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    stop=stop,
-                    repeat_penalty=repeat_penalty,
-                    reasoning=reasoning
+            # Validate and format arguments before passing to executor
+            try:
+                # Ensure messages is a list of dicts with proper format
+                if not isinstance(messages, list):
+                    raise ValueError("Messages must be a list")
+                
+                formatted_messages = []
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        formatted_messages.append({
+                            "role": str(msg.get("role", "user")),
+                            "content": str(msg.get("content", ""))
+                        })
+                    else:
+                        raise ValueError(f"Invalid message format: {type(msg)}")
+                
+                # Use a lambda to properly pass all arguments including reasoning
+                return await loop.run_in_executor(
+                    None, 
+                    lambda: self.generate_chat(
+                        messages=formatted_messages,  # Use formatted messages
+                        max_tokens=int(max_tokens),
+                        temperature=float(temperature),
+                        top_p=float(top_p),
+                        top_k=int(top_k),
+                        stop=stop,
+                        repeat_penalty=float(repeat_penalty),
+                        reasoning=bool(reasoning)
+                    )
                 )
-            )
+            except Exception as e:
+                logger.error(f"Error in generate_chat_safe argument preparation: {e}")
+                raise
             
     async def generate_safe(self, prompt, max_tokens=100, temperature=0.7, top_p=0.9, 
                            top_k=40, stop=None, repeat_penalty=1.1) -> Dict[str, Any]:
