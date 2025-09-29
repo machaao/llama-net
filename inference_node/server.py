@@ -1141,6 +1141,13 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             "content": message.content
         })
     
+    # Determine if reasoning should be enabled
+    enable_reasoning = request.reasoning
+    if enable_reasoning is None and request.enable_reasoning is not None:
+        enable_reasoning = request.enable_reasoning
+    if enable_reasoning is None:
+        enable_reasoning = True  # Default to enabled
+    
     # Prepare stop tokens
     stop_tokens = None
     if request.stop:
@@ -1163,10 +1170,12 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                         temperature=request.temperature or 0.7,
                         top_p=request.top_p or 0.9,
                         stop=stop_tokens,
-                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                        repeat_penalty=1.0 + (request.frequency_penalty or 0.0),
+                        reasoning=enable_reasoning
                     ):
                         yield {
                             "text": chunk.get("text", ""),
+                            "reasoning": chunk.get("reasoning", ""),
                             "finished": chunk.get("finished", False)
                         }
                         
@@ -1184,7 +1193,8 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                 "model": config.model_name,
                 "processing_node": "local",
                 "chat_template": "auto",
-                "queued": True
+                "queued": True,
+                "reasoning_enabled": enable_reasoning
             }
             
             return StreamingResponse(
@@ -1209,18 +1219,23 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             request.temperature or 0.7,
             request.top_p or 0.9,
             stop_tokens,
-            1.0 + (request.frequency_penalty or 0.0)
+            1.0 + (request.frequency_penalty or 0.0),
+            reasoning=enable_reasoning
         )
         
         # Calculate token counts
         prompt_tokens = sum(len(msg["content"].split()) for msg in messages)
         completion_tokens = result["tokens_generated"]
         
-        # Create response message
+        # Create response message with reasoning support
         response_message = OpenAIMessage(
             role="assistant",
             content=result["text"].strip()
         )
+        
+        # Add reasoning content if available
+        if result.get("reasoning"):
+            response_message.reasoning_content = result["reasoning"]
         
         choice = OpenAIChoice(
             message=response_message,
@@ -1242,7 +1257,8 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             "model": config.model_name,
             "processing_node": "local",
             "chat_template": "auto",
-            "queued": True
+            "queued": True,
+            "reasoning_enabled": enable_reasoning
         }
         
         return OpenAIChatCompletionResponse(
@@ -1269,6 +1285,13 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             "content": message.content
         })
     
+    # Determine if reasoning should be enabled
+    enable_reasoning = request.reasoning
+    if enable_reasoning is None and request.enable_reasoning is not None:
+        enable_reasoning = request.enable_reasoning
+    if enable_reasoning is None:
+        enable_reasoning = True  # Default to enabled
+    
     # Prepare stop tokens
     stop_tokens = None
     if request.stop:
@@ -1294,7 +1317,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                             temperature=request.temperature or 0.7,
                             top_p=request.top_p or 0.9,
                             stop=stop_tokens,
-                            repeat_penalty=1.0 + (request.frequency_penalty or 0.0)
+                            repeat_penalty=1.0 + (request.frequency_penalty or 0.0),
+                            reasoning=enable_reasoning
                         )
                     
                     # Create the generator in a thread
@@ -1313,6 +1337,7 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                             break
                         yield {
                             "text": chunk.get("text", ""),
+                            "reasoning": chunk.get("reasoning", ""),
                             "finished": chunk.get("finished", False)
                         }
                         
@@ -1329,7 +1354,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                 "port": config.port,
                 "model": config.model_name,
                 "processing_node": "local",
-                "chat_template": "auto"  # Indicate template support
+                "chat_template": "auto",  # Indicate template support
+                "reasoning_enabled": enable_reasoning
             }
             
             return StreamingResponse(
@@ -1350,26 +1376,32 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         # NON-STREAMING: Run in thread executor to avoid blocking
         loop = asyncio.get_event_loop()
         
-        result = await loop.run_in_executor(
-            None,  # Use default thread pool
-            llm.generate_chat,
-            messages,
-            request.max_tokens or 100,
-            request.temperature or 0.7,
-            request.top_p or 0.9,
-            stop_tokens,
-            1.0 + (request.frequency_penalty or 0.0)
-        )
+        def generate_with_reasoning():
+            return llm.generate_chat(
+                messages,
+                request.max_tokens or 100,
+                request.temperature or 0.7,
+                request.top_p or 0.9,
+                stop_tokens,
+                1.0 + (request.frequency_penalty or 0.0),
+                reasoning=enable_reasoning
+            )
+        
+        result = await loop.run_in_executor(None, generate_with_reasoning)
         
         # Calculate token counts
         prompt_tokens = sum(len(msg["content"].split()) for msg in messages)
         completion_tokens = result["tokens_generated"]
         
-        # Create response message
+        # Create response message with reasoning support
         response_message = OpenAIMessage(
             role="assistant",
             content=result["text"].strip()
         )
+        
+        # Add reasoning content if available
+        if result.get("reasoning"):
+            response_message.reasoning_content = result["reasoning"]
         
         choice = OpenAIChoice(
             message=response_message,
@@ -1390,7 +1422,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             "port": config.port,
             "model": config.model_name,
             "processing_node": "local",
-            "chat_template": "auto"
+            "chat_template": "auto",
+            "reasoning_enabled": enable_reasoning
         }
         
         return OpenAIChatCompletionResponse(

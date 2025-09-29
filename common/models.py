@@ -63,7 +63,7 @@ class OpenAIMessage(BaseModel):
     """OpenAI chat message format with reasoning support"""
     role: str  # "system", "user", "assistant"
     content: str
-    reasoning: Optional[str] = None  # Add reasoning field for reasoning models
+    reasoning_content: Optional[str] = None  # Add reasoning_content field for reasoning models
 
 class OpenAICompletionRequest(BaseModel):
     """OpenAI-compatible completion request"""
@@ -101,7 +101,8 @@ class OpenAIChatCompletionRequest(BaseModel):
     user: Optional[str] = None
     strategy: Optional[str] = "round_robin"
     target_model: Optional[str] = None
-    reasoning: Optional[bool] = True  # Add reasoning parameter
+    reasoning: Optional[bool] = True  # Enable reasoning by default
+    enable_reasoning: Optional[bool] = None  # Alternative parameter name for compatibility
 
 class OpenAIChoice(BaseModel):
     """OpenAI choice object"""
@@ -154,7 +155,7 @@ class OpenAIStreamingDelta(BaseModel):
     """OpenAI streaming delta object with reasoning support"""
     content: Optional[str] = None
     role: Optional[str] = None
-    reasoning: Optional[str] = None  # Add reasoning field
+    reasoning_content: Optional[str] = None  # Add reasoning_content field
 
 class OpenAIStreamingChoice(BaseModel):
     """OpenAI streaming choice object"""
@@ -229,7 +230,7 @@ async def create_streaming_chat_response(
             delta_content["content"] = chunk["text"]
         
         if chunk.get("reasoning"):
-            delta_content["reasoning"] = chunk["reasoning"]
+            delta_content["reasoning_content"] = chunk["reasoning"]
         
         if delta_content:
             streaming_chunk = OpenAIStreamingChatResponse(

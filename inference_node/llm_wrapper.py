@@ -302,8 +302,12 @@ class LlamaWrapper:
                     response_content = choice['message']['content']
                     
                     # Extract reasoning if present (for reasoning models)
-                    if reasoning and hasattr(choice['message'], 'reasoning'):
-                        reasoning_content = choice['message'].get('reasoning', '')
+                    if reasoning:
+                        # Check for reasoning in message object
+                        if hasattr(choice['message'], 'reasoning_content'):
+                            reasoning_content = choice['message'].get('reasoning_content', '')
+                        elif hasattr(choice['message'], 'reasoning'):
+                            reasoning_content = choice['message'].get('reasoning', '')
                 
             if 'usage' in output:
                 tokens_generated = output['usage'].get('completion_tokens', 0)
