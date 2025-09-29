@@ -179,17 +179,45 @@ class LlamaWrapper:
         """Check if the LLM is currently processing a request"""
         return self._processing_lock.locked()
         
-    async def generate_chat_safe(self, *args, **kwargs) -> Dict[str, Any]:
+    async def generate_chat_safe(self, messages, max_tokens=100, temperature=0.7, top_p=0.9, 
+                               top_k=40, stop=None, repeat_penalty=1.1, reasoning=True) -> Dict[str, Any]:
         """Thread-safe version of generate_chat"""
         async with self._processing_lock:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self.generate_chat, *args, **kwargs)
             
-    async def generate_safe(self, *args, **kwargs) -> Dict[str, Any]:
+            # Use a lambda to properly pass all arguments including reasoning
+            return await loop.run_in_executor(
+                None, 
+                lambda: self.generate_chat(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    stop=stop,
+                    repeat_penalty=repeat_penalty,
+                    reasoning=reasoning
+                )
+            )
+            
+    async def generate_safe(self, prompt, max_tokens=100, temperature=0.7, top_p=0.9, 
+                           top_k=40, stop=None, repeat_penalty=1.1) -> Dict[str, Any]:
         """Thread-safe version of generate"""
         async with self._processing_lock:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self.generate, *args, **kwargs)
+            
+            return await loop.run_in_executor(
+                None,
+                lambda: self.generate(
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    stop=stop,
+                    repeat_penalty=repeat_penalty
+                )
+            )
             
     async def generate_chat_stream_safe(self, *args, **kwargs) -> Generator[Dict[str, Any], None, None]:
         """Thread-safe version of generate_chat_stream"""
