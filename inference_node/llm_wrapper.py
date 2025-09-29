@@ -518,28 +518,6 @@ class LlamaWrapper:
         finally:
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)
-
-    async def generate_chat_stream_async(self,
-                                       messages: List[Dict[str, str]],
-                                       max_tokens: int = 100,
-                                       temperature: float = 0.7,
-                                       top_p: float = 0.9,
-                                       top_k: int = 40,
-                                       stop: Optional[List[str]] = None,
-                                       repeat_penalty: float = 1.1,
-                                       reasoning: bool = True) -> Generator[Dict[str, Any], None, None]:
-        """Async wrapper for streaming chat generation"""
-        for chunk in self.generate_chat_stream(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            stop=stop,
-            repeat_penalty=repeat_penalty,
-            reasoning=reasoning
-        ):
-            yield chunk
         
     def generate(self, 
                 prompt: str, 
@@ -634,26 +612,6 @@ class LlamaWrapper:
             # Update metrics using consolidated manager
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)
-
-    async def generate_stream_async(self, 
-                                   prompt: str, 
-                                   max_tokens: int = 100,
-                                   temperature: float = 0.7,
-                                   top_p: float = 0.9,
-                                   top_k: int = 40,
-                                   stop: Optional[List[str]] = None,
-                                   repeat_penalty: float = 1.1) -> Generator[Dict[str, Any], None, None]:
-        """Async wrapper for streaming generation"""
-        for chunk in self.generate_stream(
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            stop=stop,
-            repeat_penalty=repeat_penalty
-        ):
-            yield chunk
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get metrics about the model using consolidated manager"""
