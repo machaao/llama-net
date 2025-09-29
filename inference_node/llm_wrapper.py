@@ -9,6 +9,24 @@ from inference_node.config import InferenceConfig
 
 logger = get_logger(__name__)
 
+def detect_reasoning_model(model_name: str) -> bool:
+    """
+    Detect if the model supports reasoning based on model name patterns.
+    """
+    model_name_lower = model_name.lower()
+    
+    reasoning_patterns = [
+        'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning', 
+        'reasoning', 'r1-', '-r1', 'think', 'cot', 'gpt-oss'  # Add gpt-oss pattern
+    ]
+    
+    for pattern in reasoning_patterns:
+        if pattern in model_name_lower:
+            logger.info(f"Detected reasoning model: {model_name} (pattern: {pattern})")
+            return True
+    
+    return False
+
 def detect_chat_format_from_model_name(model_name: str) -> str:
     """
     Detect appropriate chat format based on model name patterns.
@@ -71,6 +89,10 @@ class LlamaWrapper:
         # Auto-detect chat format based on model name
         self.detected_chat_format = detect_chat_format_from_model_name(config.model_name)
         
+        # Detect if this is a reasoning model
+        self.supports_reasoning = detect_reasoning_model(config.model_name)
+        logger.info(f"Reasoning support: {'enabled' if self.supports_reasoning else 'disabled'}")
+        
         logger.info(f"Loading model from {config.model_path}")
         logger.info(f"Using detected chat format: {self.detected_chat_format}")
         
@@ -114,6 +136,44 @@ class LlamaWrapper:
                 "content": msg.get("content", "")
             })
         return formatted
+    
+    def _separate_reasoning_and_content(self, text: str) -> tuple[str, str]:
+        """Separate reasoning content from final response"""
+        if not self.supports_reasoning:
+            return "", text
+        
+        # Look for the message marker that separates reasoning from final content
+        if "<|message|>" in text:
+            parts = text.split("<|message|>", 1)
+            reasoning_part = parts[0].strip()
+            content_part = parts[1].strip() if len(parts) > 1 else ""
+            
+            # Clean up reasoning part - remove special tokens
+            reasoning_part = self._clean_reasoning_content(reasoning_part)
+            
+            return reasoning_part, content_part
+        else:
+            # If no marker found, treat everything as content for now
+            return "", text
+    
+    def _clean_reasoning_content(self, reasoning_text: str) -> str:
+        """Clean up reasoning content by removing special tokens"""
+        if not reasoning_text:
+            return ""
+        
+        # Remove common special tokens from reasoning
+        tokens_to_remove = [
+            "<|start|>", "<|end|>", "<|channel|>", "assistant", "final"
+        ]
+        
+        cleaned = reasoning_text
+        for token in tokens_to_remove:
+            cleaned = cleaned.replace(token, "")
+        
+        # Clean up extra whitespace and newlines
+        cleaned = " ".join(cleaned.split())
+        
+        return cleaned.strip()
     
     def is_processing(self) -> bool:
         """Check if the LLM is currently processing a request"""
@@ -220,7 +280,7 @@ class LlamaWrapper:
                      stop: Optional[List[str]] = None,
                      repeat_penalty: float = 1.1,
                      reasoning: bool = True) -> Dict[str, Any]:
-        """Generate chat completion using proper chat formatting"""
+        """Generate chat completion with reasoning content separation"""
         self.metrics_manager.record_request_start()
         start_time = time.time()
         
@@ -238,7 +298,7 @@ class LlamaWrapper:
             
             generation_time = time.time() - start_time
             
-            # Extract response with reasoning support
+            # Extract response with reasoning separation
             response_content = ""
             reasoning_content = ""
             tokens_generated = 0
@@ -246,15 +306,13 @@ class LlamaWrapper:
             if 'choices' in output and len(output['choices']) > 0:
                 choice = output['choices'][0]
                 if 'message' in choice and 'content' in choice['message']:
-                    response_content = choice['message']['content']
+                    full_response = choice['message']['content']
                     
-                    # Extract reasoning if present (for reasoning models)
-                    if reasoning:
-                        # Check for reasoning in message object
-                        if hasattr(choice['message'], 'reasoning_content'):
-                            reasoning_content = choice['message'].get('reasoning_content', '')
-                        elif hasattr(choice['message'], 'reasoning'):
-                            reasoning_content = choice['message'].get('reasoning', '')
+                    # Separate reasoning from content if reasoning is enabled
+                    if self.supports_reasoning and reasoning:
+                        reasoning_content, response_content = self._separate_reasoning_and_content(full_response)
+                    else:
+                        response_content = full_response
                 
             if 'usage' in output:
                 tokens_generated = output['usage'].get('completion_tokens', 0)
@@ -263,12 +321,15 @@ class LlamaWrapper:
             
             result = {
                 "text": response_content,
+                "content": response_content,
                 "tokens_generated": tokens_generated,
                 "generation_time": generation_time
             }
             
+            # Add reasoning content if available
             if reasoning_content:
                 result["reasoning"] = reasoning_content
+                result["reasoning_content"] = reasoning_content
                 
             return result
             
@@ -286,12 +347,11 @@ class LlamaWrapper:
                            stop: Optional[List[str]] = None,
                            repeat_penalty: float = 1.1,
                            reasoning: bool = True) -> Generator[Dict[str, Any], None, None]:
-        """Generate streaming chat completion with content filtering"""
+        """Generate streaming chat completion with reasoning content separation"""
         self.metrics_manager.record_request_start()
         start_time = time.time()
         
-        # Prepare stop tokens - don't add reasoning markers as stop tokens
-        # since we want to detect them for filtering
+        # Prepare stop tokens
         stop_tokens = normalize_stop_tokens(stop)
         
         # Create streaming generator
@@ -308,6 +368,10 @@ class LlamaWrapper:
         
         total_tokens = 0
         accumulated_text = ""
+        reasoning_buffer = ""
+        content_buffer = ""
+        in_reasoning_phase = True
+        message_marker_found = False
         
         try:
             for chunk in stream:
@@ -315,31 +379,95 @@ class LlamaWrapper:
                     choice = chunk['choices'][0]
                     delta = choice.get('delta', {})
                     
-                    chunk_data = {}
-                    
                     if 'content' in delta and delta['content']:
                         content = delta['content']
                         total_tokens += 1
                         accumulated_text += content
-                        chunk_data["text"] = content
-                        chunk_data["accumulated_text"] = accumulated_text
-                    
-                    # Handle reasoning content if present (but don't include in main response)
-                    if reasoning and 'reasoning' in delta and delta['reasoning']:
-                        chunk_data["reasoning"] = delta['reasoning']
-                    
-                    if chunk_data:
-                        generation_time = time.time() - start_time
-                        chunk_data.update({
-                            "tokens_generated": total_tokens,
-                            "generation_time": generation_time,
-                            "finished": choice.get('finish_reason') is not None
-                        })
                         
-                        yield chunk_data
+                        # Check for message marker
+                        if self.supports_reasoning and reasoning and "<|message|>" in accumulated_text and not message_marker_found:
+                            message_marker_found = True
+                            in_reasoning_phase = False
+                            
+                            # Split the accumulated text at the marker
+                            reasoning_part, content_part = self._separate_reasoning_and_content(accumulated_text)
+                            
+                            # Send reasoning content if we have it
+                            if reasoning_part:
+                                yield {
+                                    "reasoning_content": reasoning_part,
+                                    "tokens_generated": total_tokens,
+                                    "generation_time": time.time() - start_time,
+                                    "finished": False,
+                                    "reasoning_phase": True
+                                }
+                            
+                            # Send content part if we have it
+                            if content_part:
+                                content_buffer = content_part
+                                yield {
+                                    "text": content_part,
+                                    "content": content_part,
+                                    "accumulated_text": content_part,
+                                    "tokens_generated": total_tokens,
+                                    "generation_time": time.time() - start_time,
+                                    "finished": False,
+                                    "reasoning_phase": False
+                                }
+                        
+                        elif not in_reasoning_phase:
+                            # We're in content phase, send content normally
+                            content_buffer += content
+                            yield {
+                                "text": content,
+                                "content": content,
+                                "accumulated_text": content_buffer,
+                                "tokens_generated": total_tokens,
+                                "generation_time": time.time() - start_time,
+                                "finished": False,
+                                "reasoning_phase": False
+                            }
+                        
+                        elif in_reasoning_phase and self.supports_reasoning and reasoning:
+                            # We're still in reasoning phase, buffer the content
+                            reasoning_buffer += content
+                            # Don't yield reasoning chunks individually to avoid UI clutter
+                        
+                        else:
+                            # No reasoning support or reasoning disabled, send as regular content
+                            yield {
+                                "text": content,
+                                "content": content,
+                                "accumulated_text": accumulated_text,
+                                "tokens_generated": total_tokens,
+                                "generation_time": time.time() - start_time,
+                                "finished": False,
+                                "reasoning_phase": False
+                            }
                         
                         if choice.get('finish_reason') is not None:
+                            # Handle case where we finish in reasoning phase without finding marker
+                            if in_reasoning_phase and self.supports_reasoning and reasoning and reasoning_buffer:
+                                cleaned_reasoning = self._clean_reasoning_content(reasoning_buffer)
+                                if cleaned_reasoning:
+                                    yield {
+                                        "reasoning_content": cleaned_reasoning,
+                                        "tokens_generated": total_tokens,
+                                        "generation_time": time.time() - start_time,
+                                        "finished": False,
+                                        "reasoning_phase": True
+                                    }
+                            
+                            # Send final chunk
+                            yield {
+                                "text": "",
+                                "tokens_generated": total_tokens,
+                                "generation_time": time.time() - start_time,
+                                "finished": True,
+                                "reasoning_phase": False
+                            }
                             break
+                            
         finally:
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)

@@ -226,11 +226,13 @@ async def create_streaming_chat_response(
     async for chunk in stream_generator:
         delta_content = {}
         
-        if chunk.get("text"):
-            delta_content["content"] = chunk["text"]
+        # Handle reasoning content first (if available)
+        if chunk.get("reasoning_content"):
+            delta_content["reasoning_content"] = chunk["reasoning_content"]
         
-        if chunk.get("reasoning"):
-            delta_content["reasoning_content"] = chunk["reasoning"]
+        # Handle regular content
+        if chunk.get("text") or chunk.get("content"):
+            delta_content["content"] = chunk.get("text") or chunk.get("content")
         
         if delta_content:
             streaming_chunk = OpenAIStreamingChatResponse(
