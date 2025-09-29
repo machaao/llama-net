@@ -52,7 +52,7 @@ class InferenceConfig:
             self.n_batch = int(load_env_var("N_BATCH", args.batch_size))
             # LLM configuration
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
-            self.verbose = args.verbose or bool(load_env_var("VERBOSE", False))
+            self.verbose = args.verbose or bool(load_env_var("VERBOSE", True))
 
             # Handle HTTP port using consolidated utilities
             preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))

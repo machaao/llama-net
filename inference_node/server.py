@@ -1,6 +1,7 @@
 import os
 import asyncio
 import time
+import traceback
 import uuid
 import uvicorn
 import aiohttp
@@ -1128,6 +1129,7 @@ async def create_chat_completion(request: OpenAIChatCompletionRequest):
             }
         )
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"Error processing chat completion: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
