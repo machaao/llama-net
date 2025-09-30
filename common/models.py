@@ -231,6 +231,45 @@ class OpenAIImageResponse(BaseModel):
     data: List[OpenAIImageData]
     node_info: Optional[Dict[str, Any]] = None
 
+# OpenAI Image Generation Models
+class OpenAIImageGenerationRequest(BaseModel):
+    """OpenAI-compatible image generation request"""
+    prompt: str
+    negative_prompt: Optional[str] = None
+    n: Optional[int] = 1
+    size: Optional[str] = "512x512"
+    response_format: Optional[str] = "b64_json"
+    
+    # Extended SD parameters
+    cfg_scale: Optional[float] = None
+    steps: Optional[int] = None
+    seed: Optional[int] = -1
+    sampler: Optional[str] = None
+    strategy: Optional[str] = "round_robin"
+    target_model: Optional[str] = None
+    
+    @property
+    def size_width(self) -> int:
+        """Extract width from size string"""
+        return int(self.size.split('x')[0])
+    
+    @property
+    def size_height(self) -> int:
+        """Extract height from size string"""
+        return int(self.size.split('x')[1])
+
+class OpenAIImageData(BaseModel):
+    """OpenAI image data object"""
+    url: Optional[str] = None
+    b64_json: Optional[str] = None
+    revised_prompt: Optional[str] = None
+
+class OpenAIImageResponse(BaseModel):
+    """OpenAI-compatible image generation response"""
+    created: int
+    data: List[OpenAIImageData]
+    node_info: Optional[Dict[str, Any]] = None
+
 # Streaming utilities
 def create_sse_data(data: Dict[str, Any]) -> str:
     """Create Server-Sent Events formatted data"""

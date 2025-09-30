@@ -36,6 +36,8 @@ from inference_node.event_publisher import EventBasedDHTPublisher
 from inference_node.heartbeat import HeartbeatManager
 from inference_node.p2p_handler import P2PRequestHandler
 from inference_node.request_queue import RequestQueueManager, RequestStatus
+from inference_node.sd_config import SDConfig
+from inference_node.sd_wrapper import SDWrapper, SD_AVAILABLE
 from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
 from client.event_discovery import NodeEventType, NodeEvent, NodeEventListener
@@ -46,6 +48,8 @@ logger = get_logger(__name__)
 # Global variables
 config = None
 llm = None
+sd_wrapper = None
+sd_config = None
 dht_publisher = None
 system_info = None
 heartbeat_manager = None
@@ -211,6 +215,38 @@ async def lifespan(app: FastAPI):
         shutdown_handler.register_component('request_queue', request_queue_manager)
         await service_manager.mark_service_ready("request_queue")
         logger.info("Request queue manager initialized")
+        
+        # 2.6. Initialize SD if configured (optional)
+        global sd_wrapper, sd_config
+        sd_wrapper = None
+        sd_config = None
+        try:
+            await service_manager.mark_service_initializing("sd")
+            logger.info("Checking for Stable Diffusion configuration...")
+            
+            # Check if SD model is configured
+            sd_model_path = os.environ.get("SD_MODEL_PATH")
+            
+            if sd_model_path and SD_AVAILABLE:
+                logger.info(f"Initializing Stable Diffusion with model: {sd_model_path}")
+                sd_config = SDConfig(model_path=sd_model_path)
+                sd_wrapper = SDWrapper(sd_config)
+                shutdown_handler.register_component('sd_wrapper', sd_wrapper)
+                await service_manager.mark_service_ready("sd")
+                logger.info("✅ Stable Diffusion initialized successfully")
+            else:
+                if not sd_model_path:
+                    logger.info("SD_MODEL_PATH not set - image generation disabled")
+                elif not SD_AVAILABLE:
+                    logger.warning("stable-diffusion-cpp-python not installed - image generation disabled")
+                await service_manager.mark_service_ready("sd")
+                
+        except ImportError as e:
+            logger.info(f"Stable Diffusion not available: {e}")
+            await service_manager.mark_service_ready("sd")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Stable Diffusion: {e}")
+            await service_manager.mark_service_failed("sd", str(e))
         
         # 3. Get system info
         await service_manager.mark_service_initializing("system_info")
@@ -413,7 +449,9 @@ async def list_models():
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
     
-    # Get chat template info if available
+    models = []
+    
+    # Add LLM model
     chat_format_info = {}
     if llm:
         try:
@@ -428,17 +466,35 @@ async def list_models():
             logger.warning(f"Could not get chat format info: {e}")
             chat_format_info = {"chat_format": "unknown", "error": str(e)}
     
-    model_data = OpenAIModel(
+    llm_model = OpenAIModel(
         id=config.model_name,
         created=int(time.time()),
         owned_by="llamanet"
     )
     
     # Add chat format info to the model data
-    model_dict = model_data.dict()
-    model_dict.update(chat_format_info)
+    llm_model_dict = llm_model.dict()
+    llm_model_dict.update(chat_format_info)
+    llm_model_dict["capabilities"] = ["text_generation", "chat_completion"]
+    models.append(llm_model_dict)
     
-    return OpenAIModelList(data=[model_dict])
+    # Add SD model if available
+    if sd_wrapper and sd_config:
+        sd_model = OpenAIModel(
+            id=sd_config.model_name,
+            created=int(time.time()),
+            owned_by="llamanet"
+        )
+        sd_model_dict = sd_model.dict()
+        sd_model_dict.update({
+            "model_type": sd_config.model_type,
+            "capabilities": ["image_generation"],
+            "default_size": f"{sd_config.default_width}x{sd_config.default_height}",
+            "supported_samplers": SDWrapper(sd_config).get_supported_samplers() if SD_AVAILABLE else []
+        })
+        models.append(sd_model_dict)
+    
+    return OpenAIModelList(data=models)
 
 @app.get("/v1/models/network")
 async def list_network_models():
@@ -1529,6 +1585,111 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
         # Fall back to local processing
         return await _handle_chat_completion_locally(request)
 
+# Image generation endpoint
+@app.post("/v1/images/generations")
+async def create_image(request: OpenAIImageGenerationRequest):
+    """Create image from text prompt (OpenAI-compatible)"""
+    if not sd_wrapper:
+        raise HTTPException(
+            status_code=503, 
+            detail="Image generation not available. SD_MODEL_PATH not configured or stable-diffusion-cpp-python not installed."
+        )
+    
+    # Check if request has strategy parameter for routing
+    strategy = getattr(request, 'strategy', None)
+    target_model = getattr(request, 'target_model', None)
+    
+    # If strategy is specified and we have node selector, try to route request
+    if strategy and node_selector and strategy != "local":
+        try:
+            # Find SD-capable nodes
+            nodes = await dht_discovery.get_nodes()
+            sd_nodes = [n for n in nodes if n.capabilities and n.capabilities.get('image_generation')]
+            
+            if len(sd_nodes) > 1:  # Only route if there are other SD nodes
+                selected_node = await node_selector.select_node(
+                    capability="image_generation",
+                    strategy=strategy,
+                    target_model=target_model
+                )
+                
+                if selected_node and _should_forward_request(request, selected_node):
+                    logger.info(f"🔄 Routing image generation to node {selected_node.node_id[:8]}...")
+                    return await _forward_image_generation(request, selected_node)
+        except Exception as e:
+            logger.warning(f"Failed to route image request: {e}")
+    
+    # Generate locally
+    try:
+        result = await sd_wrapper.txt2img_safe(
+            prompt=request.prompt,
+            negative_prompt=request.negative_prompt or "",
+            width=request.size_width,
+            height=request.size_height,
+            cfg_scale=request.cfg_scale or sd_config.default_cfg_scale,
+            steps=request.steps or sd_config.default_steps,
+            seed=request.seed,
+            sampler=request.sampler or sd_config.default_sampler
+        )
+        
+        # Format as OpenAI response
+        image_data = OpenAIImageData(
+            b64_json=result["image"] if request.response_format == "b64_json" else None,
+            url=f"data:image/png;base64,{result['image']}" if request.response_format == "url" else None,
+            revised_prompt=request.prompt
+        )
+        
+        node_info = {
+            "node_id": config.node_id,
+            "model_type": sd_config.model_type,
+            "model_name": sd_config.model_name,
+            "generation_time": result["generation_time"],
+            "processing_node": "local"
+        }
+        
+        return OpenAIImageResponse(
+            created=int(time.time()),
+            data=[image_data],
+            node_info=node_info
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def _forward_image_generation(request: OpenAIImageGenerationRequest, target_node):
+    """Forward image generation request to another node"""
+    try:
+        request_dict = request.dict()
+        request_dict.pop('strategy', None)
+        
+        url = f"http://{target_node.ip}:{target_node.port}/v1/images/generations"
+        
+        timeout = aiohttp.ClientTimeout(total=60, connect=5)  # Longer timeout for image gen
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                url,
+                json=request_dict,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status == 200:
+                    response_data = await response.json()
+                    if "node_info" in response_data and response_data["node_info"]:
+                        response_data["node_info"]["processing_node"] = "forwarded"
+                        response_data["node_info"]["forwarded_from"] = config.node_id
+                    return OpenAIImageResponse(**response_data)
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Forwarded image generation failed: {response.status} {error_text}")
+                    raise HTTPException(status_code=response.status, detail=error_text)
+                    
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout forwarding image generation to {target_node.node_id[:8]}")
+        raise HTTPException(status_code=504, detail="Image generation timeout")
+    except Exception as e:
+        logger.error(f"Error forwarding image generation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Status and utility endpoints
 @app.get("/status")
 async def status():
@@ -1585,6 +1746,22 @@ async def info():
         except Exception as e:
             logger.warning(f"Could not get chat template info: {e}")
             chat_template_info = {"error": str(e)}
+    
+    # Get SD info if available
+    sd_info = {}
+    if sd_wrapper and sd_config:
+        sd_info = {
+            "sd_enabled": True,
+            "sd_model": sd_config.model_name,
+            "sd_model_type": sd_config.model_type,
+            "sd_model_info": sd_config.get_model_info()
+        }
+    else:
+        sd_info = {"sd_enabled": False}
+        
+    endpoints = ["/v1/models", "/v1/completions", "/v1/chat/completions"]
+    if sd_wrapper:
+        endpoints.append("/v1/images/generations")
         
     return {
         "node_id": config.node_id,
@@ -1594,11 +1771,12 @@ async def info():
         "dht_port": config.dht_port,
         "openai_compatible": True,
         "chat_template": chat_template_info,
-        "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"],
+        "endpoints": endpoints,
         "p2p_enabled": bool(p2p_handler),
         "hardware_based_id": True,
         "hardware_fingerprint": hardware_info,
-        **p2p_info
+        **p2p_info,
+        **sd_info
     }
 
 @app.get("/health")
