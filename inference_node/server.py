@@ -20,6 +20,7 @@ from common.models import (
     OpenAICompletionRequest, OpenAIChatCompletionRequest,
     OpenAICompletionResponse, OpenAIChatCompletionResponse,
     OpenAIChoice, OpenAIUsage, OpenAIMessage,
+    OpenAIImageGenerationRequest, OpenAIImageData, OpenAIImageResponse,
     create_streaming_chat_response, create_streaming_completion_response
 )
 from common.sse_handler import SSEForwarder
