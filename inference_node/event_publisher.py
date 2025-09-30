@@ -875,25 +875,38 @@ class EventBasedDHTPublisher:
         return info
     
     def _get_node_capabilities(self) -> Dict[str, Any]:
-        """Determine node capabilities based on available services"""
-        capabilities = {
-            'text_generation': True  # Always available for LLM nodes
-        }
+        """Determine node capabilities based on detected model type and initialized services"""
+        capabilities = {}
         
-        # Check for SD capabilities
-        try:
-            # Try to import and check if SD is configured
-            from inference_node.sd_config import SDConfig
-            from inference_node.sd_wrapper import SD_AVAILABLE
+        # Check for LLM capabilities based on detection
+        if hasattr(self.config, 'is_llm_model') and self.config.is_llm_model():
+            capabilities['text_generation'] = True
+            capabilities['chat_completion'] = True
+            capabilities['model_type'] = 'llm'
+        
+        # Check for SD capabilities based on detection
+        if hasattr(self.config, 'is_sd_model') and self.config.is_sd_model():
+            capabilities['image_generation'] = True
+            capabilities['model_type'] = 'sd'
             
-            if SD_AVAILABLE and hasattr(self.config, 'sd_model_path'):
-                capabilities['image_generation'] = True
-                capabilities['sd_model'] = getattr(self.config, 'sd_model_name', 'unknown')
-                capabilities['sd_model_type'] = getattr(self.config, 'sd_model_type', 'unknown')
-            else:
-                capabilities['image_generation'] = False
-        except (ImportError, AttributeError):
-            capabilities['image_generation'] = False
+            # Add SD-specific info if available
+            try:
+                from inference_node.sd_config import SDConfig
+                if hasattr(self.config, 'model_path'):
+                    sd_config = SDConfig(model_path=self.config.model_path)
+                    capabilities['sd_model_type'] = sd_config.model_type
+                    capabilities['sd_model_name'] = sd_config.model_name
+            except:
+                pass
+        
+        # Add detection metadata
+        if hasattr(self.config, 'get_model_detection_info'):
+            detection_info = self.config.get_model_detection_info()
+            capabilities['detection'] = {
+                'auto_detected': True,
+                'confidence': detection_info.get('confidence', 0.0),
+                'format': detection_info.get('detected_format', 'unknown')
+            }
         
         return capabilities
     

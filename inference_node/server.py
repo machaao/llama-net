@@ -202,12 +202,25 @@ async def lifespan(app: FastAPI):
         await service_manager.mark_service_ready("config")
         logger.info(f"Starting OpenAI-compatible inference node: {config}")
         
-        # 2. Initialize LLM first (most likely to fail)
-        await service_manager.mark_service_initializing("llm")
-        logger.info("Initializing LLM...")
-        llm = LlamaWrapper(config)
-        await service_manager.mark_service_ready("llm")
-        logger.info("LLM initialized successfully")
+        # 2. Detect model type
+        await service_manager.mark_service_initializing("model_detection")
+        logger.info("Detecting model type...")
+        
+        detection_info = config.get_model_detection_info()
+        logger.info(f"Model detection: {detection_info}")
+        
+        await service_manager.mark_service_ready("model_detection")
+        
+        # 2.1. Initialize LLM if detected
+        if config.is_llm_model():
+            await service_manager.mark_service_initializing("llm")
+            logger.info("Initializing LLM model...")
+            llm = LlamaWrapper(config)
+            await service_manager.mark_service_ready("llm")
+            logger.info("✅ LLM initialized successfully")
+        else:
+            logger.info("LLM not detected, skipping LLM initialization")
+            llm = None
         
         # 2.5. Initialize request queue manager after LLM
         await service_manager.mark_service_initializing("request_queue")
@@ -217,37 +230,38 @@ async def lifespan(app: FastAPI):
         await service_manager.mark_service_ready("request_queue")
         logger.info("Request queue manager initialized")
         
-        # 2.6. Initialize SD if configured (optional)
+        # 2.2. Initialize SD if detected
         global sd_wrapper, sd_config
-        sd_wrapper = None
-        sd_config = None
-        try:
+        if config.is_sd_model():
             await service_manager.mark_service_initializing("sd")
-            logger.info("Checking for Stable Diffusion configuration...")
+            logger.info("Initializing Stable Diffusion model...")
             
-            # Check if SD model is configured
-            sd_model_path = os.environ.get("SD_MODEL_PATH")
-            
-            if sd_model_path and SD_AVAILABLE:
-                logger.info(f"Initializing Stable Diffusion with model: {sd_model_path}")
-                sd_config = SDConfig(model_path=sd_model_path)
-                sd_wrapper = SDWrapper(sd_config)
-                shutdown_handler.register_component('sd_wrapper', sd_wrapper)
-                await service_manager.mark_service_ready("sd")
-                logger.info("✅ Stable Diffusion initialized successfully")
+            if SD_AVAILABLE:
+                try:
+                    sd_config = SDConfig(model_path=config.model_path)
+                    sd_wrapper = SDWrapper(sd_config)
+                    shutdown_handler.register_component('sd_wrapper', sd_wrapper)
+                    await service_manager.mark_service_ready("sd")
+                    logger.info("✅ Stable Diffusion initialized successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize SD: {e}")
+                    await service_manager.mark_service_failed("sd", str(e))
+                    sd_wrapper = None
+                    sd_config = None
             else:
-                if not sd_model_path:
-                    logger.info("SD_MODEL_PATH not set - image generation disabled")
-                elif not SD_AVAILABLE:
-                    logger.warning("stable-diffusion-cpp-python not installed - image generation disabled")
-                await service_manager.mark_service_ready("sd")
-                
-        except ImportError as e:
-            logger.info(f"Stable Diffusion not available: {e}")
-            await service_manager.mark_service_ready("sd")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Stable Diffusion: {e}")
-            await service_manager.mark_service_failed("sd", str(e))
+                logger.error("stable-diffusion-cpp-python not installed")
+                await service_manager.mark_service_failed("sd", "Package not installed")
+                sd_wrapper = None
+                sd_config = None
+        else:
+            logger.info("SD not detected, skipping SD initialization")
+            sd_wrapper = None
+            sd_config = None
+        
+        # Validate at least one model type was initialized
+        if llm is None and sd_wrapper is None:
+            logger.error("No valid model detected or initialized!")
+            raise RuntimeError("Failed to initialize any model type")
         
         # 3. Get system info
         await service_manager.mark_service_initializing("system_info")
@@ -2422,6 +2436,28 @@ async def get_queue_status():
         raise HTTPException(status_code=503, detail="Request queue not initialized")
     
     return request_queue_manager.get_status()
+
+@app.get("/model/detection")
+async def get_model_detection():
+    """Get model detection information"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    detection_info = config.get_model_detection_info()
+    
+    return {
+        "success": True,
+        "detection": detection_info,
+        "capabilities": {
+            "llm": config.is_llm_model() if hasattr(config, 'is_llm_model') else False,
+            "sd": config.is_sd_model() if hasattr(config, 'is_sd_model') else False
+        },
+        "initialized_services": {
+            "llm": llm is not None,
+            "sd": sd_wrapper is not None
+        },
+        "timestamp": time.time()
+    }
 
 @app.get("/hardware/validate")
 async def validate_hardware_consistency():

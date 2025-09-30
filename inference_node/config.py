@@ -7,6 +7,7 @@ import hashlib
 from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
 from common.port_utils import PortManager
+from common.model_detector import ModelDetector, ModelType, ModelFormat
 
 logger = get_logger(__name__)
 
@@ -105,8 +106,60 @@ class InferenceConfig:
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path)
         
+        # Auto-detect model type
+        self.model_detector = ModelDetector()
+        self.model_detection_result = None
+        self.detected_model_type = None
+        self.detected_model_format = None
+        
+        if self.model_path:
+            self._detect_model_type()
+        
         # Configure networking for better stability
         self._configure_networking()
+    
+    def _detect_model_type(self):
+        """Detect model type from file"""
+        try:
+            logger.info(f"Detecting model type for: {self.model_path}")
+            self.model_detection_result = self.model_detector.detect_model(self.model_path)
+            
+            self.detected_model_type = self.model_detection_result["model_type"]
+            self.detected_model_format = self.model_detection_result["model_format"]
+            
+            confidence = self.model_detection_result["confidence"]
+            
+            logger.info(f"✅ Detected model type: {self.detected_model_type} "
+                       f"(format: {self.detected_model_format}, confidence: {confidence:.2f})")
+            
+            if confidence < 0.7:
+                logger.warning(f"⚠️ Low confidence in model detection ({confidence:.2f}). "
+                             "You may want to manually specify the model type.")
+            
+        except Exception as e:
+            logger.error(f"Failed to detect model type: {e}")
+            logger.info("Defaulting to LLM model type")
+            self.detected_model_type = ModelType.LLM
+            self.detected_model_format = ModelFormat.UNKNOWN
+    
+    def is_llm_model(self) -> bool:
+        """Check if detected model is an LLM"""
+        return self.detected_model_type == ModelType.LLM
+    
+    def is_sd_model(self) -> bool:
+        """Check if detected model is Stable Diffusion"""
+        return self.detected_model_type == ModelType.STABLE_DIFFUSION
+    
+    def get_model_detection_info(self) -> Dict:
+        """Get model detection information"""
+        if self.model_detection_result:
+            return {
+                "detected_type": self.detected_model_type,
+                "detected_format": self.detected_model_format,
+                "confidence": self.model_detection_result.get("confidence", 0.0),
+                "metadata": self.model_detection_result.get("metadata", {})
+            }
+        return {}
     
     def _configure_networking(self):
         """Configure networking settings for better stability"""

@@ -6,6 +6,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 
 ## Features
 
+- **Automatic Model Type Detection** - Automatically detects LLM vs Stable Diffusion models from file characteristics
 - **Hardware-based node identity** - Nodes maintain consistent IDs across restarts based on hardware fingerprinting
 - **Decentralized DHT-based node discovery** using Kademlia protocol
 - **High-performance inference** powered by [llama.cpp](https://github.com/ggerganov/llama.cpp)
@@ -14,8 +15,27 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 - **Interactive web interface** with live streaming responses
 - **Async Client Library** for easy integration with async/await support
 - **Automatic node selection** based on load and performance
+- **Multi-model support** - Serve both LLM and SD models seamlessly
 - **No single point of failure** - fully distributed architecture
 - **Docker support** for easy deployment
+
+## Automatic Model Detection
+
+### Zero-Configuration Model Loading
+- **Automatic Type Detection** - Detects whether your model is LLM or Stable Diffusion
+- **Format Support** - Handles GGUF, safetensors, and CKPT formats
+- **Confidence Scoring** - Reports detection confidence for transparency
+- **Metadata Analysis** - Examines model structure and metadata for accurate classification
+- **Fallback Handling** - Gracefully handles unknown or ambiguous model types
+
+### Supported Model Types
+- **LLM Models**: GGUF format with llama-cpp-python
+- **Stable Diffusion**: GGUF, safetensors, or CKPT formats with stable-diffusion-cpp-python
+- **Multi-Model Nodes**: Can serve both types simultaneously if both are detected
+
+### Detection Endpoints
+- **GET `/model/detection`** - View model detection results and confidence
+- **Automatic Capability Registration** - Nodes advertise detected capabilities to the network
 
 ## New Streaming Features
 
