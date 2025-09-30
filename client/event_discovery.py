@@ -482,10 +482,14 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                                     ip=contact.ip,
                                     port=http_port,
                                     model=info.get('model', 'unknown'),
+                                    model_type=info.get('model_type', 'unknown'),
+                                    model_format=info.get('model_format', 'unknown'),
+                                    detection_confidence=info.get('detection_confidence', 0.0),
                                     load=info.get('load', 0.0),
                                     tps=info.get('tps', 0.0),
                                     uptime=info.get('uptime', 0),
                                     last_seen=int(time.time()),
+                                    capabilities=info.get('capabilities'),
                                     event_driven=True,
                                     change_reason='verified_http_discovery'
                                 )
@@ -692,7 +696,23 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
         for node_data in nodes_data:
             if isinstance(node_data, dict) and node_data.get('node_id'):
                 try:
-                    node_info = NodeInfo(**node_data)
+                    # Create NodeInfo with model type support
+                    node_info = NodeInfo(
+                        node_id=node_data['node_id'],
+                        ip=node_data.get('ip', 'unknown'),
+                        port=node_data.get('port', 8000),
+                        model=node_data.get('model', 'unknown'),
+                        model_type=node_data.get('model_type', 'unknown'),
+                        model_format=node_data.get('model_format', 'unknown'),
+                        detection_confidence=node_data.get('detection_confidence', 0.0),
+                        load=node_data.get('load', 0.0),
+                        tps=node_data.get('tps', 0.0),
+                        uptime=node_data.get('uptime', 0),
+                        last_seen=node_data.get('last_seen', int(time.time())),
+                        available_ips=node_data.get('available_ips'),
+                        ip_types=node_data.get('ip_types'),
+                        capabilities=node_data.get('capabilities')
+                    )
                     if self._should_include_node(node_info):
                         node_id = node_info.node_id
                         new_active_nodes[node_id] = node_info

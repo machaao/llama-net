@@ -384,6 +384,17 @@ class EventBasedDHTPublisher:
                 if interface.ip in available_ips:
                     ip_types[interface.ip] = interface.classification
 
+            # Get model detection info
+            model_type = 'unknown'
+            model_format = 'unknown'
+            detection_confidence = 0.0
+
+            if hasattr(self.config, 'get_model_detection_info'):
+                detection_info = self.config.get_model_detection_info()
+                model_type = detection_info.get('detected_type', 'unknown')
+                model_format = detection_info.get('detected_format', 'unknown')
+                detection_confidence = detection_info.get('confidence', 0.0)
+
             # Determine node capabilities
             capabilities = self._get_node_capabilities()
 
@@ -392,6 +403,9 @@ class EventBasedDHTPublisher:
                 'ip': primary_ip,
                 'port': self.config.port,
                 'model': self.config.model_name,
+                'model_type': model_type,
+                'model_format': model_format,
+                'detection_confidence': detection_confidence,
                 'load': metrics['load'],
                 'tps': metrics['tps'],
                 'uptime': metrics['uptime'],
@@ -469,6 +483,17 @@ class EventBasedDHTPublisher:
                 if interface.ip in available_ips:
                     ip_types[interface.ip] = interface.classification
 
+            # Get model detection info
+            model_type = 'unknown'
+            model_format = 'unknown'
+            detection_confidence = 0.0
+
+            if hasattr(self.config, 'get_model_detection_info'):
+                detection_info = self.config.get_model_detection_info()
+                model_type = detection_info.get('detected_type', 'unknown')
+                model_format = detection_info.get('detected_format', 'unknown')
+                detection_confidence = detection_info.get('confidence', 0.0)
+
             # Determine node capabilities
             capabilities = self._get_node_capabilities()
 
@@ -477,6 +502,9 @@ class EventBasedDHTPublisher:
                 'ip': primary_ip,
                 'port': self.config.port,
                 'model': self.config.model_name,
+                'model_type': model_type,
+                'model_format': model_format,
+                'detection_confidence': detection_confidence,
                 'load': metrics['load'],
                 'tps': metrics['tps'],
                 'uptime': metrics['uptime'],

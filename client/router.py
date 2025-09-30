@@ -20,8 +20,9 @@ class NodeSelector:
                          strategy: str = "round_robin",  # "load_balanced", "round_robin", "random"
                          randomize: bool = True,
                          target_model: Optional[str] = None,
-                         capability: Optional[str] = None) -> Optional[NodeInfo]:
-        """Select the best node based on criteria, strategy, and capabilities"""
+                         capability: Optional[str] = None,
+                         model_type: Optional[str] = None) -> Optional[NodeInfo]:
+        """Select the best node based on criteria, strategy, capabilities, and model type"""
         
         # Use target_model if specified, otherwise fall back to model parameter
         model_filter = target_model or model
@@ -35,6 +36,14 @@ class NodeSelector:
             if not nodes:
                 logger.warning(f"No nodes found with capability: {capability}")
                 return None
+        
+        # Filter by model type if specified
+        if model_type:
+            nodes = [node for node in nodes if node.model_type == model_type]
+            if not nodes:
+                logger.warning(f"No nodes found with model type: {model_type}")
+                return None
+            logger.debug(f"Filtered to {len(nodes)} nodes with model type: {model_type}")
         
         if not nodes:
             logger.warning(f"No nodes available for model {model_filter}")

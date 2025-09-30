@@ -1750,6 +1750,9 @@ async def info():
     if p2p_handler:
         p2p_info = p2p_handler.get_p2p_info()
     
+    # Get model detection info
+    detection_info = config.get_model_detection_info()
+    
     # Get hardware fingerprint info
     hardware_info = config.get_hardware_info()
     
@@ -1782,6 +1785,13 @@ async def info():
         "node_id": config.node_id,
         "model": config.model_name,
         "model_path": config.model_path,
+        "model_detection": {
+            "detected_type": detection_info.get('detected_type', 'unknown'),
+            "detected_format": detection_info.get('detected_format', 'unknown'),
+            "confidence": detection_info.get('confidence', 0.0),
+            "metadata": detection_info.get('metadata', {}),
+            "auto_detected": True
+        },
         "system": system_info,
         "dht_port": config.dht_port,
         "openai_compatible": True,
@@ -2455,6 +2465,13 @@ async def get_model_detection():
         "initialized_services": {
             "llm": llm is not None,
             "sd": sd_wrapper is not None
+        },
+        "model_info": {
+            "model_name": config.model_name,
+            "model_path": config.model_path,
+            "detected_type": detection_info.get('detected_type', 'unknown'),
+            "detected_format": detection_info.get('detected_format', 'unknown'),
+            "confidence": detection_info.get('confidence', 0.0)
         },
         "timestamp": time.time()
     }

@@ -1,12 +1,26 @@
 import json
+from enum import Enum
 
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union, AsyncGenerator
 import time
 import uuid
 
+class ModelTypeEnum(str, Enum):
+    """Model type enumeration for node capabilities"""
+    LLM = "llm"
+    STABLE_DIFFUSION = "sd"
+    UNKNOWN = "unknown"
+
+class ModelFormatEnum(str, Enum):
+    """Model format enumeration"""
+    GGUF = "gguf"
+    SAFETENSORS = "safetensors"
+    CKPT = "ckpt"
+    UNKNOWN = "unknown"
+
 class NodeInfo(BaseModel):
-    """Information about an inference node"""
+    """Information about an inference node with model type detection"""
     node_id: str
     ip: str  # Primary IP for backward compatibility
     port: int
@@ -15,6 +29,11 @@ class NodeInfo(BaseModel):
     tps: float = 0.0
     uptime: int = 0
     last_seen: int = Field(default_factory=lambda: int(time.time()))
+    
+    # Model type detection fields
+    model_type: Optional[str] = "unknown"  # Use string for flexibility
+    model_format: Optional[str] = "unknown"
+    detection_confidence: Optional[float] = 0.0
     
     # Event-driven metadata
     event_driven: bool = True  # Mark as event-driven update
@@ -60,6 +79,39 @@ class NodeInfo(BaseModel):
                 return private_ips[0]
         
         return self.ip  # Fallback to primary IP
+    
+    # Model type helper methods
+    def is_llm_node(self) -> bool:
+        """Check if this node serves LLM models"""
+        return self.model_type == "llm"
+    
+    def is_sd_node(self) -> bool:
+        """Check if this node serves Stable Diffusion models"""
+        return self.model_type == "sd"
+    
+    def supports_text_generation(self) -> bool:
+        """Check if node supports text generation"""
+        if self.capabilities:
+            return self.capabilities.get('text_generation', False)
+        return self.is_llm_node()
+    
+    def supports_image_generation(self) -> bool:
+        """Check if node supports image generation"""
+        if self.capabilities:
+            return self.capabilities.get('image_generation', False)
+        return self.is_sd_node()
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get comprehensive model information"""
+        return {
+            "model_name": self.model,
+            "model_type": self.model_type,
+            "model_format": self.model_format,
+            "detection_confidence": self.detection_confidence,
+            "capabilities": self.capabilities or {},
+            "supports_text": self.supports_text_generation(),
+            "supports_images": self.supports_image_generation()
+        }
 
 # OpenAI-compatible models with reasoning support
 class OpenAIMessage(BaseModel):
