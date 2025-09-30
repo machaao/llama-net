@@ -384,6 +384,9 @@ class EventBasedDHTPublisher:
                 if interface.ip in available_ips:
                     ip_types[interface.ip] = interface.classification
 
+            # Determine node capabilities
+            capabilities = self._get_node_capabilities()
+
             node_info = {
                 'node_id': self.config.node_id,
                 'ip': primary_ip,
@@ -400,7 +403,8 @@ class EventBasedDHTPublisher:
                 'hardware_based': True,
                 'hardware_fingerprint_version': '1.0',
                 'is_first_publish': False,  # Don't trigger join event yet
-                'join_pending': True  # Indicate join is pending
+                'join_pending': True,  # Indicate join is pending
+                'capabilities': capabilities
             }
 
             # Add hardware fingerprint summary for debugging and validation
@@ -465,6 +469,9 @@ class EventBasedDHTPublisher:
                 if interface.ip in available_ips:
                     ip_types[interface.ip] = interface.classification
 
+            # Determine node capabilities
+            capabilities = self._get_node_capabilities()
+
             node_info = {
                 'node_id': self.config.node_id,
                 'ip': primary_ip,
@@ -480,7 +487,8 @@ class EventBasedDHTPublisher:
                 'multi_ip_enabled': True,
                 'hardware_based': True,
                 'hardware_fingerprint_version': '1.0',
-                'join_pending': False
+                'join_pending': False,
+                'capabilities': capabilities
             }
 
             # Add hardware fingerprint summary for debugging and validation
@@ -854,7 +862,8 @@ class EventBasedDHTPublisher:
             'dht_running': self.running,
             'bootstrap_nodes': self.bootstrap_nodes,
             'hardware_key': self._get_hardware_key(),
-            'consistency_validated': True
+            'consistency_validated': True,
+            'capabilities': self._get_node_capabilities()
         }
         
         if self.hardware_fingerprint:
@@ -864,6 +873,29 @@ class EventBasedDHTPublisher:
             )
         
         return info
+    
+    def _get_node_capabilities(self) -> Dict[str, Any]:
+        """Determine node capabilities based on available services"""
+        capabilities = {
+            'text_generation': True  # Always available for LLM nodes
+        }
+        
+        # Check for SD capabilities
+        try:
+            # Try to import and check if SD is configured
+            from inference_node.sd_config import SDConfig
+            from inference_node.sd_wrapper import SD_AVAILABLE
+            
+            if SD_AVAILABLE and hasattr(self.config, 'sd_model_path'):
+                capabilities['image_generation'] = True
+                capabilities['sd_model'] = getattr(self.config, 'sd_model_name', 'unknown')
+                capabilities['sd_model_type'] = getattr(self.config, 'sd_model_type', 'unknown')
+            else:
+                capabilities['image_generation'] = False
+        except (ImportError, AttributeError):
+            capabilities['image_generation'] = False
+        
+        return capabilities
     
     def _get_hardware_key(self) -> str:
         """Generate a hardware-based DHT key for node discovery"""

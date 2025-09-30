@@ -19,14 +19,22 @@ class NodeSelector:
                          max_load: float = 1.0,
                          strategy: str = "round_robin",  # "load_balanced", "round_robin", "random"
                          randomize: bool = True,
-                         target_model: Optional[str] = None) -> Optional[NodeInfo]:
-        """Select the best node based on criteria and strategy"""
+                         target_model: Optional[str] = None,
+                         capability: Optional[str] = None) -> Optional[NodeInfo]:
+        """Select the best node based on criteria, strategy, and capabilities"""
         
         # Use target_model if specified, otherwise fall back to model parameter
         model_filter = target_model or model
         
         # Get nodes from event-based discovery (real-time, no polling)
         nodes = await self.dht_discovery.get_nodes(model=model_filter)
+        
+        # Filter by capability if specified
+        if capability:
+            nodes = [node for node in nodes if self._has_capability(node, capability)]
+            if not nodes:
+                logger.warning(f"No nodes found with capability: {capability}")
+                return None
         
         if not nodes:
             logger.warning(f"No nodes available for model {model_filter}")
@@ -107,3 +115,10 @@ class NodeSelector:
         
         # Return the first (lowest load)
         return best_nodes[0]
+    
+    def _has_capability(self, node: NodeInfo, capability: str) -> bool:
+        """Check if node has specific capability"""
+        if not node.capabilities:
+            return False
+        
+        return node.capabilities.get(capability, False)
