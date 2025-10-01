@@ -1,21 +1,21 @@
 # LlamaNet: Decentralized Inference Swarm for llama.cpp
 
-LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It uses Kademlia DHT for truly distributed node discovery without any central registry and supports both real-time streaming and traditional inference modes.
+LlamaNet is a decentralized inference swarm for LLM and Stable Diffusion models using llama.cpp and stable-diffusion.cpp. It uses Kademlia DHT for truly distributed node discovery without any central registry and supports both real-time streaming and traditional inference modes.
 
 ![LlamaNet](./static/images/screenshot.png)
 
 ## Features
 
 - **Automatic Model Type Detection** - Automatically detects LLM vs Stable Diffusion models from file characteristics
+- **Multi-Modal Support** - Serve both text generation (LLM) and image generation (SD) models
 - **Hardware-based node identity** - Nodes maintain consistent IDs across restarts based on hardware fingerprinting
 - **Decentralized DHT-based node discovery** using Kademlia protocol
-- **High-performance inference** powered by [llama.cpp](https://github.com/ggerganov/llama.cpp)
+- **High-performance inference** powered by [llama.cpp](https://github.com/ggerganov/llama.cpp) and [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
 - **Real-time streaming inference** with Server-Sent Events (SSE)
-- **OpenAI-compatible API** with streaming support
+- **OpenAI-compatible API** with streaming support for both text and images
 - **Interactive web interface** with live streaming responses
 - **Async Client Library** for easy integration with async/await support
 - **Automatic node selection** based on load and performance
-- **Multi-model support** - Serve both LLM and SD models seamlessly
 - **No single point of failure** - fully distributed architecture
 - **Docker support** for easy deployment
 
@@ -47,6 +47,7 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 
 ### Streaming Endpoints
 - **OpenAI Compatible**: `/v1/chat/completions` and `/v1/completions` with `stream: true`
+- **Image Generation**: `/v1/images/generations` for Stable Diffusion models
 - **Web Interface**: Toggle streaming on/off in the browser UI
 
 ## Hardware-Based Node Identity
@@ -74,8 +75,341 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It u
 
 - Python 3.8+
 - **LLM models in GGUF format** (compatible with [llama.cpp](https://github.com/ggerganov/llama.cpp))
+- **SD models in GGUF, safetensors, or CKPT format** (compatible with [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp))
 - Docker (optional, for containerized deployment)
 
+## Installation
+
+### From Source
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/machaao/llama-net.git
+   cd llama-net
+   ```
+
+2. Install the requirements:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+
+### Installing Stable Diffusion Support
+
+For image generation capabilities, install the stable-diffusion-cpp-python package:
+
+```bash
+# Install stable-diffusion-cpp-python
+pip install stable-diffusion-cpp-python
+
+# Or install with CUDA support (for NVIDIA GPUs)
+CMAKE_ARGS="-DSD_CUBLAS=ON" pip install stable-diffusion-cpp-python
+```
+
+**Note**: If `stable-diffusion-cpp-python` is not installed, LlamaNet will still work but only for LLM models. Image generation endpoints will return a 503 error.
+
+## Quick Start
+
+### 1. Start a Bootstrap Node (LLM)
+
+```bash
+python -m inference_node.server --model-path ./models/your-llm-model.gguf
+```
+
+This starts:
+- **HTTP API** on port 8000 (inference endpoints)
+- **DHT node** on port 8001 (peer discovery)
+- **Web UI** at http://localhost:8000
+- **Hardware-based node ID** automatically generated and stored
+- **Automatic model detection** (LLM or SD)
+
+### 2. Start a Stable Diffusion Node
+
+```bash
+python -m inference_node.server \
+  --model-path ./models/your-sd-model.gguf \
+  --port 8002 \
+  --dht-port 8003 \
+  --bootstrap-nodes localhost:8001
+```
+
+**Note**: The model type (LLM or SD) is automatically detected. No manual configuration needed!
+
+### 3. Start Additional Nodes
+
+```bash
+python -m inference_node.server \
+  --model-path ./models/your-model.gguf \
+  --port 8004 \
+  --dht-port 8005 \
+  --bootstrap-nodes localhost:8001
+```
+
+**Note**: Each additional node will automatically generate a unique hardware-based node ID that includes the port number, ensuring no conflicts when running multiple nodes on the same machine.
+
+### 4. Use the Web Interface
+
+Open http://localhost:8000 in your browser for an interactive interface with:
+- **Real-time streaming responses** for text generation
+- **Network status monitoring**
+- **Streaming toggle** for instant vs. complete responses
+- **Hardware fingerprint information** in node details
+- **Model type indicators** (LLM or SD)
+
+## Stable Diffusion Integration
+
+### Supported SD Model Formats
+
+LlamaNet supports multiple Stable Diffusion model formats:
+
+1. **GGUF Format** (Recommended)
+   - Quantized models for efficient inference
+   - Smaller file sizes
+   - Faster loading times
+   - Example: `sd-v1.5-q4_0.gguf`
+
+2. **Safetensors Format**
+   - Safe tensor storage format
+   - Full precision models
+   - Example: `sd-v1.5.safetensors`
+
+3. **CKPT Format**
+   - Legacy PyTorch checkpoint format
+   - Requires PyTorch installed
+   - Example: `sd-v1.5.ckpt`
+
+### Downloading SD Models
+
+#### GGUF Models (Recommended)
+```bash
+# Create models directory
+mkdir -p models
+
+# Download Stable Diffusion 1.5 GGUF (quantized)
+wget -O models/sd-v1.5-q4_0.gguf \
+  "https://huggingface.co/leejet/stable-diffusion-gguf/resolve/main/sd-v1.5-q4_0.gguf"
+
+# Or download SDXL GGUF
+wget -O models/sdxl-base-1.0-q4_0.gguf \
+  "https://huggingface.co/leejet/stable-diffusion-gguf/resolve/main/sdxl-base-1.0-q4_0.gguf"
+```
+
+#### Safetensors Models
+```bash
+# Download from Hugging Face
+huggingface-cli download runwayml/stable-diffusion-v1-5 \
+  v1-5-pruned-emaonly.safetensors --local-dir ./models
+```
+
+### SD Configuration Options
+
+Configure SD models using environment variables:
+
+```bash
+# Basic SD configuration
+export SD_MODEL_PATH=./models/sd-v1.5-q4_0.gguf
+export SD_DEFAULT_WIDTH=512
+export SD_DEFAULT_HEIGHT=512
+export SD_DEFAULT_STEPS=20
+export SD_DEFAULT_CFG_SCALE=7.0
+export SD_DEFAULT_SAMPLER=euler_a
+
+# Optional: VAE and enhancements
+export SD_VAE_PATH=./models/vae.safetensors
+export SD_TAESD_PATH=./models/taesd.safetensors
+export SD_CONTROL_NET_PATH=./models/controlnet.safetensors
+export SD_LORA_MODEL_DIR=./models/loras
+export SD_EMBEDDINGS_PATH=./models/embeddings
+
+# Performance settings
+export SD_N_THREADS=-1  # Auto-detect
+export SD_WTYPE=default  # Weight type: default, f32, f16, q4_0, q4_1, q5_0, q5_1, q8_0
+export SD_VAE_TILING=false
+export SD_FREE_PARAMS_IMMEDIATELY=false
+
+# Start the node
+python -m inference_node.server --model-path $SD_MODEL_PATH
+```
+
+### Using SD Models
+
+#### OpenAI-Compatible Image Generation API
+
+```python
+import openai
+
+# Configure to use LlamaNet
+openai.api_base = "http://localhost:8000/v1"
+openai.api_key = "dummy-key"
+
+# Generate image
+response = openai.Image.create(
+    prompt="a beautiful sunset over mountains",
+    size="512x512",
+    n=1
+)
+
+# Get base64 image
+image_b64 = response.data[0].b64_json
+```
+
+#### Direct HTTP API
+
+```bash
+# Generate image
+curl -X POST http://localhost:8000/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a beautiful sunset over mountains",
+    "negative_prompt": "blurry, low quality",
+    "size": "512x512",
+    "steps": 20,
+    "cfg_scale": 7.0,
+    "sampler": "euler_a",
+    "seed": -1
+  }'
+```
+
+#### Python Client Library
+
+```python
+import asyncio
+from client.api import Client
+
+async def generate_image():
+    client = Client(bootstrap_nodes="localhost:8001")
+    
+    try:
+        # The client will automatically find SD-capable nodes
+        response = await client.generate_image(
+            prompt="a beautiful sunset over mountains",
+            negative_prompt="blurry, low quality",
+            size="512x512",
+            steps=20,
+            cfg_scale=7.0
+        )
+        
+        if response:
+            print(f"Image generated by node: {response.node_id}")
+            # Save image
+            import base64
+            with open("output.png", "wb") as f:
+                f.write(base64.b64decode(response.image_b64))
+    finally:
+        await client.close()
+
+asyncio.run(generate_image())
+```
+
+### SD-Specific Endpoints
+
+- **POST `/v1/images/generations`** - Generate images from text prompts (OpenAI-compatible)
+- **GET `/v1/models`** - List available models (includes SD models with capabilities)
+- **GET `/v1/models/network`** - List all SD models across the network
+
+### Supported Samplers
+
+LlamaNet SD integration supports multiple sampling methods:
+
+- `euler_a` (Euler Ancestral) - Default, good quality
+- `euler` (Euler)
+- `heun` (Heun's method)
+- `dpm2` (DPM-Solver-2)
+- `dpm++2s_a` (DPM++ 2S Ancestral)
+- `dpm++2m` (DPM++ 2M)
+- `dpm++2mv2` (DPM++ 2M v2)
+- `lcm` (Latent Consistency Model)
+
+### Load Balancing for SD
+
+LlamaNet automatically load balances image generation requests across SD-capable nodes:
+
+```python
+# Request with load balancing strategy
+response = await client.generate_image(
+    prompt="a beautiful landscape",
+    strategy="load_balanced"  # or "round_robin", "random"
+)
+```
+
+### Mixed LLM and SD Networks
+
+You can run both LLM and SD nodes in the same network:
+
+```bash
+# Start LLM node
+python -m inference_node.server --model-path ./models/llm-model.gguf --port 8000
+
+# Start SD node
+python -m inference_node.server --model-path ./models/sd-model.gguf --port 8002 --dht-port 8003 --bootstrap-nodes localhost:8001
+
+# Start another LLM node
+python -m inference_node.server --model-path ./models/llm-model.gguf --port 8004 --dht-port 8005 --bootstrap-nodes localhost:8001
+```
+
+The network will automatically route:
+- Text generation requests to LLM nodes
+- Image generation requests to SD nodes
+
+### Checking Model Capabilities
+
+```bash
+# Check what capabilities a node has
+curl http://localhost:8000/info
+
+# Response includes:
+{
+  "model_detection": {
+    "detected_type": "sd",
+    "detected_format": "gguf",
+    "confidence": 0.95
+  },
+  "sd_enabled": true,
+  "sd_model": "sd-v1.5-q4_0.gguf",
+  "capabilities": ["image_generation"],
+  "supported_samplers": ["euler_a", "euler", "heun", ...]
+}
+```
+
+### SD Performance Tips
+
+1. **Use GGUF quantized models** for faster inference and lower memory usage
+2. **Adjust steps** - Lower steps (15-20) for faster generation, higher (30-50) for quality
+3. **Enable VAE tiling** for large images: `SD_VAE_TILING=true`
+4. **Use GPU acceleration** if available (requires CUDA-enabled stable-diffusion-cpp-python)
+5. **Batch generation** - Generate multiple images in parallel across nodes
+
+### Troubleshooting SD
+
+**SD not available error:**
+```bash
+# Check if stable-diffusion-cpp-python is installed
+pip list | grep stable-diffusion
+
+# Install if missing
+pip install stable-diffusion-cpp-python
+```
+
+**Model not loading:**
+```bash
+# Check model file exists
+ls -lh ./models/your-sd-model.gguf
+
+# Check model detection
+curl http://localhost:8000/model/detection
+```
+
+**Slow generation:**
+```bash
+# Reduce steps
+export SD_DEFAULT_STEPS=15
+
+# Use smaller resolution
+export SD_DEFAULT_WIDTH=512
+export SD_DEFAULT_HEIGHT=512
+
+# Enable GPU if available
+CMAKE_ARGS="-DSD_CUBLAS=ON" pip install --upgrade stable-diffusion-cpp-python
+```
 
 ## Use Cases & Scenarios
 
@@ -238,56 +572,6 @@ Game developers want to provide AI-powered NPCs and content generation without r
 - No external API dependencies or costs
 - Custom models trained on game-specific content
 
-## Installation
-
-### From Source
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/machaao/llama-net.git
-   cd llama-net
-   ```
-
-2. Install the requirements:
-   ```bash
-   pip3 install -r requirements.txt
-   ```
-   
-## Quick Start
-
-### 1. Start a Bootstrap Node
-
-```bash
-python -m inference_node.server --model-path ./models/your-model.gguf
-```
-
-This starts:
-- **HTTP API** on port 8000 (inference endpoints)
-- **DHT node** on port 8001 (peer discovery)
-- **Web UI** at http://localhost:8000
-- **Hardware-based node ID** automatically generated and stored
-
-### 2. Start Additional Nodes
-
-```bash
-python -m inference_node.server \
-  --model-path ./models/your-model.gguf \
-  --port 8002 \
-  --dht-port 8003 \
-  --bootstrap-nodes localhost:8001
-```
-
-**Note**: Each additional node will automatically generate a unique hardware-based node ID that includes the port number, ensuring no conflicts when running multiple nodes on the same machine.
-
-### 3. Use the Web Interface
-
-Open http://localhost:8000 in your browser for an interactive chat interface with:
-- **Real-time streaming responses**
-- **Network status monitoring**
-- **Streaming toggle** for instant vs. complete responses
-- **Hardware fingerprint information** in node details
-
-
 ## Hardware-Based Node Identity
 
 ### Automatic Node ID Generation
@@ -390,9 +674,9 @@ This ensures the same node ID is used across restarts.
 
 ## Model Setup
 
-### Model Requirements
+### LLM Model Requirements
 
-LlamaNet requires models in **GGUF format** (GGML Universal Format). GGUF is the modern format used by llama.cpp for efficient inference.
+LlamaNet requires LLM models in **GGUF format** (GGML Universal Format). GGUF is the modern format used by llama.cpp for efficient inference.
 
 ### Download Sources
 
@@ -552,8 +836,12 @@ models/
 ├── phi-3.5-mini/
 │   ├── Phi-3.5-mini-instruct-Q4_K_M.gguf
 │   └── README.md
-└── codeqwen-1.5-7b/
-    ├── CodeQwen1.5-7B-Chat-Q4_K_M.gguf
+├── codeqwen-1.5-7b/
+│   ├── CodeQwen1.5-7B-Chat-Q4_K_M.gguf
+│   └── README.md
+└── sd-models/
+    ├── sd-v1.5-q4_0.gguf
+    ├── sdxl-base-1.0-q4_0.gguf
     └── README.md
 ```
 
@@ -579,6 +867,9 @@ python -m inference_node.server --model-path ./models/Meta-Llama-3.1-8B-Instruct
 # Or with environment variable
 export MODEL_PATH=./models/Qwen2.5-7B-Instruct-Q4_K_M.gguf
 python -m inference_node.server
+
+# Or with SD model
+python -m inference_node.server --model-path ./models/sd-v1.5-q4_0.gguf
 ```
 
 ### Troubleshooting Model Issues
@@ -590,6 +881,9 @@ ls -la ./models/your-model.gguf
 
 # Verify it's a valid GGUF file
 file ./models/your-model.gguf
+
+# Check model detection
+curl http://localhost:8000/model/detection
 ```
 
 **Out of memory errors:**
