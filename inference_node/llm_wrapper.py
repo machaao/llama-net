@@ -102,7 +102,7 @@ class LlamaWrapper:
             n_batch=config.n_batch,
             n_gpu_layers=config.n_gpu_layers,
             verbose=config.verbose,
-            reasoning=True,
+            reasoning=False,
             chat_format=self.detected_chat_format  # Use detected format instead of "auto"
         )
         

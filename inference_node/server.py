@@ -1200,7 +1200,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                     logger.info("Local chat streaming cancelled")
                     raise
                 except Exception as e:
-                    logger.error(f"Error in local chat streaming: {e}")
+                    logger.error(f"Error in locally queued chat streaming: {e}")
             
             # Create node info for streaming
             node_info = {
