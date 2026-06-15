@@ -76,33 +76,45 @@ class HFModelDownloader:
         # Clean the URL
         hf_url = hf_url.strip().rstrip('/')
         
-        # Try to match patterns
-        for pattern in self.HF_URL_PATTERNS:
-            match = re.match(pattern, hf_url)
-            if match:
-                groups = match.groups()
-                repo_id = groups[0]
-                
-                # Check for tag/quantization
-                if len(groups) > 1 and groups[1]:
-                    if groups[1].startswith('Q'):
-                        # Quantization tag like Q4_K_M
-                        return repo_id, None, groups[1]
-                    else:
-                        # Branch or other tag
-                        return repo_id, None, groups[1]
-                
-                return repo_id, None, None
+        # Remove scheme if present (http://, https://)
+        if '://' in hf_url:
+            hf_url = hf_url.split('://', 1)[1]
         
-        # If no pattern matches, try to construct from HF format
-        if '/' in hf_url:
-            parts = hf_url.split(':')
-            if len(parts) == 2:
-                repo_id = parts[0]
-                tag = parts[1]
+        # Remove domain prefixes (hf.co/, huggingface.co/)
+        for prefix in ['hf.co/', 'huggingface.co/']:
+            if hf_url.startswith(prefix):
+                hf_url = hf_url[len(prefix):]
+                break
+        
+        # Now hf_url should be in format: user/model or user/model:tag or user/model@branch
+        
+        # Check for tag/quantization separator (: or @)
+        # Use rsplit to split from the RIGHT to handle dots in model names
+        if ':' in hf_url:
+            # Split on the LAST colon to handle model names like "LFM2.5-1.2B"
+            repo_id, tag = hf_url.rsplit(':', 1)
+            
+            # Validate that we have a proper user/model format
+            if '/' in repo_id and repo_id.count('/') == 1:
+                logger.debug(f"Parsed HF URL: repo_id={repo_id}, tag={tag}")
                 return repo_id, None, tag
         
-        raise ValueError(f"Invalid Hugging Face URL format: {hf_url}")
+        if '@' in hf_url:
+            # Split on the LAST @ to handle edge cases
+            repo_id, tag = hf_url.rsplit('@', 1)
+            
+            # Validate that we have a proper user/model format
+            if '/' in repo_id and repo_id.count('/') == 1:
+                logger.debug(f"Parsed HF URL: repo_id={repo_id}, tag={tag}")
+                return repo_id, None, tag
+        
+        # No tag/branch specified - check if it's a valid repo_id format
+        if '/' in hf_url and hf_url.count('/') == 1:
+            logger.debug(f"Parsed HF URL: repo_id={hf_url}, no tag")
+            return hf_url, None, None
+        
+        # If we get here, the format is invalid
+        raise ValueError(f"Invalid Hugging Face URL format: {hf_url}. Expected format: user/model or user/model:tag")
     
     def get_model_info(self, repo_id: str, tag: Optional[str] = None) -> Dict:
         """
@@ -116,10 +128,14 @@ class HFModelDownloader:
             Dictionary with model info
         """
         try:
-            # Use Hugging Face API
+            # Construct API URL - repo_id should NOT contain the tag
             api_url = f"https://huggingface.co/api/models/{repo_id}"
+            
+            # Add revision parameter if tag is specified
             if tag:
                 api_url += f"?revision={tag}"
+            
+            logger.debug(f"Fetching model info from: {api_url}")
             
             response = requests.get(api_url, timeout=30)
             response.raise_for_status()
@@ -134,6 +150,8 @@ class HFModelDownloader:
                     if filename.lower().endswith('.gguf'):
                         gguf_files.append(filename)
             
+            logger.debug(f"Found {len(gguf_files)} GGUF files in {repo_id}")
+            
             return {
                 'repo_id': repo_id,
                 'tag': tag,
@@ -145,6 +163,16 @@ class HFModelDownloader:
                 'last_modified': model_info.get('lastModified', ''),
             }
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error(f"Unauthorized access to {repo_id}. This model may be gated.")
+                logger.error("Please authenticate with Hugging Face:")
+                logger.error("  1. Get a token from https://huggingface.co/settings/tokens")
+                logger.error("  2. Run: huggingface-cli login")
+                logger.error("  3. Accept the model's terms on Hugging Face if required")
+            elif e.response.status_code == 404:
+                logger.error(f"Model not found: {repo_id}")
+            raise
         except requests.RequestException as e:
             logger.error(f"Failed to fetch model info for {repo_id}: {e}")
             raise
