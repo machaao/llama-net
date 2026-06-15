@@ -2641,21 +2641,39 @@ def show_help():
 LlamaNet OpenAI-Compatible Inference Node
 
 Usage:
+  llamanet run <huggingface-url> [OPTIONS]
   python -m inference_node.server [OPTIONS]
 
+Commands:
+  run <hf-url>    Download and run a model from Hugging Face
+                  Example: llamanet run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
 Options:
-  --model-path PATH     Path to the GGUF model file (required)
+  --model-path PATH     Path to the GGUF model file (required if not using run command)
   --host HOST          Host to bind the service (default: 0.0.0.0)
   --port PORT          HTTP API port (default: 8000)
   --dht-port PORT      DHT protocol port (default: 8001)
   --node-id ID         Unique node identifier (default: auto-generated)
   --bootstrap-nodes    Comma-separated bootstrap nodes (ip:port)
 
+Hugging Face URL Formats:
+  hf.co/user/model                 - Latest version
+  hf.co/user/model:Q4_K_M         - Specific quantization
+  hf.co/user/model@branch          - Specific branch
+  user/model                       - Short format
+  user/model:Q4_K_M               - Short format with quantization
+
 Examples:
-  # Start bootstrap node
+  # Download and run a model from Hugging Face
+  llamanet run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+  # Download and run with custom options
+  llamanet run hf.co/TheBloke/Llama-2-7B-Chat-GGUF:Q4_K_M --port 8080
+
+  # Run bootstrap node with local model
   python -m inference_node.server --model-path ./models/model.gguf
 
-  # Start additional node
+  # Run additional node
   python -m inference_node.server \\
     --model-path ./models/model.gguf \\
     --port 8002 \\

@@ -30,6 +30,8 @@ dependencies = [
     "aiohttp>=3.8.0,<4.0.0",
     "p2pd",
     "ipaddress>=1.0.23",
+    "tqdm>=4.64.0",
+    "huggingface_hub>=0.0.1",
 ]
 
 [project.urls]

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # LlamaNet OpenAI-Compatible Inference Node Startup Script
 # This script handles deployment on MACHAAO platform and local development
@@ -16,8 +16,61 @@ else
     CONTAINER_MODE=false
 fi
 
-# Set default values
-DEFAULT_MODEL_PATH="${MODEL_PATH:-./models/model.gguf}"
+# Handle 'run' command
+if [ "$1" = "run" ]; then
+    if [ -z "$2" ]; then
+        echo "❌ Usage: llamanet run <huggingface-url>"
+        echo "   Example: llamanet run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M"
+        exit 1
+    fi
+    
+    HF_URL="$2"
+    shift 2  # Remove 'run' and URL from arguments
+    
+    echo "🔗 Downloading model from Hugging Face: $HF_URL"
+    
+    # Create models directory if it doesn't exist
+    MODELS_DIR="${HOME}/.llamanet/models"
+    mkdir -p "$MODELS_DIR"
+    
+    # Run the Python model downloader
+    python -c "
+from inference_node.model_manager import ModelManager
+import sys
+
+manager = ModelManager()
+try:
+    model_path = manager.resolve_model_path('$HF_URL')
+    print(f'MODEL_PATH={model_path}')
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" > /tmp/llamanet_model_path.txt 2>&1
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to download model"
+        cat /tmp/llamanet_model_path.txt
+        rm -f /tmp/llamanet_model_path.txt
+        exit 1
+    fi
+    
+    MODEL_PATH=$(grep "MODEL_PATH=" /tmp/llamanet_model_path.txt | cut -d'=' -f2)
+    rm -f /tmp/llamanet_model_path.txt
+    
+    if [ -z "$MODEL_PATH" ] || [ ! -f "$MODEL_PATH" ]; then
+        echo "❌ Model file not found after download"
+        exit 1
+    fi
+    
+    echo "✅ Model downloaded to: $MODEL_PATH"
+    
+    # Set the model path for the inference node
+    export MODEL_PATH="$MODEL_PATH"
+    DEFAULT_MODEL_PATH="$MODEL_PATH"
+else
+    # Set default values for non-run commands
+    DEFAULT_MODEL_PATH="${MODEL_PATH:-./models/model.gguf}"
+fi
 DEFAULT_HOST="${HOST:-0.0.0.0}"
 DEFAULT_PORT="${PORT:-8000}"
 DEFAULT_DHT_PORT="${DHT_PORT:-8001}"

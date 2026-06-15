@@ -7,6 +7,7 @@ import hashlib
 from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
 from common.port_utils import PortManager
+from inference_node.model_manager import ModelManager
 
 logger = get_logger(__name__)
 
@@ -15,6 +16,29 @@ class InferenceConfig:
     
     
     def __init__(self, model_path: str = None):
+        # Check for 'run' command in sys.argv
+        if len(sys.argv) > 1 and sys.argv[1] == 'run':
+            # Handle run command
+            if len(sys.argv) < 3:
+                logger.error("Usage: llamanet run <huggingface-url>")
+                sys.exit(1)
+            
+            hf_url = sys.argv[2]
+            model_manager = ModelManager()
+            
+            try:
+                # Resolve model path (download if needed)
+                resolved_path = model_manager.resolve_model_path(hf_url)
+                
+                # Update sys.argv to remove 'run' command and add --model-path
+                sys.argv = [sys.argv[0]] + ['--model-path', resolved_path] + sys.argv[3:]
+                
+                logger.info(f"Resolved model path: {resolved_path}")
+                
+            except Exception as e:
+                logger.error(f"Failed to resolve model: {e}")
+                sys.exit(1)
+        
         # Parse command line arguments if model_path not provided
         if model_path is None:
             parser = argparse.ArgumentParser(description='LlamaNet Inference Node')
