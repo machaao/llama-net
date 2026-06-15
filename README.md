@@ -232,8 +232,41 @@ Game developers want to provide AI-powered NPCs and content generation without r
    ```bash
    pip3 install -r requirements.txt
    ```
+
+### Verify Installation
+
+```bash
+# Test URL parsing
+python test_hf_parsing.py
+
+# Test model download (requires ~5GB disk space)
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# In another terminal, test the API
+curl http://localhost:8000/v1/models
+```
    
 ## Quick Start
+
+### Downloading Models from Hugging Face
+
+LlamaNet can automatically download and run models directly from Hugging Face:
+
+```bash
+# Using Python module (recommended)
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# Or using start-app.sh
+./start-app.sh run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+```
+
+**Supported URL Formats**:
+- `hf.co/user/model` - Latest version
+- `hf.co/user/model:Q4_K_M` - With quantization tag
+- `user/model:Q4_K_M` - Short format
+- `https://huggingface.co/user/model:Q4_K_M` - Full URL
+
+**Note**: Model names with dots (like `LFM2.5`, `1.2B`) are now properly supported.
 
 ### 1. Start a Bootstrap Node
 
@@ -373,6 +406,140 @@ This ensures the same node ID is used across restarts.
 ### Model Requirements
 
 LlamaNet requires models in **GGUF format** (GGML Universal Format). GGUF is the modern format used by llama.cpp for efficient inference.
+
+### Working with Gated Models
+
+Some models on Hugging Face require accepting terms before access. Follow these steps:
+
+#### Step 1: Get Your Hugging Face Token
+
+1. Visit https://huggingface.co/settings/tokens
+2. Create a new token (read access is sufficient)
+3. Copy the token
+
+#### Step 2: Authenticate Locally
+
+```bash
+# Option A: Using huggingface-cli (recommended)
+huggingface-cli login
+# Paste your token when prompted
+
+# Option B: Set environment variable
+export HF_TOKEN="your_token_here"
+
+# Option C: Create token file
+mkdir -p ~/.huggingface
+echo "your_token_here" > ~/.huggingface/token
+```
+
+#### Step 3: Accept Model Terms
+
+1. Visit the model page on Hugging Face
+   - Example: https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF
+2. Click "Access repository" button
+3. Accept the terms
+
+#### Step 4: Download and Run
+
+```bash
+# Now you can download the gated model
+python -m inference_node.server run hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M
+
+# Or with start-app.sh
+./start-app.sh run hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M
+```
+
+#### Troubleshooting Gated Models
+
+**Error: 401 Unauthorized**
+
+```
+401 Client Error: Unauthorized for url: https://huggingface.co/api/models/...
+```
+
+**Solutions**:
+
+1. **Verify authentication**:
+   ```bash
+   huggingface-cli whoami
+   # Should show your username
+   ```
+
+2. **Check token permissions**:
+   - Visit https://huggingface.co/settings/tokens
+   - Ensure token has "read" access
+   - Regenerate if needed
+
+3. **Verify model access**:
+   - Visit the model page on Hugging Face
+   - Confirm you can access it in your browser
+   - Accept terms if prompted
+
+4. **Re-authenticate**:
+   ```bash
+   huggingface-cli logout
+   huggingface-cli login
+   # Enter your token again
+   ```
+
+5. **Manual download as fallback**:
+   ```bash
+   # Download using huggingface-cli
+   huggingface-cli download LiquidAI/LFM2.5-1.2B-JP-202606-GGUF \
+     LFM2.5-1.2B-JP-202606-Q4_K_M.gguf \
+     --local-dir ./models \
+     --local-dir-use-symlinks False
+   
+   # Run with local path
+   python -m inference_node.server --model-path ./models/LFM2.5-1.2B-JP-202606-Q4_K_M.gguf
+   ```
+
+### URL Parsing and Quantization
+
+LlamaNet properly handles complex model identifiers:
+
+**Supported Formats**:
+
+```bash
+# Full Hugging Face URL
+python -m inference_node.server run https://huggingface.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# Short Hugging Face URL
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# Repository format
+python -m inference_node.server run meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# With branch specifier
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf@main:Q4_K_M
+
+# Models with dots in names
+python -m inference_node.server run hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M
+python -m inference_node.server run hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+```
+
+**How Parsing Works**:
+
+The parser correctly separates model names from quantization tags:
+
+```
+Input:  hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M
+        ↓
+Parse:  repo_id = "LiquidAI/LFM2.5-1.2B-JP-202606-GGUF"
+        tag = "Q4_K_M"
+        ↓
+API:    https://huggingface.co/api/models/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF
+```
+
+**Quantization Selection**:
+
+```bash
+# Specify exact quantization
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# Auto-select best available (preference: Q4_K_M > Q5_K_M > Q8_0)
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf
+```
 
 ### Download Sources
 
@@ -1377,6 +1544,67 @@ This architecture ensures **high availability**, **automatic scaling**, and **fa
 
 ## Troubleshooting
 
+### Model Download Troubleshooting
+
+#### 401 Unauthorized Error
+
+**Cause**: Model is gated or authentication is missing.
+
+**Fix**:
+
+```bash
+# 1. Authenticate with Hugging Face
+huggingface-cli login
+# Enter your token from https://huggingface.co/settings/tokens
+
+# 2. Accept model terms on Hugging Face website
+# Visit: https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF
+# Click "Access repository" and accept terms
+
+# 3. Try again
+python -m inference_node.server run hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M
+```
+
+#### 404 Model Not Found
+
+**Cause**: Repository doesn't exist or typo in model name.
+
+**Fix**:
+
+```bash
+# Verify model exists on Hugging Face
+# Visit: https://huggingface.co/search/models?q=your-model-name
+
+# Use correct format: user/model-name
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+```
+
+#### No GGUF Files Found
+
+**Cause**: Repository doesn't contain GGUF format files.
+
+**Fix**:
+
+```bash
+# Use a repository with GGUF files
+# Popular publishers: bartowski, unsloth, MaziyarPanahi
+
+python -m inference_node.server run hf.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+```
+
+#### Manual Download Fallback
+
+```bash
+# If automatic download fails, download manually
+huggingface-cli download LiquidAI/LFM2.5-1.2B-JP-202606-GGUF \
+  LFM2.5-1.2B-JP-202606-Q4_K_M.gguf \
+  --local-dir ./models \
+  --local-dir-use-symlinks False
+
+# Run with local path
+python -m inference_node.server --model-path ./models/LFM2.5-1.2B-JP-202606-Q4_K_M.gguf
+```
+
 ### Common Issues
 
 **No nodes discovered:**
@@ -1422,6 +1650,41 @@ curl -X POST http://localhost:8000/debug/fix-node-id
 # Enable debug logging
 export LOG_LEVEL=DEBUG
 python -m inference_node.server --model-path ./model.gguf
+```
+
+## Common Commands
+
+```bash
+# Download and run a public model
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+
+# Download and run a gated model (requires authentication)
+python -m inference_node.server run hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M
+
+# Run with local model file
+python -m inference_node.server --model-path ./models/model.gguf
+
+# Run with custom port
+python -m inference_node.server run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M --port 8080
+
+# Run bootstrap node
+python -m inference_node.server --model-path ./models/model.gguf
+
+# Run additional node (join network)
+python -m inference_node.server \
+  --model-path ./models/model.gguf \
+  --port 8002 \
+  --dht-port 8003 \
+  --bootstrap-nodes localhost:8001
+
+# Authenticate with Hugging Face
+huggingface-cli login
+
+# Check authentication status
+huggingface-cli whoami
+
+# Logout
+huggingface-cli logout
 ```
 
 ## Use Cases & Scenarios
