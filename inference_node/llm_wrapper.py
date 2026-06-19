@@ -93,6 +93,9 @@ class LlamaWrapper:
         self.supports_reasoning = detect_reasoning_model(config.model_name)
         logger.info(f"Reasoning support: {'enabled' if self.supports_reasoning else 'disabled'}")
         
+        # Chat formats that do not support system role messages
+        self._formats_without_system_role = {'gemma'}
+        
         logger.info(f"Loading model from {config.model_path}")
         logger.info(f"Using detected chat format: {self.detected_chat_format}")
         
@@ -128,14 +131,68 @@ class LlamaWrapper:
             logger.warning(f"Could not detect chat template: {e}")
     
     def _format_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        """Format messages for llama-cpp-python"""
+        """Format messages for llama-cpp-python with chat-format-specific adaptations"""
         formatted = []
         for msg in messages:
             formatted.append({
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", "")
             })
+
+        # For formats that don't support system role, merge system content into first user message
+        if self.detected_chat_format in self._formats_without_system_role:
+            formatted = self._adapt_messages_for_format(formatted)
+
         return formatted
+
+    def _adapt_messages_for_format(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Adapt messages for chat formats that don't support system roles.
+        
+        Strategy: Prepend system message content to the first user message.
+        This is the standard approach used by Ollama and llama.cpp CLI.
+        """
+        system_parts = []
+        non_system_messages = []
+
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = msg.get("content", "").strip()
+                if content:
+                    system_parts.append(content)
+            else:
+                non_system_messages.append(msg)
+
+        if not system_parts:
+            return non_system_messages
+
+        # Prepend system content to first user message
+        combined_system = "\n\n".join(system_parts)
+
+        adapted = []
+        system_prepended = False
+        for msg in non_system_messages:
+            if msg.get("role") == "user" and not system_prepended:
+                adapted.append({
+                    "role": "user",
+                    "content": f"{combined_system}\n\n{msg.get('content', '')}"
+                })
+                system_prepended = True
+            else:
+                adapted.append(msg)
+
+        # Edge case: no user messages found, create one with system content
+        if not system_prepended and combined_system:
+            adapted.insert(0, {
+                "role": "user",
+                "content": combined_system
+            })
+
+        logger.debug(
+            f"Adapted messages for '{self.detected_chat_format}': "
+            f"merged {len(system_parts)} system message(s) into first user message"
+        )
+
+        return adapted
     
     def _separate_reasoning_and_content(self, text: str) -> tuple[str, str]:
         """Separate reasoning content from final response"""
