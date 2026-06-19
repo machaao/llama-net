@@ -257,7 +257,7 @@ class HFModelDownloader:
             
             # Determine quantization from tag if it looks like one
             quantization = None
-            if tag and re.match(r'^Q[0-9]+_[A-Z]+[A-Z0-9_]*$', tag):
+            if tag and re.match(r'^Q[0-9]+_[A-Z0-9_]+$', tag):
                 quantization = tag
                 tag = None
             
