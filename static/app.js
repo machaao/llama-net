@@ -545,6 +545,7 @@ class LlamaNetUI {
                 // Performance metrics from node
                 ttft: parseFloat(nodeData.ttft) || null,
                 latency: parseFloat(nodeData.latency) || null,
+                total_tokens: parseInt(nodeData.total_tokens) || 0,
                 
                 // UI validation metadata
                 validated: true,
@@ -785,6 +786,15 @@ class LlamaNetUI {
             parts.push(`<span class="node-metric-badge"><i class="fas fa-tachometer-alt"></i> ${latDisplay} Latency</span>`);
         }
         
+        // Total tokens (show if > 0)
+        const totalTokens = this._safeMetric(node.total_tokens, 0);
+        if (totalTokens > 0) {
+            const tokenDisplay = totalTokens >= 1000000 ? `${(totalTokens / 1000000).toFixed(1)}M` :
+                                 totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}K` :
+                                 `${totalTokens}`;
+            parts.push(`<span class="node-metric-badge"><i class="fas fa-coins"></i> ${tokenDisplay} Tokens</span>`);
+        }
+        
         return parts.length > 0 ? `<div class="node-metrics-container">${parts.join('')}</div>` : '';
     }
     
@@ -957,7 +967,8 @@ class LlamaNetUI {
                         tps: node.tps,
                         load: node.load,
                         uptime: node.uptime,
-                        last_seen: node.last_seen
+                        last_seen: node.last_seen,
+                        total_tokens: node.total_tokens
                     });
                 });
                 

@@ -396,6 +396,7 @@ async def _broadcast_current_node_metrics():
                 "uptime": metrics.get("uptime", 0),
                 "ttft": metrics.get("ttft", 0),
                 "latency": metrics.get("latency", 0),
+                "total_tokens": metrics.get("total_tokens", 0),
                 "last_seen": int(time.time()),
                 "dht_port": config.dht_port
             },
@@ -537,7 +538,8 @@ async def list_network_models():
                     "uptime": fresh_metrics.get('uptime', node.uptime),
                     "last_seen": int(time.time()),
                     "ttft": fresh_metrics.get('ttft', 0),
-                    "latency": fresh_metrics.get('latency', 0)
+                    "latency": fresh_metrics.get('latency', 0),
+                    "total_tokens": fresh_metrics.get('total_tokens', 0)
                 }
             else:
                 node_info = {
@@ -548,7 +550,8 @@ async def list_network_models():
                     "tps": node.tps,
                     "last_seen": node.last_seen,
                     "ttft": getattr(node, 'ttft', None),
-                    "latency": getattr(node, 'latency', None)
+                    "latency": getattr(node, 'latency', None),
+                    "total_tokens": getattr(node, 'total_tokens', None)
                 }
             
             # Try to get chat format info from the node
@@ -662,7 +665,8 @@ async def get_models_statistics():
                 "uptime": metrics.get("uptime", 0),
                 "last_seen": int(time.time()),
                 "ttft": metrics.get("ttft", 0),
-                "latency": metrics.get("latency", 0)
+                "latency": metrics.get("latency", 0),
+                "total_tokens": metrics.get("total_tokens", 0)
             }
             current_node_included = True
         
@@ -753,7 +757,8 @@ async def get_models_statistics():
                         "uptime": n.get("uptime", 0) if isinstance(n, dict) else n.uptime,
                         "last_seen": n.get("last_seen") if isinstance(n, dict) else n.last_seen,
                         "ttft": n.get("ttft") if isinstance(n, dict) else getattr(n, 'ttft', None),
-                        "latency": n.get("latency") if isinstance(n, dict) else getattr(n, 'latency', None)
+                        "latency": n.get("latency") if isinstance(n, dict) else getattr(n, 'latency', None),
+                        "total_tokens": n.get("total_tokens") if isinstance(n, dict) else getattr(n, 'total_tokens', None)
                     } for n in nodes
                 ]
             }

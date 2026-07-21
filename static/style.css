@@ -1468,6 +1468,12 @@ pre {
     letter-spacing: 0.01em;
 }
 
+/* Tokens specific - subtle purple tint */
+.node-metric-badge:has(.fa-coins) {
+    border-color: rgba(111, 66, 193, 0.3);
+    color: #6f42c1;
+}
+
 /* Info icon in node items */
 .clickable-node .fa-info-circle {
     opacity: 0.5;
