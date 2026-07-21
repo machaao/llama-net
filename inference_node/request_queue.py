@@ -36,6 +36,7 @@ class RequestQueueManager:
         self.processing_request: Optional[QueuedRequest] = None
         self.worker_task: Optional[asyncio.Task] = None
         self.running = False
+        self.reloading = False
         self.stats = {
             "total_requests": 0,
             "completed_requests": 0,
@@ -137,6 +138,11 @@ class RequestQueueManager:
         
         while self.running:
             try:
+                # Skip processing while reloading
+                if self.reloading:
+                    await asyncio.sleep(0.5)
+                    continue
+
                 # Get next request (with timeout to allow graceful shutdown)
                 try:
                     request = await asyncio.wait_for(
