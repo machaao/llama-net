@@ -3091,6 +3091,18 @@ class ModelDownloaderUI {
                 // Hide no-model banner if it was showing
                 const banner = document.getElementById('no-model-banner');
                 if (banner) banner.style.display = 'none';
+
+                // Update model info in main UI after hot-reload
+                if (typeof llamaNetUI !== 'undefined' && data.data && data.data.model_name) {
+                    llamaNetUI.selectedModel = data.data.model_name;
+                    llamaNetUI.updateChatInterface(data.data.model_name);
+                    localStorage.setItem('llamanet_selected_model', data.data.model_name);
+
+                    // Refresh network status to reflect new model
+                    setTimeout(() => {
+                        llamaNetUI.refreshNetworkDataOnTopologyChange();
+                    }, 1000);
+                }
             } else {
                 this.showToast('error', `Failed: ${data.message}`);
             }
