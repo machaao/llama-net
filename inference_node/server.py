@@ -239,10 +239,13 @@ async def lifespan(app: FastAPI):
             logger.info("LLM initialized successfully")
             
             # Register callback to broadcast metrics via SSE after each generation
+            # Store event loop ref so callback can be scheduled from worker threads
+            _main_loop = asyncio.get_event_loop()
+            llm.metrics_manager._event_loop = _main_loop
             def _on_metrics_updated():
-                asyncio.get_event_loop().create_task(_broadcast_current_node_metrics())
+                _main_loop.create_task(_broadcast_current_node_metrics())
             llm.metrics_manager._on_metrics_updated = _on_metrics_updated
-            logger.info("✅ Registered per-generation metrics broadcast callback")
+            logger.info("✅ Registered per-generation metrics broadcast callback (thread-safe)")
             
             await service_manager.mark_service_initializing("system_info")
             system_info = SystemInfo.get_all_info()

@@ -22,6 +22,7 @@ class MetricsManager:
         
         # Callback for metrics updates (used by server to broadcast via SSE)
         self._on_metrics_updated = None
+        self._event_loop = None  # Set by server for thread-safe scheduling
         
     def get_comprehensive_metrics(self) -> Dict[str, Any]:
         """Get all metrics in one call"""
@@ -104,9 +105,15 @@ class MetricsManager:
         self.total_generation_time += generation_time
         
         # Notify listeners that metrics have been updated
+        # Must be thread-safe since record_request_end() is called from thread executors
         if self._on_metrics_updated:
             try:
-                self._on_metrics_updated()
+                if self._event_loop and self._event_loop.is_running():
+                    # Schedule callback on the main event loop from worker thread
+                    self._event_loop.call_soon_threadsafe(self._on_metrics_updated)
+                else:
+                    # Already on main loop or loop not set
+                    self._on_metrics_updated()
             except Exception as e:
                 logger.debug(f"Metrics update callback error: {e}")
     
