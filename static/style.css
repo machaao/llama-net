@@ -1389,3 +1389,92 @@ pre {
     border-color: rgba(255, 193, 7, 0.4);
     color: #997404;
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* ENHANCED DETAIL CARDS & METRIC DISPLAYS                */
+/* ═══════════════════════════════════════════════════════ */
+
+.network-detail-item strong {
+    display: inline-block;
+    min-width: 90px;
+    color: #495057;
+}
+
+.network-detail-item strong:after {
+    content: '';
+}
+
+/* Subtle pulse on active metric badges */
+.node-metric-badge .fa-bolt {
+    color: #198754;
+}
+
+/* Metric values in detail modals */
+.network-detail-item .metric-highlight {
+    font-weight: 600;
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.25rem;
+    font-size: 0.85rem;
+}
+
+.metric-highlight.tps {
+    background-color: rgba(25, 135, 84, 0.1);
+    color: #198754;
+}
+
+.metric-highlight.ttft {
+    background-color: rgba(13, 110, 253, 0.1);
+    color: #0d6efd;
+}
+
+.metric-highlight.latency {
+    background-color: rgba(255, 193, 7, 0.15);
+    color: #997404;
+}
+
+/* Smooth transitions for metric value changes */
+.metric-value,
+.node-metric-badge {
+    transition: all 0.4s ease;
+}
+
+/* Network panel node list scrollbar */
+.model-nodes::-webkit-scrollbar {
+    width: 4px;
+}
+
+.model-nodes::-webkit-scrollbar-track {
+    background: #f8f9fa;
+    border-radius: 2px;
+}
+
+.model-nodes::-webkit-scrollbar-thumb {
+    background: #dee2e6;
+    border-radius: 2px;
+}
+
+.model-nodes::-webkit-scrollbar-thumb:hover {
+    background: #adb5bd;
+}
+
+/* Network status container smooth update */
+#network-status {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Better model group header alignment */
+.model-group .fw-bold.small {
+    font-size: 0.78rem;
+    letter-spacing: 0.01em;
+}
+
+/* Info icon in node items */
+.clickable-node .fa-info-circle {
+    opacity: 0.5;
+    transition: opacity 0.2s ease;
+    font-size: 0.65rem;
+}
+
+.clickable-node:hover .fa-info-circle {
+    opacity: 1;
+}

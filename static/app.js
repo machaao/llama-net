@@ -754,6 +754,13 @@ class LlamaNetUI {
         return `${Math.floor(diff / 3600)}h ago`;
     }
     
+    formatMetricTime(value) {
+        const num = typeof value === 'number' ? value : parseFloat(value);
+        if (!num || num <= 0) return 'N/A';
+        if (num < 1) return `${(num * 1000).toFixed(0)}ms`;
+        return `${num.toFixed(2)}s`;
+    }
+    
     renderNodeMetricsBadge(node) {
         const parts = [];
         
@@ -1547,6 +1554,8 @@ class LlamaNetUI {
                         <strong>Address:</strong> ${modelStats.best_node.ip}:${modelStats.best_node.port}<br>
                         <strong>Load:</strong> ${modelStats.best_node.load.toFixed(3)}<br>
                         <strong>TPS:</strong> ${modelStats.best_node.tps.toFixed(1)}<br>
+                        <strong>TTFT:</strong> ${this.formatMetricTime(modelStats.best_node.ttft)}<br>
+                        <strong>Latency:</strong> ${this.formatMetricTime(modelStats.best_node.latency)}<br>
                         <strong>Uptime:</strong> ${Math.floor(modelStats.best_node.uptime / 60)} minutes
                     </div>
                     ` : ''}
@@ -1678,6 +1687,8 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Load:</strong> ${nodeData.load.toFixed(2)}<br>
                         <strong>TPS:</strong> ${nodeData.tps.toFixed(1)}<br>
+                        <strong>TTFT:</strong> ${this.formatMetricTime(nodeData.ttft)}<br>
+                        <strong>Latency:</strong> ${this.formatMetricTime(nodeData.latency)}<br>
                         <strong>Uptime:</strong> ${uptimeText}
                     </div>
                 </div>
@@ -1758,6 +1769,8 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Load:</strong> ${nodeInfo.load ? nodeInfo.load.toFixed(2) : '0.00'}<br>
                         <strong>TPS:</strong> ${nodeInfo.tps ? nodeInfo.tps.toFixed(1) : '0.0'}<br>
+                        <strong>TTFT:</strong> ${this.formatMetricTime(nodeInfo.ttft)}<br>
+                        <strong>Latency:</strong> ${this.formatMetricTime(nodeInfo.latency)}<br>
                         <strong>Uptime:</strong> ${nodeInfo.uptime ? `${Math.floor(nodeInfo.uptime / 60)} minutes` : 'Unknown'}<br>
                         ${nodeInfo.total_tokens ? `<strong>Total Tokens:</strong> ${nodeInfo.total_tokens.toLocaleString()}<br>` : ''}
                     </div>
@@ -2306,6 +2319,8 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Load:</strong> ${status.load}<br>
                         <strong>TPS:</strong> ${status.tps}<br>
+                        <strong>TTFT:</strong> ${this.formatMetricTime(status.ttft)}<br>
+                        <strong>Latency:</strong> ${this.formatMetricTime(status.latency)}<br>
                         <strong>Uptime:</strong> ${status.uptime}s<br>
                         <strong>Total Tokens:</strong> ${status.total_tokens}
                     </div>

@@ -2100,6 +2100,8 @@ async def get_node_info(node_id: str):
                 "tps": metrics.get("tps", 0.0),
                 "uptime": metrics.get("uptime", 0),
                 "total_tokens": metrics.get("total_tokens", 0),
+                "ttft": metrics.get("ttft", 0),
+                "latency": metrics.get("latency", 0),
                 "last_seen": int(time.time()),
                 "system": system_info,
                 "status": "online",
