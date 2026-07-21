@@ -441,6 +441,23 @@ async def list_models():
 @app.get("/v1/models/network")
 async def list_network_models():
     """List all available models across the network (OpenAI-compatible extension) with chat formats"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    # In no-model mode with no DHT discovery, return empty gracefully
+    if config.no_model_mode and not dht_discovery:
+        return {
+            "object": "list",
+            "data": [],
+            "total_models": 0,
+            "total_nodes": 0,
+            "chat_format_summary": {
+                "models_with_chat_support": 0,
+                "unique_chat_formats": 0,
+                "format_distribution": {}
+            }
+        }
+    
     if not dht_discovery:
         raise HTTPException(status_code=503, detail="DHT discovery not initialized")
     
@@ -451,7 +468,11 @@ async def list_network_models():
         # Group by model and create OpenAI-compatible response
         models_dict = {}
         for node in all_nodes:
-            model_name = node.model
+            # Override current node with fresh local model name (DHT may be stale)
+            if not config.no_model_mode and node.node_id == config.node_id:
+                model_name = config.model_name
+            else:
+                model_name = node.model
             if model_name not in models_dict:
                 models_dict[model_name] = {
                     "id": model_name,
