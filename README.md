@@ -2,7 +2,7 @@
 
 LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It provides an OpenAI-compatible API with real-time streaming, automatic node discovery via Kademlia DHT, and no single point of failure.
 
-![LlamaNet](./static/images/screenshot.png)
+![LlamaNet](./static/images/screenshot-v2.png)
 
 ## Quick Start
 
