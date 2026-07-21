@@ -84,6 +84,26 @@ python -m inference_node.server \
   --bootstrap-nodes localhost:8001
 ```
 
+## Docker Setup
+
+LlamaNet includes Docker support with automatic GPU/CPU detection and no-model mode.
+
+```bash
+# Build and start a 3-node network
+docker-compose -f docker/docker-compose.yml up -d
+
+# Start a no-model router node (downloads model via Web UI)
+docker run -d \
+  --name llamanet-router \
+  -p 8000:8000 \
+  -p 8001:8001/udp \
+  -v llamanet-models:/root/.llamanet/models \
+  -e BOOTSTRAP_NODES="" \
+  llamanet
+```
+
+See [docker/README.md](./docker/README.md) for full Docker documentation including GPU setup, environment variables, and scaling.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
