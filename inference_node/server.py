@@ -1628,6 +1628,88 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
         # Fall back to local processing
         return await _handle_chat_completion_locally(request)
 
+async def _route_to_worker(request, endpoint_type="chat"):
+    """Route request to an available worker node (used by no-model master nodes)"""
+    # Get target model from request
+    target_model = getattr(request, 'target_model', None) or getattr(request, 'model', None)
+    strategy = getattr(request, 'strategy', None) or 'round_robin'
+    
+    # Find worker nodes with the requested model
+    nodes = []
+    if target_model and dht_discovery:
+        try:
+            nodes = await dht_discovery.get_nodes(model=target_model)
+        except Exception as e:
+            logger.warning(f"Error finding nodes for model {target_model}: {e}")
+    
+    # If no model-specific nodes found, try any available node
+    if not nodes and dht_discovery:
+        try:
+            nodes = await dht_discovery.get_nodes()
+        except Exception as e:
+            logger.warning(f"Error finding nodes: {e}")
+    
+    # Still no nodes → error
+    if not nodes:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "No worker nodes available for inference",
+                    "type": "no_workers",
+                    "code": "no_workers_available"
+                },
+                "hint": "Start a worker node with: --bootstrap-nodes <this-node-ip>:8001",
+                "master_node": {
+                    "node_id": config.node_id,
+                    "mode": "router",
+                    "model": "none"
+                }
+            }
+        )
+    
+    # Select best node using node selector
+    selected = None
+    if node_selector:
+        try:
+            selected = await node_selector.select_node(
+                model=target_model,
+                strategy=strategy
+            )
+        except Exception as e:
+            logger.warning(f"Node selector failed, using first available: {e}")
+    
+    # Fallback to first available node
+    if not selected:
+        selected = nodes[0]
+    
+    # Don't forward to self (safety check)
+    if selected.node_id == config.node_id:
+        if len(nodes) <= 1:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": {
+                        "message": "No external worker nodes available",
+                        "type": "no_workers",
+                        "code": "self_only"
+                    }
+                }
+            )
+        # Try next node
+        for node in nodes:
+            if node.node_id != config.node_id:
+                selected = node
+                break
+    
+    logger.info(f"🔀 Routing {endpoint_type} request to worker {selected.node_id[:8]}... ({selected.model}) at {selected.ip}:{selected.port}")
+    
+    # Forward using existing infrastructure
+    if endpoint_type == "chat":
+        return await _forward_chat_completion(request, selected)
+    else:
+        return await _forward_completion(request, selected)
+
 # Status and utility endpoints
 @app.get("/status")
 async def status():
