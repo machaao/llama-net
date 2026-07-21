@@ -561,15 +561,17 @@ class LlamaNetUI {
         const container = document.getElementById('network-status');
         if (!container) return;
         
+        // ALWAYS use activeNodes as source of truth (has latest SSE + API data)
         const nodes = Array.from(this.activeNodes.values());
         
-        // Group nodes by model
+        // Group nodes by model, merging fresh metrics from activeNodes
         const modelGroups = {};
         nodes.forEach(node => {
-            if (!modelGroups[node.model]) {
-                modelGroups[node.model] = [];
+            const model = node.model || 'unknown';
+            if (!modelGroups[model]) {
+                modelGroups[model] = [];
             }
-            modelGroups[node.model].push(node);
+            modelGroups[model].push(node);
         });
         
         // Calculate network stats using server-compatible structure
@@ -762,26 +764,34 @@ class LlamaNetUI {
     }
     
     renderNodeMetricsBadge(node) {
+        if (!node) return '';
         const parts = [];
         
-        // TPS (always show, even if 0)
-        const tps = typeof node.tps === 'number' ? node.tps : parseFloat(node.tps) || 0;
+        // TPS (always show)
+        const tps = this._safeMetric(node.tps, 0);
         parts.push(`<span class="node-metric-badge"><i class="fas fa-bolt"></i> ${tps.toFixed(1)} TPS</span>`);
         
-        // TTFT (show if > 0)
-        const ttft = typeof node.ttft === 'number' ? node.ttft : parseFloat(node.ttft);
-        if (ttft && ttft > 0) {
-            parts.push(`<span class="node-metric-badge"><i class="fas fa-stopwatch"></i> ${ttft < 1 ? (ttft * 1000).toFixed(0) + 'ms' : ttft.toFixed(2) + 's'} TTFT</span>`);
+        // TTFT (show if we have a value)
+        const ttft = this._safeMetric(node.ttft, null);
+        if (ttft !== null && ttft > 0) {
+            const ttftDisplay = ttft < 1 ? `${(ttft * 1000).toFixed(0)}ms` : `${ttft.toFixed(2)}s`;
+            parts.push(`<span class="node-metric-badge"><i class="fas fa-stopwatch"></i> ${ttftDisplay} TTFT</span>`);
         }
         
-        // Latency (show if > 0)
-        const latency = typeof node.latency === 'number' ? node.latency : parseFloat(node.latency);
-        if (latency && latency > 0) {
-            parts.push(`<span class="node-metric-badge"><i class="fas fa-tachometer-alt"></i> ${latency < 1 ? (latency * 1000).toFixed(0) + 'ms' : latency.toFixed(2) + 's'} Latency</span>`);
+        // Latency (show if we have a value)
+        const latency = this._safeMetric(node.latency, null);
+        if (latency !== null && latency > 0) {
+            const latDisplay = latency < 1 ? `${(latency * 1000).toFixed(0)}ms` : `${latency.toFixed(2)}s`;
+            parts.push(`<span class="node-metric-badge"><i class="fas fa-tachometer-alt"></i> ${latDisplay} Latency</span>`);
         }
         
-        if (parts.length === 0) return '';
-        return `<div class="node-metrics-container">${parts.join('')}</div>`;
+        return parts.length > 0 ? `<div class="node-metrics-container">${parts.join('')}</div>` : '';
+    }
+    
+    _safeMetric(value, defaultVal) {
+        if (value === null || value === undefined) return defaultVal;
+        const num = typeof value === 'number' ? value : parseFloat(value);
+        return isNaN(num) ? defaultVal : num;
     }
     
     calculateNetworkHealth(avgLoadOrSummary, nodeCount) {
@@ -938,11 +948,51 @@ class LlamaNetUI {
                 // Debug log to check the structure
                 console.log('🔍 Models data structure:', modelsData);
                 
+                // Preserve SSE-updated metrics before clearing activeNodes
+                const sseMetrics = new Map();
+                this.activeNodes.forEach((node, nodeId) => {
+                    sseMetrics.set(nodeId, {
+                        ttft: node.ttft,
+                        latency: node.latency,
+                        tps: node.tps,
+                        load: node.load,
+                        uptime: node.uptime,
+                        last_seen: node.last_seen
+                    });
+                });
+                
                 // Update activeNodes from fresh API data
                 this.updateActiveNodesFromAPI(modelsData);
                 
+                // Merge SSE-updated metrics back into API nodes (SSE is fresher for current node)
+                this.activeNodes.forEach((node, nodeId) => {
+                    const sseData = sseMetrics.get(nodeId);
+                    if (sseData) {
+                        // For the current node, always prefer SSE metrics (they're from live generation)
+                        // For remote nodes, use whichever is more recent
+                        if (nodeId === freshLocalNode?.node_id) {
+                            // Current node: SSE metrics are always freshest
+                            node.ttft = sseData.ttft ?? node.ttft;
+                            node.latency = sseData.latency ?? node.latency;
+                            node.tps = sseData.tps ?? node.tps;
+                            node.load = sseData.load ?? node.load;
+                        } else if (sseData.last_seen && node.last_seen && sseData.last_seen >= node.last_seen) {
+                            // Remote node: use SSE data if it's more recent
+                            node.ttft = sseData.ttft ?? node.ttft;
+                            node.latency = sseData.latency ?? node.latency;
+                            node.tps = sseData.tps ?? node.tps;
+                            node.load = sseData.load ?? node.load;
+                        }
+                    }
+                });
+                
                 // Override local node with fresh model info (DHT may still have stale data)
                 if (freshLocalNode) {
+                    const existingNode = this.activeNodes.get(freshLocalNode.node_id);
+                    freshLocalNode.ttft = existingNode?.ttft ?? freshLocalNode.ttft;
+                    freshLocalNode.latency = existingNode?.latency ?? freshLocalNode.latency;
+                    freshLocalNode.tps = existingNode?.tps ?? freshLocalNode.tps;
+                    freshLocalNode.load = existingNode?.load ?? freshLocalNode.load;
                     this.activeNodes.set(freshLocalNode.node_id, freshLocalNode);
                     this.nodeStatuses.set(freshLocalNode.node_id, 'online');
                     this.nodeLastEvent.set(freshLocalNode.node_id, Date.now());
