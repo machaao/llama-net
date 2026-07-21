@@ -494,7 +494,9 @@ async def list_network_models():
                 "port": node.port,
                 "load": node.load,
                 "tps": node.tps,
-                "last_seen": node.last_seen
+                "last_seen": node.last_seen,
+                "ttft": getattr(node, 'ttft', None),
+                "latency": getattr(node, 'latency', None)
             }
             
             # Try to get chat format info from the node
@@ -595,6 +597,7 @@ async def get_models_statistics():
         
         # Include current node with fresh model info (DHT may have stale data)
         current_node_included = False
+        metrics = {}
         if not config.no_model_mode and llm:
             metrics = llm.get_metrics()
             current_node_data = {
@@ -605,7 +608,9 @@ async def get_models_statistics():
                 "load": metrics.get("load", 0.0),
                 "tps": metrics.get("tps", 0.0),
                 "uptime": metrics.get("uptime", 0),
-                "last_seen": int(time.time())
+                "last_seen": int(time.time()),
+                "ttft": metrics.get("ttft", 0),
+                "latency": metrics.get("latency", 0)
             }
             current_node_included = True
         
@@ -613,7 +618,11 @@ async def get_models_statistics():
             # If this node is the current node, override with fresh local data
             if current_node_included and node.node_id == config.node_id:
                 model_name = config.model_name
-                node_info = current_node_data
+                node_info = {
+                    **current_node_data,
+                    "ttft": metrics.get("ttft", 0),
+                    "latency": metrics.get("latency", 0)
+                }
             else:
                 model_name = node.model
                 node_info = node
@@ -690,7 +699,9 @@ async def get_models_statistics():
                         "load": n.get("load", 0) if isinstance(n, dict) else n.load,
                         "tps": n.get("tps", 0) if isinstance(n, dict) else n.tps,
                         "uptime": n.get("uptime", 0) if isinstance(n, dict) else n.uptime,
-                        "last_seen": n.get("last_seen") if isinstance(n, dict) else n.last_seen
+                        "last_seen": n.get("last_seen") if isinstance(n, dict) else n.last_seen,
+                        "ttft": n.get("ttft") if isinstance(n, dict) else getattr(n, 'ttft', None),
+                        "latency": n.get("latency") if isinstance(n, dict) else getattr(n, 'latency', None)
                     } for n in nodes
                 ]
             }
