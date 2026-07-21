@@ -36,6 +36,7 @@ from inference_node.event_publisher import EventBasedDHTPublisher
 from inference_node.heartbeat import HeartbeatManager
 from inference_node.p2p_handler import P2PRequestHandler
 from inference_node.request_queue import RequestQueueManager, RequestStatus
+from inference_node.download_manager import DownloadManager
 from client.dht_discovery import DHTDiscovery
 from client.router import NodeSelector
 from client.event_discovery import NodeEventType, NodeEvent, NodeEventListener
@@ -59,6 +60,7 @@ signal_handler = None
 round_robin_state = {"index": 0}  # Global round robin state
 executor = None  # ProcessPoolExecutor for clean shutdown
 request_queue_manager = None  # Request queue manager
+download_manager = None  # Model download manager
 
 class DiscoverySSEBridge(NodeEventListener):
     """Bridge discovery events to SSE broadcasting"""
@@ -170,7 +172,7 @@ async def basic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_manager, discovery_bridge, shutdown_handler, signal_handler, executor, request_queue_manager
+    global config, llm, dht_publisher, system_info, heartbeat_manager, dht_discovery, node_selector, p2p_handler, sse_manager, discovery_bridge, shutdown_handler, signal_handler, executor, request_queue_manager, download_manager
     
     # Get service manager
     service_manager = get_service_manager()
@@ -197,115 +199,111 @@ async def lifespan(app: FastAPI):
         await service_manager.mark_service_ready("config")
         logger.info(f"Starting OpenAI-compatible inference node: {config}")
         
-        # 2. Initialize LLM first (most likely to fail)
-        await service_manager.mark_service_initializing("llm")
-        logger.info("Initializing LLM...")
-        llm = LlamaWrapper(config)
-        await service_manager.mark_service_ready("llm")
-        logger.info("LLM initialized successfully")
+        # 1.5 Initialize download manager (always available)
+        await service_manager.mark_service_initializing("download_manager")
+        download_manager = DownloadManager()
+        await service_manager.mark_service_ready("download_manager")
+        logger.info("Download manager initialized")
         
-        # 2.5. Initialize request queue manager after LLM
+        # 1.6 Initialize request queue manager (always available)
         await service_manager.mark_service_initializing("request_queue")
         request_queue_manager = RequestQueueManager(max_queue_size=50)
         await request_queue_manager.start()
         shutdown_handler.register_component('request_queue', request_queue_manager)
         await service_manager.mark_service_ready("request_queue")
         logger.info("Request queue manager initialized")
-        
-        # 3. Get system info
-        await service_manager.mark_service_initializing("system_info")
-        system_info = SystemInfo.get_all_info()
-        await service_manager.mark_service_ready("system_info")
-        
-        # 4. Start heartbeat manager (lightweight)
-        await service_manager.mark_service_initializing("heartbeat_manager")
-        logger.info("Starting heartbeat manager...")
-        heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
-        await heartbeat_manager.start()
-        shutdown_handler.register_component('heartbeat_manager', heartbeat_manager)
-        await service_manager.mark_service_ready("heartbeat_manager")
-        
-        # 5. Initialize shared DHT service
-        await service_manager.mark_service_initializing("dht_service")
-        logger.info("Initializing shared DHT service...")
-        from common.dht_service import SharedDHTService
-        dht_service = SharedDHTService()
-        
-        # Parse bootstrap nodes
-        bootstrap_nodes = []
-        if config.bootstrap_nodes:
-            for node_str in config.bootstrap_nodes.split(','):
-                try:
-                    ip, port = node_str.strip().split(':')
-                    bootstrap_nodes.append((ip, int(port)))
-                except ValueError:
-                    logger.warning(f"Invalid bootstrap node format: {node_str}")
-        
-        # Initialize the shared DHT service
-        await dht_service.initialize(config.node_id, config.dht_port, bootstrap_nodes)
-        await service_manager.mark_service_ready("dht_service")
 
-        # 6. Start DHT publisher (with delayed join)
-        await service_manager.mark_service_initializing("dht_publisher")
-        logger.info("Starting DHT publisher...")
-        dht_publisher = DHTPublisher(config, llm.get_metrics)
-        await dht_publisher.start()  # Join event will be delayed
-        shutdown_handler.register_component('dht_publisher', dht_publisher)
-        await service_manager.mark_service_ready("dht_publisher")
-        
-        # Connect event publisher to DHT service for bootstrap event coordination
-        if dht_publisher and dht_service.is_initialized():
-            dht_service.set_event_publisher(dht_publisher)
-            logger.info("✅ Event publisher connected to DHT service for bootstrap events")
-        
-        # 7. Start DHT discovery
-        await service_manager.mark_service_initializing("dht_discovery")
-        logger.info("Starting DHT discovery...")
-        dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
-        await dht_discovery.start()
-        shutdown_handler.register_component('dht_discovery', dht_discovery)
-        await service_manager.mark_service_ready("dht_discovery")
-        
-        # 8. Initialize unified SSE manager
-        await service_manager.mark_service_initializing("sse_manager")
-        logger.info("Initializing unified SSE manager...")
-        base_url = f"http://{config.host}:{config.port}"
-        sse_manager = UnifiedSSEManager(base_url)
-        await sse_manager.start()
-        shutdown_handler.register_component('sse_manager', sse_manager)
-        await service_manager.mark_service_ready("sse_manager")
-        
-        # 9. Bridge discovery events to SSE
-        await service_manager.mark_service_initializing("discovery_bridge")
-        if dht_discovery and sse_manager:
-            discovery_bridge = DiscoverySSEBridge(sse_manager.handler)
-            dht_discovery.add_event_listener(discovery_bridge)
-            logger.info("✅ Discovery-to-SSE bridge established - real-time events enabled")
-        await service_manager.mark_service_ready("discovery_bridge")
-        
-        # 10. Initialize node selector
-        await service_manager.mark_service_initializing("node_selector")
-        node_selector = NodeSelector(dht_discovery)
-        await service_manager.mark_service_ready("node_selector")
+        if config.no_model_mode:
+            # ── NO-MODEL MODE: Skip LLM and network features ──
+            logger.warning("⚠️  Starting in NO-MODEL MODE")
+            logger.info("🌐 Web UI is available - use Model Manager to download a model")
+            logger.info("   Inference endpoints (/v1/chat/completions, etc.) will return 503")
+            
+            await service_manager.mark_service_initializing("system_info")
+            system_info = SystemInfo.get_all_info()
+            await service_manager.mark_service_ready("system_info")
+            
+            await service_manager.mark_service_initializing("sse_manager")
+            base_url = f"http://{config.host}:{config.port}"
+            sse_manager = UnifiedSSEManager(base_url)
+            await sse_manager.start()
+            shutdown_handler.register_component('sse_manager', sse_manager)
+            await service_manager.mark_service_ready("sse_manager")
+            
+        else:
+            # ── NORMAL MODE: Full initialization ──
+            await service_manager.mark_service_initializing("llm")
+            logger.info("Initializing LLM...")
+            llm = LlamaWrapper(config)
+            await service_manager.mark_service_ready("llm")
+            logger.info("LLM initialized successfully")
+            
+            await service_manager.mark_service_initializing("system_info")
+            system_info = SystemInfo.get_all_info()
+            await service_manager.mark_service_ready("system_info")
+            
+            await service_manager.mark_service_initializing("heartbeat_manager")
+            logger.info("Starting heartbeat manager...")
+            heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
+            await heartbeat_manager.start()
+            shutdown_handler.register_component('heartbeat_manager', heartbeat_manager)
+            await service_manager.mark_service_ready("heartbeat_manager")
+            
+            await service_manager.mark_service_initializing("dht_service")
+            logger.info("Initializing shared DHT service...")
+            from common.dht_service import SharedDHTService
+            dht_service = SharedDHTService()
+            
+            bootstrap_nodes = []
+            if config.bootstrap_nodes:
+                for node_str in config.bootstrap_nodes.split(','):
+                    try:
+                        ip, port = node_str.strip().split(':')
+                        bootstrap_nodes.append((ip, int(port)))
+                    except ValueError:
+                        logger.warning(f"Invalid bootstrap node format: {node_str}")
+            
+            await dht_service.initialize(config.node_id, config.dht_port, bootstrap_nodes)
+            await service_manager.mark_service_ready("dht_service")
 
-        # 12. Start P2P handler LAST (optional service)
-        # await service_manager.mark_service_initializing("p2p_handler")
-        # try:
-        #     logger.info("Starting P2P handler...")
-        #     p2p_handler = P2PRequestHandler(config, llm)
-        #     await p2p_handler.start()
-        #     if p2p_handler:
-        #         dht_publisher.p2p_handler = p2p_handler
-        #         shutdown_handler.register_component('p2p_handler', p2p_handler)
-        #     await service_manager.mark_service_ready("p2p_handler")
-        #     logger.info("P2P handler started successfully")
-        # except Exception as e:
-        #     await service_manager.mark_service_failed("p2p_handler", str(e))
-        #     logger.warning(f"P2P handler failed to start (continuing without P2P): {e}")
-        #     p2p_handler = None
-        
-        # Schedule post-uvicorn join event trigger
-        asyncio.create_task(trigger_post_uvicorn_join())
+            await service_manager.mark_service_initializing("dht_publisher")
+            logger.info("Starting DHT publisher...")
+            dht_publisher = DHTPublisher(config, llm.get_metrics)
+            await dht_publisher.start()
+            shutdown_handler.register_component('dht_publisher', dht_publisher)
+            await service_manager.mark_service_ready("dht_publisher")
+            
+            if dht_publisher and dht_service.is_initialized():
+                dht_service.set_event_publisher(dht_publisher)
+                logger.info("✅ Event publisher connected to DHT service for bootstrap events")
+            
+            await service_manager.mark_service_initializing("dht_discovery")
+            logger.info("Starting DHT discovery...")
+            dht_discovery = DHTDiscovery(config.bootstrap_nodes, config.dht_port)
+            await dht_discovery.start()
+            shutdown_handler.register_component('dht_discovery', dht_discovery)
+            await service_manager.mark_service_ready("dht_discovery")
+            
+            await service_manager.mark_service_initializing("sse_manager")
+            logger.info("Initializing unified SSE manager...")
+            base_url = f"http://{config.host}:{config.port}"
+            sse_manager = UnifiedSSEManager(base_url)
+            await sse_manager.start()
+            shutdown_handler.register_component('sse_manager', sse_manager)
+            await service_manager.mark_service_ready("sse_manager")
+            
+            await service_manager.mark_service_initializing("discovery_bridge")
+            if dht_discovery and sse_manager:
+                discovery_bridge = DiscoverySSEBridge(sse_manager.handler)
+                dht_discovery.add_event_listener(discovery_bridge)
+                logger.info("✅ Discovery-to-SSE bridge established - real-time events enabled")
+            await service_manager.mark_service_ready("discovery_bridge")
+            
+            await service_manager.mark_service_initializing("node_selector")
+            node_selector = NodeSelector(dht_discovery)
+            await service_manager.mark_service_ready("node_selector")
+
+            asyncio.create_task(trigger_post_uvicorn_join())
         
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
@@ -615,6 +613,8 @@ async def get_models_statistics():
 @app.post("/v1/completions")
 async def create_completion(request: OpenAICompletionRequest):
     """Create a completion (OpenAI-compatible) with queue handling"""
+    if config and config.no_model_mode:
+        raise HTTPException(status_code=503, detail="No model loaded. Use the Model Manager to download and select a model.")
     if not llm or not request_queue_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
     
@@ -1044,6 +1044,8 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: OpenAIChatCompletionRequest):
     """Create a chat completion (OpenAI-compatible) with queue handling"""
+    if config and config.no_model_mode:
+        raise HTTPException(status_code=503, detail="No model loaded. Use the Model Manager to download and select a model.")
     if not llm or not request_queue_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
     
@@ -1533,6 +1535,15 @@ async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_
 @app.get("/status")
 async def status():
     """Get node status with chat format information"""
+    if config and config.no_model_mode:
+        return {
+            "status": "no_model",
+            "no_model_mode": True,
+            "node_id": config.node_id,
+            "model_name": "No Model Loaded",
+            "openai_compatible": True,
+            "timestamp": time.time()
+        }
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not initialized")
     
@@ -1566,7 +1577,24 @@ async def status():
 @app.get("/info")
 async def info():
     """Get static node information"""
-    if not config or not system_info:
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    if config.no_model_mode:
+        return {
+            "node_id": config.node_id,
+            "model": "No Model Loaded",
+            "model_path": "",
+            "system": system_info or {},
+            "dht_port": config.dht_port,
+            "openai_compatible": True,
+            "no_model_mode": True,
+            "endpoints": ["/models/search", "/models/download", "/models/select", "/models/local"],
+            "hardware_based_id": True,
+            "message": "No model loaded. Use the Model Manager to download and select a model."
+        }
+    
+    if not system_info:
         raise HTTPException(status_code=503, detail="Node not initialized")
     
     # Get P2P info if available
@@ -1604,17 +1632,28 @@ async def info():
 @app.get("/health")
 async def health():
     """Get node health status"""
+    if config and config.no_model_mode:
+        return {
+            "status": "no_model",
+            "no_model_mode": True,
+            "llm_loaded": False,
+            "dht_running": False,
+            "timestamp": time.time(),
+            "openai_compatible": True,
+            "message": "No model loaded. Use the Model Manager in the Web UI to download and select a model."
+        }
+    
     if not heartbeat_manager:
         raise HTTPException(status_code=503, detail="Heartbeat manager not initialized")
         
     health_status = heartbeat_manager.get_health_status()
     
-    # Add additional health checks
     health_status.update({
         "llm_loaded": llm is not None,
         "dht_running": dht_publisher is not None and dht_publisher.running,
         "timestamp": time.time(),
-        "openai_compatible": True
+        "openai_compatible": True,
+        "no_model_mode": False
     })
     
     return health_status
@@ -2593,6 +2632,284 @@ def validate_global_components():
     
     logger.info("✅ All required global components are initialized")
     return True
+
+# ═══════════════════════════════════════════════════════
+# MODEL MANAGER ENDPOINTS
+# ═══════════════════════════════════════════════════════
+
+@app.get("/models/search")
+async def search_models(q: str = "", limit: int = 20):
+    """Search Hugging Face for GGUF models"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    try:
+        results = await download_manager.search_models(q, limit=limit)
+        return {
+            "success": True,
+            "data": results,
+            "query": q,
+            "count": len(results),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error searching models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/models/details/{repo_id:path}")
+async def get_model_details(repo_id: str):
+    """Get detailed model info including GGUF files"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    try:
+        details = await download_manager.get_model_details(repo_id)
+        return {
+            "success": True,
+            "data": details,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error getting model details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/models/download")
+async def start_model_download(request: Request):
+    """Start downloading a model"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    try:
+        body = await request.json()
+        repo_id = body.get("repo_id")
+        quantization = body.get("quantization", "Q4_K_M")
+        
+        if not repo_id:
+            raise HTTPException(status_code=400, detail="repo_id is required")
+        
+        download_id = await download_manager.start_download(repo_id, quantization)
+        
+        return {
+            "success": True,
+            "data": {
+                "download_id": download_id,
+                "repo_id": repo_id,
+                "quantization": quantization,
+                "status": "pending"
+            },
+            "message": f"Download started for {repo_id}:{quantization}",
+            "timestamp": time.time()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting download: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/models/download/status")
+async def download_status_stream(download_id: str = ""):
+    """SSE stream for download progress"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    if not download_id:
+        return download_manager.get_all_downloads()
+    
+    async def event_generator():
+        queue = download_manager.register_progress_listener(download_id)
+        if not queue:
+            status = download_manager.get_download_status(download_id)
+            if status:
+                yield f"data: {json.dumps(status)}\n\n"
+            return
+        
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    
+                    if event.get("status") in ("completed", "failed", "cancelled"):
+                        break
+                        
+                except asyncio.TimeoutError:
+                    heartbeat = {"type": "heartbeat", "timestamp": time.time()}
+                    yield f"data: {json.dumps(heartbeat)}\n\n"
+                    
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                queue.task_done()
+            except Exception:
+                pass
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@app.delete("/models/download/{download_id}")
+async def cancel_download(download_id: str):
+    """Cancel an active download"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    success = await download_manager.cancel_download(download_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Download {download_id} not found")
+    
+    return {
+        "success": True,
+        "message": f"Download {download_id} cancelled",
+        "timestamp": time.time()
+    }
+
+
+@app.get("/models/local")
+async def list_local_models():
+    """List all locally cached models"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    models = download_manager.list_local_models()
+    disk = download_manager.get_disk_usage()
+    
+    return {
+        "success": True,
+        "data": models,
+        "disk_usage": disk,
+        "timestamp": time.time()
+    }
+
+
+@app.delete("/models/local/{model_id:path}")
+async def delete_local_model_endpoint(model_id: str):
+    """Delete a locally cached model"""
+    if not download_manager:
+        raise HTTPException(status_code=503, detail="Download manager not initialized")
+    
+    success = download_manager.delete_local_model(model_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+    
+    return {
+        "success": True,
+        "message": f"Model {model_id} deleted",
+        "timestamp": time.time()
+    }
+
+
+@app.post("/models/select")
+async def select_model(request: Request):
+    """Hot-reload to a different model"""
+    global llm
+    
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    try:
+        body = await request.json()
+        model_path = body.get("model_path")
+        
+        if not model_path:
+            raise HTTPException(status_code=400, detail="model_path is required")
+        
+        if not os.path.exists(model_path):
+            raise HTTPException(status_code=404, detail=f"Model file not found: {model_path}")
+        
+        # In no-model mode, do full initialization
+        if config.no_model_mode:
+            config.model_path = model_path
+            config.model_name = os.path.basename(model_path)
+            config.no_model_mode = False
+            config.save_active_model(model_path, config.model_name)
+            
+            logger.info(f"Initializing LLM with selected model: {model_path}")
+            llm = LlamaWrapper(config)
+            
+            return {
+                "success": True,
+                "data": {
+                    "model_path": model_path,
+                    "model_name": config.model_name,
+                    "mode": "initial_load",
+                    "reloaded": True
+                },
+                "message": f"Model loaded: {config.model_name}",
+                "timestamp": time.time()
+            }
+        
+        # In normal mode, do hot-reload
+        if not llm:
+            raise HTTPException(status_code=503, detail="LLM wrapper not initialized")
+        
+        if model_path == config.model_path:
+            return {
+                "success": True,
+                "data": {
+                    "model_path": model_path,
+                    "model_name": config.model_name,
+                    "mode": "already_loaded",
+                    "reloaded": False
+                },
+                "message": f"Model already loaded: {config.model_name}",
+                "timestamp": time.time()
+            }
+        
+        # Pause request queue during reload
+        await request_queue_manager.set_reloading(True)
+        
+        try:
+            drained = await request_queue_manager.drain_active_requests(timeout=30.0)
+            if not drained:
+                logger.warning("Not all requests drained - proceeding with reload anyway")
+            
+            logger.info(f"Hot-reloading model: {config.model_path} -> {model_path}")
+            llm.reload_model(model_path)
+            
+            config.save_active_model(model_path, config.model_name)
+            
+            if dht_publisher and dht_publisher.running:
+                try:
+                    await dht_publisher.send_post_uvicorn_join_event()
+                except Exception as e:
+                    logger.warning(f"Failed to update DHT after reload: {e}")
+            
+            return {
+                "success": True,
+                "data": {
+                    "model_path": model_path,
+                    "model_name": config.model_name,
+                    "mode": "hot_reload",
+                    "reloaded": True,
+                    "drained": drained
+                },
+                "message": f"Model hot-reloaded: {config.model_name}",
+                "timestamp": time.time()
+            }
+            
+        finally:
+            await request_queue_manager.set_reloading(False)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error selecting model: {e}")
+        if request_queue_manager:
+            await request_queue_manager.set_reloading(False)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 def start_server():
     """Start the inference server with enhanced graceful shutdown"""
