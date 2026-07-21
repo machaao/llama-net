@@ -183,20 +183,41 @@ start_cloudflare_tunnel() {
         cloudflared tunnel --config "$config_file" run > "$tunnel_log" 2>&1 &
         TUNNEL_PID=$!
 
-        # Wait for tunnel to connect
+        # Wait for tunnel to connect — verify process stays alive
         local attempts=0
+        local connected=false
         while [ $attempts -lt 20 ]; do
-            if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
-               grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
+            # Check if cloudflared is still running
+            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+                echo ""
+                echo "❌ cloudflared exited unexpectedly. Last 20 lines of log:"
+                tail -20 "$tunnel_log"
                 break
             fi
+
+            if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
+               grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
+                connected=true
+                break
+            fi
+
+            # Check for errors
+            if grep -qi "error\|failed\|unable" "$tunnel_log" 2>/dev/null; then
+                echo ""
+                echo "❌ cloudflared error detected:"
+                grep -i "error\|failed\|unable" "$tunnel_log" | tail -5
+                break
+            fi
+
             sleep 1
             attempts=$((attempts + 1))
         done
 
-        # Use domain from config as the URL
-        if [ -n "$EXISTING_DOMAIN" ]; then
+        # Only show success if actually connected
+        if [ "$connected" = "true" ] && [ -n "$EXISTING_DOMAIN" ]; then
             TUNNEL_URL="https://${EXISTING_DOMAIN}"
+        elif [ "$connected" = "false" ]; then
+            echo "⚠️  Tunnel may not have connected. Check log: $tunnel_log"
         fi
 
     # ── Quick temporary tunnel (no config.yml) ──
