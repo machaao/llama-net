@@ -164,9 +164,20 @@ class LlamaWrapper:
         """Hot-reload: unload current model and load a new one"""
         logger.info(f"Hot-reloading model: {self.config.model_path} -> {new_model_path}")
         self.unload_model()
-        self.load_model(new_model_path)
+        
+        # Update model config BEFORE loading new model
         self.config.model_path = new_model_path
         self.config.model_name = os.path.basename(new_model_path)
+        
+        # Re-detect chat format and reasoning support for the new model
+        self.detected_chat_format = detect_chat_format_from_model_name(self.config.model_name)
+        self.supports_reasoning = detect_reasoning_model(self.config.model_name)
+        logger.info(f"New chat format: {self.detected_chat_format}, reasoning: {self.supports_reasoning}")
+        
+        # Reset metrics for the new model
+        self.metrics_manager = MetricsManager()
+        
+        self.load_model(new_model_path)
         self._detect_chat_template()
         logger.info(f"Hot-reload complete. New model: {self.config.model_name}")
 
