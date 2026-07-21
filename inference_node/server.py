@@ -2974,11 +2974,45 @@ async def select_model(request: Request):
             
             config.save_active_model(model_path, config.model_name)
             
+            # Re-publish to DHT with updated model info
             if dht_publisher and dht_publisher.running:
                 try:
                     await dht_publisher.send_post_uvicorn_join_event()
+                    logger.info(f"DHT re-published with new model: {config.model_name}")
                 except Exception as e:
                     logger.warning(f"Failed to update DHT after reload: {e}")
+            
+            # Broadcast node_updated event via SSE so connected UIs see the change
+            if sse_manager:
+                try:
+                    await sse_manager.broadcast_event("node_updated", {
+                        "node_info": {
+                            "node_id": config.node_id,
+                            "ip": get_host_ip(),
+                            "port": config.port,
+                            "model": config.model_name,
+                            "load": 0.0,
+                            "tps": 0.0,
+                            "uptime": 0,
+                            "last_seen": int(time.time()),
+                            "dht_port": config.dht_port
+                        },
+                        "timestamp": time.time(),
+                        "source": "model_reload",
+                        "event_driven": True
+                    })
+                    logger.info(f"SSE broadcast: node_updated with new model {config.model_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast model change via SSE: {e}")
+            
+            # Force DHT discovery to refresh its local node cache
+            if dht_discovery:
+                try:
+                    # Get fresh nodes to update discovery cache
+                    await dht_discovery.get_nodes(force_refresh=True)
+                    logger.info("DHT discovery cache refreshed after model reload")
+                except Exception as e:
+                    logger.debug(f"DHT discovery refresh not critical: {e}")
             
             return {
                 "success": True,
