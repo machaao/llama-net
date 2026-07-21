@@ -123,7 +123,7 @@ cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
 ./start-app.sh --tunnel --tunnel-name bootstrap --tunnel-domain bootstrap.llamanet.app
 ```
 
-The URL `https://bootstrap.llamanet.app` stays the same across restarts.
+The script auto-generates `~/.cloudflared/config.yml` with the correct ingress rules on first run. The URL `https://bootstrap.llamanet.app` stays the same across restarts.
 
 For additional nodes, use descriptive tunnel names:
 

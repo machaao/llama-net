@@ -183,9 +183,33 @@ start_cloudflare_tunnel() {
     if [ -n "$TUNNEL_NAME" ]; then
         echo "🌐 Starting named Cloudflare tunnel: $TUNNEL_NAME"
         [ -n "$TUNNEL_DOMAIN" ] && echo "🌐 Custom domain: $TUNNEL_DOMAIN"
-        cloudflared tunnel run "$TUNNEL_NAME" > "$tunnel_log" 2>&1 &
+
+        # Auto-generate config.yml for named tunnels if it doesn't exist
+        local cloudflared_dir="$HOME/.cloudflared"
+        local config_file="$cloudflared_dir/config.yml"
+
+        if [ ! -f "$config_file" ]; then
+            echo "📝 Generating cloudflared config at $config_file"
+            mkdir -p "$cloudflared_dir"
+            cat > "$config_file" << CFGEOF
+tunnel: $TUNNEL_NAME
+credentials-file: $cloudflared_dir/$TUNNEL_NAME.json
+
+ingress:
+  - hostname: ${TUNNEL_DOMAIN:-$TUNNEL_NAME.llamanet.app}
+    service: http://localhost:$port
+  - service: http_status:404
+CFGEOF
+            echo "✅ Config generated: $config_file"
+            echo "   Ingress: ${TUNNEL_DOMAIN:-$TUNNEL_NAME.llamanet.app} → http://localhost:$port"
+        else
+            echo "ℹ️  Using existing config: $config_file"
+        fi
+
+        # Run named tunnel with config
+        cloudflared tunnel --config "$config_file" run "$TUNNEL_NAME" > "$tunnel_log" 2>&1 &
         TUNNEL_PID=$!
-        
+
         # Wait for cloudflared to establish connection
         local attempts=0
         while [ $attempts -lt 20 ]; do
@@ -196,15 +220,15 @@ start_cloudflare_tunnel() {
             sleep 1
             attempts=$((attempts + 1))
         done
-        
+
         # Priority 1: Use explicit --tunnel-domain if provided
         if [ -n "$TUNNEL_DOMAIN" ]; then
             TUNNEL_URL="https://${TUNNEL_DOMAIN}"
         else
-            # Priority 2: Extract URL from cloudflared logs
-            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' "$tunnel_log" 2>/dev/null | head -1)
+            # Priority 2: Use hostname from config or fallback
+            TUNNEL_URL="https://${TUNNEL_NAME}.llamanet.app"
         fi
-        
+
         export LLAMANET_TUNNEL_NAME="$TUNNEL_NAME"
     else
         echo "🌐 Starting quick Cloudflare tunnel on port $port"
