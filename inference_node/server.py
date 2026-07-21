@@ -704,8 +704,11 @@ async def get_models_statistics():
 @app.post("/v1/completions")
 async def create_completion(request: OpenAICompletionRequest):
     """Create a completion (OpenAI-compatible) with queue handling"""
-    if config and config.no_model_mode:
-        raise HTTPException(status_code=503, detail="No model loaded. Use the Model Manager to download and select a model.")
+    if config and config.no_model_mode and not llm:
+        # Router mode - forward to worker node
+        if node_selector and dht_discovery:
+            return await _route_to_worker(request, "completion")
+        raise HTTPException(status_code=503, detail="No model loaded and no worker nodes available. Use the Model Manager or start worker nodes with --bootstrap-nodes")
     if not llm or not request_queue_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
     
@@ -1135,8 +1138,11 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: OpenAIChatCompletionRequest):
     """Create a chat completion (OpenAI-compatible) with queue handling"""
-    if config and config.no_model_mode:
-        raise HTTPException(status_code=503, detail="No model loaded. Use the Model Manager to download and select a model.")
+    if config and config.no_model_mode and not llm:
+        # Router mode - forward to worker node
+        if node_selector and dht_discovery:
+            return await _route_to_worker(request, "chat")
+        raise HTTPException(status_code=503, detail="No model loaded and no worker nodes available. Use the Model Manager or start worker nodes with --bootstrap-nodes")
     if not llm or not request_queue_manager:
         raise HTTPException(status_code=503, detail="Services not initialized")
     
@@ -1724,14 +1730,25 @@ async def info():
 async def health():
     """Get node health status"""
     if config and config.no_model_mode:
+        # Count discovered worker nodes
+        worker_count = 0
+        if dht_discovery:
+            try:
+                workers = await dht_discovery.get_nodes()
+                worker_count = len(workers)
+            except Exception:
+                pass
+        
         return {
-            "status": "no_model",
+            "status": "router",
             "no_model_mode": True,
+            "router_mode": True,
             "llm_loaded": False,
-            "dht_running": False,
+            "dht_running": dht_discovery is not None,
+            "workers_discovered": worker_count,
             "timestamp": time.time(),
             "openai_compatible": True,
-            "message": "No model loaded. Use the Model Manager in the Web UI to download and select a model."
+            "message": f"Router mode - {worker_count} worker node(s) available. Use Model Manager to load a model locally, or connect worker nodes via --bootstrap-nodes."
         }
     
     if not heartbeat_manager:
@@ -2929,6 +2946,8 @@ async def select_model(request: Request):
         
         # In no-model mode, do full initialization
         if config.no_model_mode:
+            global heartbeat_manager, dht_publisher
+            
             config.model_path = model_path
             config.model_name = os.path.basename(model_path)
             config.no_model_mode = False
@@ -2936,6 +2955,38 @@ async def select_model(request: Request):
             
             logger.info(f"Initializing LLM with selected model: {model_path}")
             llm = LlamaWrapper(config)
+            
+            # Initialize heartbeat manager (needed for /health and metrics)
+            try:
+                logger.info("Starting heartbeat manager after model load...")
+                heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
+                await heartbeat_manager.start()
+                if shutdown_handler:
+                    shutdown_handler.register_component('heartbeat_manager', heartbeat_manager)
+                logger.info("✅ Heartbeat manager started")
+            except Exception as e:
+                logger.warning(f"Failed to start heartbeat manager: {e}")
+            
+            # Initialize DHT publisher (advertise new model to network)
+            try:
+                logger.info("Starting DHT publisher after model load...")
+                dht_publisher = DHTPublisher(config, llm.get_metrics)
+                await dht_publisher.start()
+                if shutdown_handler:
+                    shutdown_handler.register_component('dht_publisher', dht_publisher)
+                
+                # Connect publisher to DHT service for bootstrap events
+                from common.dht_service import SharedDHTService
+                dht_svc = SharedDHTService()
+                if dht_svc.is_initialized():
+                    dht_svc.set_event_publisher(dht_publisher)
+                    logger.info("✅ Event publisher connected to DHT service")
+                
+                # Trigger DHT join event so workers see this node
+                asyncio.create_task(trigger_post_uvicorn_join())
+                logger.info("✅ DHT publisher started and join event scheduled")
+            except Exception as e:
+                logger.warning(f"Failed to start DHT publisher: {e}")
             
             return {
                 "success": True,
