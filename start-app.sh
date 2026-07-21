@@ -32,14 +32,25 @@ fi
 
 # ── Cloudflare Tunnel Support ──
 ENABLE_TUNNEL=false
+TUNNEL_NAME=""
 TUNNEL_PID=""
 TUNNEL_URL=""
+NEXT_IS_TUNNEL_NAME=false
 
 REMAINING_ARGS=""
 for arg in "$@"; do
     case "$arg" in
         --tunnel) ENABLE_TUNNEL=true ;;
-        *) REMAINING_ARGS="$REMAINING_ARGS $arg" ;;
+        --tunnel-name=*) TUNNEL_NAME="${arg#*=}" ;;
+        --tunnel-name) NEXT_IS_TUNNEL_NAME=true ;;
+        *) 
+            if [ "$NEXT_IS_TUNNEL_NAME" = "true" ]; then
+                TUNNEL_NAME="$arg"
+                NEXT_IS_TUNNEL_NAME=false
+            else
+                REMAINING_ARGS="$REMAINING_ARGS $arg"
+            fi
+            ;;
     esac
 done
 [ "$ENABLE_CLOUDFLARE_TUNNEL" = "true" ] && ENABLE_TUNNEL=true
@@ -162,20 +173,42 @@ start_cloudflare_tunnel() {
     local tunnel_log="/tmp/llamanet_tunnel_$$.log"
 
     echo ""
-    echo "🌐 Starting Cloudflare Tunnel on port $port..."
+    if [ -n "$TUNNEL_NAME" ]; then
+        echo "🌐 Starting named Cloudflare tunnel: $TUNNEL_NAME"
+        cloudflared tunnel run "$TUNNEL_NAME" > "$tunnel_log" 2>&1 &
+        TUNNEL_PID=$!
+        
+        # Named tunnels use configured DNS, wait for connection
+        local attempts=0
+        while [ $attempts -lt 20 ]; do
+            if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
+               grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
+                # Try to extract URL from config or use tunnel name
+                TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' "$tunnel_log" 2>/dev/null | head -1)
+                [ -z "$TUNNEL_URL" ] && TUNNEL_URL="https://${TUNNEL_NAME}.trycloudflare.com"
+                break
+            fi
+            sleep 1
+            attempts=$((attempts + 1))
+        done
+        
+        export LLAMANET_TUNNEL_NAME="$TUNNEL_NAME"
+    else
+        echo "🌐 Starting quick Cloudflare tunnel on port $port"
+        cloudflared tunnel --url "http://localhost:$port" > "$tunnel_log" 2>&1 &
+        TUNNEL_PID=$!
 
-    cloudflared tunnel --url "http://localhost:$port" > "$tunnel_log" 2>&1 &
-    TUNNEL_PID=$!
-
-    local attempts=0
-    while [ $attempts -lt 30 ]; do
-        TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$tunnel_log" 2>/dev/null | head -1)
-        [ -n "$TUNNEL_URL" ] && break
-        sleep 0.5
-        attempts=$((attempts + 1))
-    done
+        local attempts=0
+        while [ $attempts -lt 30 ]; do
+            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$tunnel_log" 2>/dev/null | head -1)
+            [ -n "$TUNNEL_URL" ] && break
+            sleep 0.5
+            attempts=$((attempts + 1))
+        done
+    fi
 
     if [ -n "$TUNNEL_URL" ]; then
+        export LLAMANET_TUNNEL_URL="$TUNNEL_URL"
         echo ""
         echo "╔══════════════════════════════════════════════════════════════╗"
         echo "║  🌍 Cloudflare Tunnel Active                                ║"

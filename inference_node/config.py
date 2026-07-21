@@ -57,6 +57,10 @@ class InferenceConfig:
             parser.add_argument('--bootstrap-nodes', default='',
                               help='Comma-separated list of bootstrap nodes (ip:port)')
 
+            parser.add_argument('--bootstrap-peers', default='',
+                              help='Comma-separated HTTP URLs of bootstrap peers '
+                                   '(e.g. https://bootstrap.llamanet.app)')
+
             parser.add_argument('--public-ip',
                               help='Public IP address for internet-accessible nodes')
 
@@ -94,6 +98,7 @@ class InferenceConfig:
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(args.node_id, self.port)
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
+            self.bootstrap_peers = args.bootstrap_peers or load_env_var("BOOTSTRAP_PEERS", "")
 
             # Public IP support for internet-accessible nodes
             self.public_ip = args.public_ip or load_env_var("PUBLIC_IP", "")
@@ -115,6 +120,7 @@ class InferenceConfig:
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(None, self.port)
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
+            self.bootstrap_peers = load_env_var("BOOTSTRAP_PEERS", "")
 
             # Public IP support for internet-accessible nodes
             self.public_ip = load_env_var("PUBLIC_IP", "")

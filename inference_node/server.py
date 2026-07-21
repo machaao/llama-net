@@ -5,6 +5,7 @@ import traceback
 import uuid
 import uvicorn
 import aiohttp
+import aiohttp as _aiohttp_lib
 import signal
 import sys
 from fastapi import FastAPI, HTTPException, Request
@@ -61,6 +62,8 @@ round_robin_state = {"index": 0}  # Global round robin state
 executor = None  # ProcessPoolExecutor for clean shutdown
 request_queue_manager = None  # Request queue manager
 download_manager = None  # Model download manager
+_peer_registry: Dict[str, Dict[str, Any]] = {}
+gossip_task = None
 
 class DiscoverySSEBridge(NodeEventListener):
     """Bridge discovery events to SSE broadcasting"""
@@ -168,6 +171,143 @@ async def basic_cleanup():
         
     except Exception as e:
         logger.error(f"Error during basic cleanup: {e}")
+
+async def _connect_bootstrap_peers(peers_str: str):
+    """Connect to bootstrap peers via HTTP (for tunnel-connected nodes)"""
+    peer_urls = [url.strip() for url in peers_str.split(",") if url.strip()]
+
+    # Wait a moment for services to be ready
+    await asyncio.sleep(2)
+
+    for url in peer_urls:
+        try:
+            own_url = os.environ.get(
+                "LLAMANET_TUNNEL_URL",
+                f"http://{get_host_ip()}:{config.port}"
+            )
+
+            own_model = config.model_name if not config.no_model_mode else "router"
+            own_metrics = llm.get_metrics() if llm else {}
+
+            async with _aiohttp_lib.ClientSession(
+                timeout=_aiohttp_lib.ClientTimeout(total=10)
+            ) as session:
+                async with session.post(
+                    f"{url}/peers/register",
+                    json={
+                        "node_id": config.node_id,
+                        "url": own_url,
+                        "model": own_model,
+                        "load": own_metrics.get("load", 0),
+                        "tps": own_metrics.get("tps", 0)
+                    }
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"✅ Registered with bootstrap peer: {url}")
+
+                        # Register the bootstrap peer in our registry
+                        bootstrap_id = data.get("node_id")
+                        bootstrap_url = data.get("url")
+                        if bootstrap_id and bootstrap_url:
+                            _peer_registry[bootstrap_id] = {
+                                "node_id": bootstrap_id,
+                                "url": bootstrap_url,
+                                "model": data.get("model", "unknown"),
+                                "load": data.get("load", 0),
+                                "tps": data.get("tps", 0),
+                                "last_seen": time.time(),
+                                "registered_from": "bootstrap"
+                            }
+
+                        # Process peers the bootstrap told us about
+                        for peer in data.get("peers", []):
+                            pid = peer.get("node_id")
+                            if pid and pid != config.node_id:
+                                _peer_registry[pid] = {
+                                    **peer,
+                                    "last_seen": time.time()
+                                }
+                                logger.info(f"🔍 Discovered peer via bootstrap: {pid[:8]}...")
+                    else:
+                        logger.warning(
+                            f"Failed to register with {url}: HTTP {response.status}"
+                        )
+
+        except Exception as e:
+            logger.warning(f"Could not connect to bootstrap peer {url}: {e}")
+
+
+async def _gossip_loop():
+    """Periodically share peer lists with known peers"""
+    while True:
+        try:
+            await asyncio.sleep(30)
+
+            if not _peer_registry:
+                continue
+
+            own_url = os.environ.get(
+                "LLAMANET_TUNNEL_URL",
+                f"http://{get_host_ip()}:{config.port}"
+            )
+
+            own_model = config.model_name if not config.no_model_mode else "router"
+            own_metrics = llm.get_metrics() if llm else {}
+
+            import random
+            peers_to_gossip = random.sample(
+                list(_peer_registry.values()),
+                min(3, len(_peer_registry))
+            )
+
+            for peer in peers_to_gossip:
+                try:
+                    async with _aiohttp_lib.ClientSession(
+                        timeout=_aiohttp_lib.ClientTimeout(total=8)
+                    ) as session:
+                        async with session.post(
+                            f"{peer['url']}/peers/register",
+                            json={
+                                "node_id": config.node_id,
+                                "url": own_url,
+                                "model": own_model,
+                                "load": own_metrics.get("load", 0),
+                                "tps": own_metrics.get("tps", 0)
+                            }
+                        ) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                for new_peer in data.get("peers", []):
+                                    pid = new_peer.get("node_id")
+                                    if pid and pid != config.node_id:
+                                        if pid not in _peer_registry:
+                                            logger.info(
+                                                f"🔍 Discovered new peer via gossip: "
+                                                f"{pid[:8]}..."
+                                            )
+                                        _peer_registry[pid] = {
+                                            **new_peer,
+                                            "last_seen": time.time()
+                                        }
+                except Exception:
+                    pass
+
+            # Prune stale peers (> 5 minutes)
+            current_time = time.time()
+            stale = [
+                pid for pid, p in _peer_registry.items()
+                if current_time - p.get("last_seen", 0) > 300
+            ]
+            for pid in stale:
+                del _peer_registry[pid]
+                logger.debug(f"🧹 Pruned stale peer: {pid[:8]}...")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Gossip loop error: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -313,6 +453,14 @@ async def lifespan(app: FastAPI):
             await service_manager.mark_service_ready("node_selector")
 
             asyncio.create_task(trigger_post_uvicorn_join())
+
+            # Connect to bootstrap peers via HTTP if configured
+            if config.bootstrap_peers:
+                asyncio.create_task(_connect_bootstrap_peers(config.bootstrap_peers))
+
+            # Start gossip loop for peer discovery
+            gossip_task = asyncio.create_task(_gossip_loop())
+            logger.info("Peer gossip loop started")
         
     except Exception as e:
         logger.error(f"Failed to start services: {e}")
@@ -2381,6 +2529,159 @@ async def network_events():
             "Access-Control-Allow-Headers": "Cache-Control"
         }
     )
+
+# ═══════════════════════════════════════════════════════
+# DUAL-TRANSPORT DHT & PEER DISCOVERY ENDPOINTS
+# ═══════════════════════════════════════════════════════
+
+@app.post("/dht/rpc")
+async def dht_rpc(request: Request):
+    """Handle DHT protocol messages received over HTTP (for tunnel-connected peers)"""
+    try:
+        message = await request.json()
+
+        if not isinstance(message, dict) or "type" not in message:
+            return JSONResponse(
+                status_code=200,
+                content={"error": "Invalid DHT message format", "type": "error"}
+            )
+
+        if dht_publisher and dht_publisher.kademlia_node:
+            node = dht_publisher.kademlia_node
+            protocol = node.protocol
+
+            client_host = request.client.host if request.client else "unknown"
+            addr = (client_host, 0)
+
+            response = await protocol.handle_http_message(message, addr)
+
+            if response is None:
+                return JSONResponse(content={"type": "ack", "received": True})
+
+            return JSONResponse(content=response)
+        else:
+            return JSONResponse(
+                content={"error": "DHT not initialized", "type": "error"}
+            )
+
+    except Exception as e:
+        logger.error(f"Error handling DHT RPC: {e}")
+        return JSONResponse(
+            content={"error": str(e), "type": "error"}
+        )
+
+
+@app.get("/peers")
+async def list_peers():
+    """List all known peers (HTTP-discovered and DHT)"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+
+    own_url = os.environ.get(
+        "LLAMANET_TUNNEL_URL",
+        f"http://{get_host_ip()}:{config.port}"
+    )
+
+    peers = []
+    if not config.no_model_mode:
+        metrics = llm.get_metrics() if llm else {}
+        peers.append({
+            "node_id": config.node_id,
+            "url": own_url,
+            "model": config.model_name,
+            "load": metrics.get("load", 0),
+            "tps": metrics.get("tps", 0),
+            "is_self": True
+        })
+
+    current_time = time.time()
+    for peer_id, peer_data in _peer_registry.items():
+        if current_time - peer_data.get("last_seen", 0) < 300:
+            peers.append(peer_data)
+
+    return {
+        "peers": peers,
+        "count": len(peers),
+        "node_id": config.node_id,
+        "timestamp": current_time
+    }
+
+
+@app.post("/peers/register")
+async def register_peer(request: Request):
+    """Register a remote peer (called by other LlamaNet nodes)"""
+    try:
+        body = await request.json()
+
+        peer_id = body.get("node_id")
+        peer_url = body.get("url")
+        peer_model = body.get("model", "unknown")
+
+        if not peer_id or not peer_url:
+            raise HTTPException(status_code=400, detail="node_id and url required")
+
+        if peer_id == config.node_id:
+            return {"success": True, "message": "This is self"}
+
+        _peer_registry[peer_id] = {
+            "node_id": peer_id,
+            "url": peer_url,
+            "model": peer_model,
+            "load": body.get("load", 0),
+            "tps": body.get("tps", 0),
+            "last_seen": time.time(),
+            "registered_from": request.client.host if request.client else "unknown"
+        }
+
+        # Register in DHT HTTP transport so DHT messages route correctly
+        if dht_publisher and dht_publisher.kademlia_node:
+            node = dht_publisher.kademlia_node
+            if node.http_transport:
+                node.http_transport.register_peer_url(peer_url, 80, peer_url)
+
+        logger.info(f"📡 Registered peer: {peer_id[:8]}... at {peer_url}")
+
+        # Gossip response: send our peer list back
+        own_url = os.environ.get(
+            "LLAMANET_TUNNEL_URL",
+            f"http://{get_host_ip()}:{config.port}"
+        )
+
+        own_model = config.model_name if not config.no_model_mode else "router"
+        own_metrics = llm.get_metrics() if llm else {}
+
+        return {
+            "success": True,
+            "node_id": config.node_id,
+            "url": own_url,
+            "model": own_model,
+            "load": own_metrics.get("load", 0),
+            "tps": own_metrics.get("tps", 0),
+            "peers": list(_peer_registry.values())
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error registering peer: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/tunnel/status")
+async def tunnel_status():
+    """Get tunnel status and public URL"""
+    tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
+    tunnel_name = os.environ.get("LLAMANET_TUNNEL_NAME", "")
+    tunnel_type = "named" if tunnel_name else ("quick" if tunnel_url else "none")
+
+    return {
+        "active": bool(tunnel_url),
+        "url": tunnel_url,
+        "type": tunnel_type,
+        "peers_count": len(_peer_registry),
+        "timestamp": time.time()
+    }
+
 
 @app.get("/debug/routing")
 async def debug_routing():

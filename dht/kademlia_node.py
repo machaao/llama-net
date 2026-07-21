@@ -21,6 +21,8 @@ class Contact:
     ip: str
     port: int
     last_seen: float = 0
+    transport: str = "udp"      # "udp" or "http"
+    http_url: str = ""          # e.g. "https://node2.llamanet.app"
     
     def __post_init__(self):
         if self.last_seen == 0:
@@ -78,6 +80,9 @@ class KademliaNode:
         self.cleanup_interval = 90  # Increased from 30 to 90 seconds
         self.cleanup_task = None
         self.last_cleanup = 0
+
+        self.http_transport = None
+        self.transport_router = None
         
         # Log final node ID for verification
         logger.debug(f"KademliaNode initialized with final node_id: {self.node_id[:16]}...")
@@ -125,6 +130,13 @@ class KademliaNode:
                 raise
         
         logger.info(f"Kademlia node {self.node_id[:8]} started on port {self.port}")
+
+        # Initialize HTTP transport and router for dual-transport support
+        from dht.http_transport import HTTPDHTTransport
+        from dht.transport_router import TransportRouter
+        self.http_transport = HTTPDHTTransport()
+        self.transport_router = TransportRouter(self.protocol, self.http_transport)
+        logger.info(f"Dual-transport DHT initialized (UDP + HTTP)")
         
         # Start cleanup task
         self.cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -402,7 +414,7 @@ class KademliaNode:
         
         return any(my_distance <= contact.distance(key_hash) for contact in closest)
     
-    async def _ping_node(self, ip: str, port: int) -> Optional[Contact]:
+    async def _ping_node(self, ip: str, port: int, contact: Contact = None) -> Optional[Contact]:
         """Ping a node and return contact info"""
         message = {
             'type': 'ping',
@@ -411,12 +423,21 @@ class KademliaNode:
         }
         
         try:
-            response = await self.protocol.send_request(message, (ip, port))
+            response = None
+            # Use transport router if available and contact has transport info
+            if contact and self.transport_router:
+                response = await self.transport_router.send_request(message, contact)
+            else:
+                response = await self.protocol.send_request(message, (ip, port))
+            
             if response and response.get('pong'):
-                # Try to get sender_id from response root or data
                 sender_id = response.get('sender_id') or response.get('data', {}).get('sender_id')
                 if sender_id and NodeValidator.validate_node_id(str(sender_id)):
-                    return Contact(str(sender_id), ip, port)
+                    return Contact(
+                        str(sender_id), ip, port,
+                        transport=contact.transport if contact else "udp",
+                        http_url=contact.http_url if contact else ""
+                    )
                 else:
                     logger.warning(f"Invalid sender_id received from {ip}:{port}: {sender_id}")
             return None
@@ -435,7 +456,11 @@ class KademliaNode:
         }
         
         try:
-            response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            response = None
+            if self.transport_router:
+                response = await self.transport_router.send_request(message, contact)
+            else:
+                response = await self.protocol.send_request(message, (contact.ip, contact.port))
             return response and response.get('stored', False)
         except Exception as e:
             logger.error(f"Error storing on node {contact.node_id[:8]}...: {e}")
@@ -451,7 +476,11 @@ class KademliaNode:
         }
         
         try:
-            response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            response = None
+            if self.transport_router:
+                response = await self.transport_router.send_request(message, contact)
+            else:
+                response = await self.protocol.send_request(message, (contact.ip, contact.port))
             if response and 'value' in response:
                 return response['value']
         except Exception as e:
@@ -495,7 +524,12 @@ class KademliaNode:
         }
         
         try:
-            response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            response = None
+            if self.transport_router:
+                response = await self.transport_router.send_request(message, contact)
+            else:
+                response = await self.protocol.send_request(message, (contact.ip, contact.port))
+            
             if response and 'contacts' in response:
                 contacts = []
                 for contact_data in response['contacts']:
@@ -503,9 +537,10 @@ class KademliaNode:
                         new_contact = Contact(
                             contact_data['node_id'],
                             contact_data['ip'],
-                            contact_data['port']
+                            contact_data['port'],
+                            transport=contact_data.get('transport', 'udp'),
+                            http_url=contact_data.get('http_url', '')
                         )
-                        # Validate contact before adding
                         if NodeValidator.validate_contact(new_contact):
                             contacts.append(new_contact)
                     except Exception as e:

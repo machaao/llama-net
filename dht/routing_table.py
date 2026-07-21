@@ -18,6 +18,18 @@ class KBucket:
     
     def add_contact(self, contact: 'Contact') -> bool:
         """Add a contact to the bucket"""
+        # Preserve transport info from existing contact
+        existing = None
+        for c in self.contacts:
+            if c.node_id == contact.node_id:
+                existing = c
+                break
+        
+        # If existing contact has transport info and new one doesn't, preserve it
+        if existing and not contact.transport and existing.transport:
+            contact.transport = existing.transport
+            contact.http_url = existing.http_url
+        
         # Remove if already exists
         self.contacts = [c for c in self.contacts if c.node_id != contact.node_id]
         

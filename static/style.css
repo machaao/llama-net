@@ -1484,3 +1484,25 @@ pre {
 .clickable-node:hover .fa-info-circle {
     opacity: 1;
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* TUNNEL STATUS BADGE                                     */
+/* ═══════════════════════════════════════════════════════ */
+
+#tunnel-status {
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    animation: tunnelPulse 3s infinite;
+}
+
+#tunnel-status:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(25, 135, 84, 0.4);
+}
+
+@keyframes tunnelPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.85; }
+}

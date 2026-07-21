@@ -19,6 +19,9 @@
                 <i class="fas fa-network-wired"></i> LlamaNet Web UI
             </span>
             <div class="d-flex">
+                <span id="tunnel-status" class="badge bg-success me-2 d-none align-self-center" style="cursor: pointer;" title="Click to copy URL">
+                    <i class="fas fa-globe"></i> <span id="tunnel-url">Public</span>
+                </span>
                 <button class="btn btn-outline-light me-2" onclick="refreshNetworkStatus()" title="Refresh network data (maintains real-time updates via unified SSE)">
                     <i class="fas fa-sync-alt"></i> Refresh
                 </button>

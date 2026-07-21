@@ -141,6 +141,9 @@ class LlamaNetUI {
         // Start ONLY SSE-based network monitoring using unified SSE manager
         this.startUnifiedSSENetworkMonitoring();
         
+        // Load tunnel status
+        this.loadTunnelStatus();
+        
         // ONE-TIME initial network status load (not polling)
         this.loadInitialNetworkStatus();
         
@@ -279,6 +282,31 @@ class LlamaNetUI {
     
     setupEventListeners() {
         // No API mode selector needed - OpenAI only
+    }
+
+    async loadTunnelStatus() {
+        try {
+            const resp = await fetch(`${this.baseUrl}/tunnel/status`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const badge = document.getElementById('tunnel-status');
+                const urlSpan = document.getElementById('tunnel-url');
+                if (badge && urlSpan) {
+                    if (data.active) {
+                        badge.classList.remove('d-none');
+                        urlSpan.textContent = data.url.replace('https://', '');
+                        badge.title = `Tunnel: ${data.url}\nType: ${data.type}\nPeers: ${data.peers_count}\nClick to copy`;
+                        badge.onclick = () => {
+                            navigator.clipboard.writeText(data.url).then(() => {
+                                this.showToast('success', `Tunnel URL copied: ${data.url}`);
+                            });
+                        };
+                    }
+                }
+            }
+        } catch (e) {
+            // Tunnel endpoint may not exist on older deployments
+        }
     }
     
     async loadInitialNetworkStatus() {

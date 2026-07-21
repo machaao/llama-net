@@ -18,6 +18,7 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         self.node = node
         self.transport = None
         self.pending_requests: Dict[str, asyncio.Future] = {}
+        self._http_response_capture: Dict[str, asyncio.Future] = {}
     
     def connection_made(self, transport):
         self.transport = transport
@@ -92,6 +93,36 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         except Exception as e:
             logger.error(f"Error handling message from {addr}: {e}")
             # Log but don't crash the protocol handler
+
+    async def handle_http_message(self, message: Dict[str, Any], addr: Tuple[str, int]) -> Dict[str, Any]:
+        """Handle a DHT message received via HTTP and return the response directly"""
+        msg_type = message.get('type')
+        msg_id = message.get('id', f'http-{uuid.uuid4().hex[:8]}')
+
+        # Create a future to capture the response
+        future = asyncio.get_event_loop().create_future()
+        self._http_response_capture[msg_id] = future
+
+        try:
+            if msg_type == 'ping':
+                await self._handle_ping(message, addr)
+            elif msg_type == 'store':
+                await self._handle_store(message, addr)
+            elif msg_type == 'find_node':
+                await self._handle_find_node(message, addr)
+            elif msg_type == 'find_value':
+                await self._handle_find_value(message, addr)
+            else:
+                return {"error": f"Unknown message type: {msg_type}", "type": "error"}
+
+            response = await asyncio.wait_for(future, timeout=5.0)
+            return response
+        except asyncio.TimeoutError:
+            return {"error": "Response timeout", "type": "error"}
+        except Exception as e:
+            return {"error": str(e), "type": "error"}
+        finally:
+            self._http_response_capture.pop(msg_id, None)
     
     async def _handle_message(self, message: Dict[str, Any], addr: Tuple[str, int]):
         """Simplified message handling - DHT operations only"""
@@ -166,7 +197,13 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         closest = self.node.routing_table.find_closest_contacts(target_id, self.node.k)
         
         contacts_data = [
-            {'node_id': c.node_id, 'ip': c.ip, 'port': c.port}
+            {
+                'node_id': c.node_id,
+                'ip': c.ip,
+                'port': c.port,
+                'transport': getattr(c, 'transport', 'udp'),
+                'http_url': getattr(c, 'http_url', '')
+            }
             for c in closest
         ]
         
@@ -200,7 +237,13 @@ class KademliaProtocol(asyncio.DatagramProtocol):
         closest = self.node.routing_table.find_closest_contacts(target_hash, self.node.k)
         
         contacts_data = [
-            {'node_id': c.node_id, 'ip': c.ip, 'port': c.port}
+            {
+                'node_id': c.node_id,
+                'ip': c.ip,
+                'port': c.port,
+                'transport': getattr(c, 'transport', 'udp'),
+                'http_url': getattr(c, 'http_url', '')
+            }
             for c in closest
         ]
         
@@ -227,7 +270,17 @@ class KademliaProtocol(asyncio.DatagramProtocol):
                 future.set_result(message.get('data'))
     
     async def _send_message(self, message: Dict[str, Any], addr: Tuple[str, int]):
-        """Send a message to an address"""
+        """Send a message — via UDP or capture for HTTP response"""
+        msg_id = message.get('id')
+
+        # Check if this is an HTTP response we need to capture
+        if msg_id and msg_id in self._http_response_capture:
+            future = self._http_response_capture[msg_id]
+            if not future.done():
+                future.set_result(message.get('data', message))
+            return
+
+        # Normal UDP send
         try:
             data = json.dumps(message).encode()
             self.transport.sendto(data, addr)
