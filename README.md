@@ -116,26 +116,33 @@ For a URL that survives restarts, create a named Cloudflare tunnel:
 ```bash
 # One-time setup (requires free Cloudflare account):
 cloudflared tunnel login
-cloudflared tunnel create llamanet
-cloudflared tunnel route dns llamanet llamanet.yourdomain.com
+cloudflared tunnel create bootstrap
+cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
 
 # Run with persistent tunnel:
-./start-app.sh --tunnel --tunnel-name llamanet
+./start-app.sh --tunnel --tunnel-name bootstrap
 ```
 
-The URL `https://llamanet.yourdomain.com` stays the same across restarts.
+The URL `https://bootstrap.llamanet.app` stays the same across restarts.
 
-### Custom Domain Setup
+For additional nodes, use descriptive tunnel names:
 
-If you own a domain (e.g., `llamanet.app`), configure it in Cloudflare DNS:
+```bash
+# Second node
+cloudflared tunnel create gpu-m4
+cloudflared tunnel route dns gpu-m4 gpu-m4.llamanet.app
 
+# Third node
+cloudflared tunnel create eu-node
+cloudflared tunnel route dns eu-node eu-node.llamanet.app
 ```
-# Cloudflare DNS Records:
-bootstrap.llamanet.app  → CNAME → <tunnel-id>.cfargotunnel.com
-node2.llamanet.app      → CNAME → <tunnel2-id>.cfargotunnel.com
-```
 
-Each operator creates their own tunnel and points their subdomain to it.
+Each operator gets their own subdomain under `llamanet.app`:
+```
+bootstrap.llamanet.app   → Primary bootstrap node
+gpu-m4.llamanet.app      → Mac M4 with GPU
+eu-node.llamanet.app     → European region node
+```
 
 ### Connecting to a Tunneled Node
 
