@@ -201,22 +201,26 @@ class HFModelDownloader:
         if not gguf_files:
             raise ValueError(f"No GGUF files found in repository {repo_id}")
         
+        # Helper to extract filename string from either dict or string
+        def _fname(f):
+            return f["filename"] if isinstance(f, dict) else f
+
         # If quantization specified, try to find exact match
         if quantization:
-            for filename in gguf_files:
-                if quantization.upper() in filename.upper():
-                    return filename
+            for f in gguf_files:
+                if quantization.upper() in _fname(f).upper():
+                    return _fname(f)
         
         # Prefer files with common quantization patterns
         preferred_quantizations = ['Q4_K_M', 'Q4_K_S', 'Q5_K_M', 'Q5_K_S', 'Q8_0', 'F16']
         
         for pref_quant in preferred_quantizations:
-            for filename in gguf_files:
-                if pref_quant in filename.upper():
-                    return filename
+            for f in gguf_files:
+                if pref_quant in _fname(f).upper():
+                    return _fname(f)
         
         # If no preferred quantization found, use the first GGUF file
-        return gguf_files[0]
+        return _fname(gguf_files[0])
     
     def get_local_model_path(self, repo_id: str, filename: str, 
                             tag: Optional[str] = None, 

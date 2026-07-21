@@ -149,22 +149,25 @@ class DownloadManager:
                 # Find best matching quantization
                 filename = None
                 for f in model_info["gguf_files"]:
-                    if task.quantization and task.quantization.upper() in f.upper():
-                        filename = f
+                    fname = f["filename"] if isinstance(f, dict) else f
+                    if task.quantization and task.quantization.upper() in fname.upper():
+                        filename = fname
                         break
 
                 if not filename:
                     preferred = ["Q4_K_M", "Q4_K_S", "Q5_K_M", "Q8_0"]
                     for pref in preferred:
                         for f in model_info["gguf_files"]:
-                            if pref in f.upper():
-                                filename = f
+                            fname = f["filename"] if isinstance(f, dict) else f
+                            if pref in fname.upper():
+                                filename = fname
                                 break
                         if filename:
                             break
 
                 if not filename:
-                    filename = model_info["gguf_files"][0]
+                    f0 = model_info["gguf_files"][0]
+                    filename = f0["filename"] if isinstance(f0, dict) else f0
 
                 logger.info(f"Selected GGUF file: {filename}")
 
