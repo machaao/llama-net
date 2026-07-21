@@ -81,14 +81,14 @@ DEFAULT_BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-}"
 export PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tracker,ignore:resource_tracker"
 export PYTHONDONTWRITEBYTECODE=1
 
-# Validate model file exists
+# Validate model file exists (or enter no-model mode)
 if [ ! -f "$DEFAULT_MODEL_PATH" ]; then
-    echo "❌ Error: Model file not found at $DEFAULT_MODEL_PATH"
-    echo "Please set MODEL_PATH environment variable or place model at ./models/model.gguf"
-    exit 1
+    echo "⚠️  No model file found at $DEFAULT_MODEL_PATH"
+    echo "🌐 Starting in no-model mode - use the Web UI to download a model"
+    DEFAULT_MODEL_PATH=""
+else
+    echo "✅ Model file found: $DEFAULT_MODEL_PATH"
 fi
-
-echo "✅ Model file found: $DEFAULT_MODEL_PATH"
 
 # Check if Python dependencies are installed
 if ! python -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
@@ -172,7 +172,11 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Build command line arguments
-ARGS="--model-path $DEFAULT_MODEL_PATH"
+if [ -n "$DEFAULT_MODEL_PATH" ]; then
+    ARGS="--model-path $DEFAULT_MODEL_PATH"
+else
+    ARGS=""
+fi
 ARGS="$ARGS --host $DEFAULT_HOST"
 ARGS="$ARGS --port $DEFAULT_PORT"
 ARGS="$ARGS --dht-port $DEFAULT_DHT_PORT"
@@ -186,7 +190,11 @@ if [ -n "$DEFAULT_BOOTSTRAP_NODES" ]; then
 fi
 
 echo "🔧 Configuration:"
-echo "   Model: $DEFAULT_MODEL_PATH"
+if [ -n "$DEFAULT_MODEL_PATH" ]; then
+    echo "   Model: $DEFAULT_MODEL_PATH"
+else
+    echo "   Model: (none - download via Web UI)"
+fi
 echo "   Host: $DEFAULT_HOST"
 echo "   HTTP Port: $DEFAULT_PORT"
 echo "   DHT Port: $DEFAULT_DHT_PORT"

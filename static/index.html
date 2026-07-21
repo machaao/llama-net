@@ -22,12 +22,22 @@
                 <button class="btn btn-outline-light me-2" onclick="refreshNetworkStatus()" title="Refresh network data (maintains real-time updates via unified SSE)">
                     <i class="fas fa-sync-alt"></i> Refresh
                 </button>
+                <button class="btn btn-outline-light me-2" onclick="showModelManager()">
+                    <i class="fas fa-download"></i> Model Manager
+                </button>
                 <button class="btn btn-outline-light" onclick="showNetworkModal()">
                     <i class="fas fa-info-circle"></i> Network Info
                 </button>
             </div>
         </div>
     </nav>
+
+    <!-- No Model Welcome Banner -->
+    <div id="no-model-banner" class="alert alert-warning text-center mb-0" style="display:none; border-radius: 0;">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        <strong>No model loaded.</strong>
+        <span>Use the <a href="#" onclick="showModelManager(); return false;" class="alert-link">Model Manager</a> to download and select a model.</span>
+    </div>
 
     <div class="container-fluid mt-4">
         <div class="row">
@@ -234,6 +244,100 @@
                     </button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Model Manager Modal -->
+    <div class="modal fade" id="modelManagerModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-download"></i> Model Manager</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <ul class="nav nav-tabs" id="modelManagerTabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="search-tab" data-bs-toggle="tab" href="#searchPanel">
+                                <i class="fas fa-search"></i> Search
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="downloads-tab" data-bs-toggle="tab" href="#downloadsPanel">
+                                <i class="fas fa-arrow-down"></i> Downloads
+                                <span class="badge bg-primary ms-1" id="activeDownloadsBadge" style="display:none;">0</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="local-tab" data-bs-toggle="tab" href="#localPanel">
+                                <i class="fas fa-hdd"></i> Local Models
+                            </a>
+                        </li>
+                    </ul>
+                    <div class="tab-content p-3">
+                        <div class="tab-pane fade show active" id="searchPanel">
+                            <div class="input-group mb-3">
+                                <input type="text" class="form-control" id="modelSearchInput"
+                                    placeholder="Search Hugging Face for GGUF models..."
+                                    onkeypress="if(event.key==='Enter') modelDownloader.searchModels()">
+                                <button class="btn btn-primary" onclick="modelDownloader.searchModels()">
+                                    <i class="fas fa-search"></i> Search
+                                </button>
+                            </div>
+                            <div class="mb-2 d-flex gap-2 flex-wrap">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='llama'; modelDownloader.searchModels()">Llama</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='mistral'; modelDownloader.searchModels()">Mistral</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='phi'; modelDownloader.searchModels()">Phi</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='qwen'; modelDownloader.searchModels()">Qwen</button>
+                            </div>
+                            <div id="modelSearchResults" class="model-search-results">
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-search fa-2x mb-2"></i>
+                                    <p>Search for models to download</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="downloadsPanel">
+                            <div id="activeDownloadsList">
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-cloud-download-alt fa-2x mb-2"></i>
+                                    <p>No active downloads</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="localPanel">
+                            <div id="localModelsList">
+                                <div class="text-center text-muted py-4">
+                                    <div class="spinner-border text-primary" role="status"></div>
+                                    <p class="mt-2">Loading local models...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Details Sub-Modal -->
+    <div class="modal fade" id="modelDetailsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-info-circle"></i> Model Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="modelDetailsContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Reload Overlay -->
+    <div id="model-reload-overlay" class="model-reload-overlay" style="display:none;">
+        <div class="reload-overlay-content">
+            <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;"></div>
+            <h5>Switching Model...</h5>
+            <p class="text-muted">Please wait while the new model is loaded.</p>
         </div>
     </div>
 

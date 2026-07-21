@@ -4,6 +4,7 @@ import argparse
 import sys
 import socket
 import hashlib
+import time
 from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
 from common.port_utils import PortManager
@@ -14,6 +15,7 @@ logger = get_logger(__name__)
 class InferenceConfig:
     """Configuration for the inference node"""
     
+    ACTIVE_MODEL_FILE = os.path.expanduser("~/.llamanet/active_model")
     
     def __init__(self, model_path: str = None):
         # Check for 'run' command in sys.argv
@@ -112,22 +114,33 @@ class InferenceConfig:
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
             self.verbose = bool(load_env_var("VERBOSE", False))
         
-        # Validate model path
+        # No-model mode support
+        self.no_model_mode = False
+
+        # Check stored active model if no model path provided
         if not self.model_path:
-            logger.error("Model path is required. Use --model-path argument or MODEL_PATH environment variable")
-            sys.exit(1)
-        
-        if not os.path.exists(self.model_path):
-            logger.error(f"Model file not found: {self.model_path}")
-            sys.exit(1)
-            
+            stored = self._load_active_model()
+            if stored and os.path.exists(stored):
+                self.model_path = stored
+                logger.info(f"Using stored active model: {stored}")
+            else:
+                self.no_model_mode = True
+                self.model_path = ""
+                logger.warning("No model specified - starting in no-model mode")
+
+        # Validate model path exists (skip in no-model mode)
+        if not self.no_model_mode and not os.path.exists(self.model_path):
+            logger.warning(f"Model file not found: {self.model_path} - starting in no-model mode")
+            self.no_model_mode = True
+            self.model_path = ""
+
         # DHT configuration
         self.heartbeat_interval = int(load_env_var("HEARTBEAT_INTERVAL", 10))
         
 
         
         # Extract model name from path
-        self.model_name = os.path.basename(self.model_path)
+        self.model_name = os.path.basename(self.model_path) if self.model_path else "No Model Loaded"
         
         # Configure networking for better stability
         self._configure_networking()
@@ -316,5 +329,37 @@ class InferenceConfig:
         return (
             f"InferenceConfig(model_path={self.model_path}, "
             f"host={self.host}, port={self.port}, node_id={self.node_id}, "
-            f"dht_port={self.dht_port}, verbose={self.verbose})"
+            f"dht_port={self.dht_port}, verbose={self.verbose}, "
+            f"no_model_mode={self.no_model_mode})"
         )
+
+    def _load_active_model(self) -> Optional[str]:
+        """Load stored active model path"""
+        try:
+            if os.path.exists(self.ACTIVE_MODEL_FILE):
+                import json
+                with open(self.ACTIVE_MODEL_FILE, 'r') as f:
+                    data = json.load(f)
+                    path = data.get("model_path", "")
+                    if path and os.path.exists(path):
+                        return path
+        except Exception as e:
+            logger.debug(f"Could not load active model: {e}")
+        return None
+
+    def save_active_model(self, model_path: str, model_name: str = ""):
+        """Save the active model path for persistence across restarts"""
+        try:
+            import json
+            data = {
+                "model_path": model_path,
+                "model_name": model_name or os.path.basename(model_path),
+                "selected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "source": "ui"
+            }
+            os.makedirs(os.path.dirname(self.ACTIVE_MODEL_FILE), exist_ok=True)
+            with open(self.ACTIVE_MODEL_FILE, 'w') as f:
+                json.dump(data, f, indent=2)
+            logger.info(f"Saved active model: {model_path}")
+        except Exception as e:
+            logger.error(f"Could not save active model: {e}")
