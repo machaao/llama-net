@@ -505,12 +505,69 @@ async def list_network_models():
         
         # Group by model and create OpenAI-compatible response
         models_dict = {}
+        
+        # Seed current node into models_dict FIRST so it's always present
+        if not config.no_model_mode:
+            current_model_name = config.model_name
+            models_dict[current_model_name] = {
+                "id": current_model_name,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "llamanet",
+                "node_count": 0,
+                "nodes": [],
+                "chat_formats": set(),
+                "primary_chat_format": None
+            }
+            
+            fresh_metrics = llm.get_metrics() if llm else {}
+            current_node_info = {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "load": fresh_metrics.get('load', 0.0),
+                "tps": fresh_metrics.get('tps', 0.0),
+                "uptime": fresh_metrics.get('uptime', 0),
+                "last_seen": int(time.time()),
+                "ttft": fresh_metrics.get('ttft', 0),
+                "latency": fresh_metrics.get('latency', 0),
+                "total_tokens": fresh_metrics.get('total_tokens', 0)
+            }
+            
+            # Add chat format info for current node
+            try:
+                if llm:
+                    template_info = llm.get_chat_template_info()
+                    current_node_info["chat_format"] = template_info.get("chat_format", "unknown")
+                    current_node_info["detected_format"] = template_info.get("detected_format", "unknown")
+                    current_node_info["supports_chat"] = template_info.get("supports_chat", False)
+                    
+                    chat_format = template_info.get("chat_format", "unknown")
+                    models_dict[current_model_name]["chat_formats"].add(chat_format)
+                    if not models_dict[current_model_name]["primary_chat_format"]:
+                        models_dict[current_model_name]["primary_chat_format"] = chat_format
+            except Exception as e:
+                logger.debug(f"Could not get chat format for current node: {e}")
+                current_node_info["chat_format"] = "unknown"
+                current_node_info["supports_chat"] = False
+            
+            models_dict[current_model_name]["nodes"].append(current_node_info)
+            models_dict[current_model_name]["node_count"] += 1
+            current_node_added = True
+        else:
+            current_node_added = False
+        
         for node in all_nodes:
             # Override current node with fresh local model name (DHT may be stale)
             if not config.no_model_mode and node.node_id == config.node_id:
                 model_name = config.model_name
             else:
                 model_name = node.model
+            
+            # Skip the current node — already seeded above with fresh local data
+            if not config.no_model_mode and node.node_id == config.node_id:
+                continue
+            
             if model_name not in models_dict:
                 models_dict[model_name] = {
                     "id": model_name,
@@ -525,63 +582,33 @@ async def list_network_models():
             
             models_dict[model_name]["node_count"] += 1
             
-            # Add node info with chat format if available
-            # For current node, use fresh local metrics (DHT data may be stale)
-            if not config.no_model_mode and node.node_id == config.node_id and llm:
-                fresh_metrics = llm.get_metrics()
-                node_info = {
-                    "node_id": node.node_id,
-                    "ip": node.ip,
-                    "port": node.port,
-                    "load": fresh_metrics.get('load', node.load),
-                    "tps": fresh_metrics.get('tps', node.tps),
-                    "uptime": fresh_metrics.get('uptime', node.uptime),
-                    "last_seen": int(time.time()),
-                    "ttft": fresh_metrics.get('ttft', 0),
-                    "latency": fresh_metrics.get('latency', 0),
-                    "total_tokens": fresh_metrics.get('total_tokens', 0)
-                }
-            else:
-                node_info = {
-                    "node_id": node.node_id,
-                    "ip": node.ip,
-                    "port": node.port,
-                    "load": node.load,
-                    "tps": node.tps,
-                    "last_seen": node.last_seen,
-                    "ttft": getattr(node, 'ttft', None),
-                    "latency": getattr(node, 'latency', None),
-                    "total_tokens": getattr(node, 'total_tokens', None)
-                }
+            node_info = {
+                "node_id": node.node_id,
+                "ip": node.ip,
+                "port": node.port,
+                "load": node.load,
+                "tps": node.tps,
+                "last_seen": node.last_seen,
+                "ttft": getattr(node, 'ttft', None),
+                "latency": getattr(node, 'latency', None),
+                "total_tokens": getattr(node, 'total_tokens', None)
+            }
             
             # Try to get chat format info from the node
             try:
-                # For current node, use local info
-                if node.node_id == config.node_id and llm:
-                    template_info = llm.get_chat_template_info()
-                    node_info["chat_format"] = template_info.get("chat_format", "unknown")
-                    node_info["detected_format"] = template_info.get("detected_format", "unknown")
-                    node_info["supports_chat"] = template_info.get("supports_chat", False)
+                # For remote nodes, detect based on model name as fallback
+                from inference_node.llm_wrapper import detect_chat_format_from_model_name
+                detected_format = detect_chat_format_from_model_name(model_name)
+                node_info["chat_format"] = detected_format
+                node_info["detected_format"] = detected_format
+                node_info["supports_chat"] = True
+                node_info["source"] = "name_detection"
+                
+                # Add to model's chat formats
+                models_dict[model_name]["chat_formats"].add(detected_format)
+                if not models_dict[model_name]["primary_chat_format"]:
+                    models_dict[model_name]["primary_chat_format"] = detected_format
                     
-                    # Add to model's chat formats
-                    chat_format = template_info.get("chat_format", "unknown")
-                    models_dict[model_name]["chat_formats"].add(chat_format)
-                    if not models_dict[model_name]["primary_chat_format"]:
-                        models_dict[model_name]["primary_chat_format"] = chat_format
-                else:
-                    # For remote nodes, we'll detect based on model name as fallback
-                    from inference_node.llm_wrapper import detect_chat_format_from_model_name
-                    detected_format = detect_chat_format_from_model_name(model_name)
-                    node_info["chat_format"] = detected_format
-                    node_info["detected_format"] = detected_format
-                    node_info["supports_chat"] = True
-                    node_info["source"] = "name_detection"
-                    
-                    # Add to model's chat formats
-                    models_dict[model_name]["chat_formats"].add(detected_format)
-                    if not models_dict[model_name]["primary_chat_format"]:
-                        models_dict[model_name]["primary_chat_format"] = detected_format
-                        
             except Exception as e:
                 logger.debug(f"Could not get chat format for node {node.node_id}: {e}")
                 node_info["chat_format"] = "unknown"
