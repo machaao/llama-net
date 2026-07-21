@@ -1,5 +1,7 @@
+import os
 import time
 import asyncio
+import gc
 from typing import Dict, List, Optional, Any, Generator
 from llama_cpp import Llama
 from common.utils import get_logger, normalize_stop_tokens
@@ -130,6 +132,44 @@ class LlamaWrapper:
         except Exception as e:
             logger.warning(f"Could not detect chat template: {e}")
     
+    @property
+    def is_loaded(self) -> bool:
+        """Check if a model is currently loaded"""
+        return self.llm is not None
+
+    def unload_model(self) -> None:
+        """Unload the current model from memory"""
+        if self.llm is not None:
+            logger.info(f"Unloading model: {self.config.model_name}")
+            del self.llm
+            self.llm = None
+            gc.collect()
+            logger.info("Model unloaded and garbage collected")
+
+    def load_model(self, model_path: str) -> None:
+        """Load a new model from the given path"""
+        logger.info(f"Loading model from {model_path}")
+        self.llm = Llama(
+            model_path=model_path,
+            n_ctx=self.config.n_ctx,
+            n_batch=self.config.n_batch,
+            n_gpu_layers=self.config.n_gpu_layers,
+            verbose=self.config.verbose,
+            reasoning=True,
+            chat_format=self.detected_chat_format
+        )
+        logger.info(f"Model loaded successfully from {model_path}")
+
+    def reload_model(self, new_model_path: str) -> None:
+        """Hot-reload: unload current model and load a new one"""
+        logger.info(f"Hot-reloading model: {self.config.model_path} -> {new_model_path}")
+        self.unload_model()
+        self.load_model(new_model_path)
+        self.config.model_path = new_model_path
+        self.config.model_name = os.path.basename(new_model_path)
+        self._detect_chat_template()
+        logger.info(f"Hot-reload complete. New model: {self.config.model_name}")
+
     def _format_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Format messages for llama-cpp-python with chat-format-specific adaptations"""
         formatted = []
