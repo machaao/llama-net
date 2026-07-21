@@ -2994,12 +2994,18 @@ class ModelDownloaderUI {
                         <div class="col-md-6">
                             <h6><i class="fas fa-file-archive"></i> GGUF Files (${ggufFiles.length})</h6>
                             <div class="network-detail-item" style="max-height: 300px; overflow-y: auto;">
-                                ${ggufFiles.length > 0 ? ggufFiles.map(f => `
+                                ${ggufFiles.length > 0 ? ggufFiles.map(f => {
+                                    const fileName = typeof f === 'string' ? f : f.filename;
+                                    const fileSize = typeof f === 'string' ? null : f.size_gb;
+                                    return `
                                     <div class="d-flex justify-content-between align-items-center mb-1 p-1 border-bottom">
-                                        <span class="small"><i class="fas fa-file"></i> ${this.escapeHtml(f)}</span>
-                                        ${['Q4_K_M','Q4_K_S','Q5_K_M'].some(p => f.toUpperCase().includes(p)) ? '<span class="badge bg-success">Recommended</span>' : ''}
-                                    </div>
-                                `).join('') : '<div class="text-muted">No GGUF files found</div>'}
+                                        <span class="small"><i class="fas fa-file"></i> ${this.escapeHtml(fileName)}</span>
+                                        <div class="d-flex align-items-center gap-2">
+                                            ${fileSize ? `<span class="badge bg-light text-dark">${fileSize} GB</span>` : ''}
+                                            ${['Q4_K_M','Q4_K_S','Q5_K_M'].some(p => fileName.toUpperCase().includes(p)) ? '<span class="badge bg-success">Recommended</span>' : ''}
+                                        </div>
+                                    </div>`;
+                                }).join('') : '<div class="text-muted">No GGUF files found</div>'}
                             </div>
                         </div>
                     </div>

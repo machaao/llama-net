@@ -142,13 +142,18 @@ class HFModelDownloader:
             
             model_info = response.json()
             
-            # Find GGUF files in the model
+            # Find GGUF files in the model with sizes
             gguf_files = []
             if 'siblings' in model_info:
                 for sibling in model_info['siblings']:
                     filename = sibling.get('rfilename', '')
                     if filename.lower().endswith('.gguf'):
-                        gguf_files.append(filename)
+                        size_bytes = sibling.get('size', 0) or 0
+                        gguf_files.append({
+                            "filename": filename,
+                            "size_bytes": size_bytes,
+                            "size_gb": round(size_bytes / (1024**3), 2) if size_bytes else 0,
+                        })
             
             logger.debug(f"Found {len(gguf_files)} GGUF files in {repo_id}")
             
