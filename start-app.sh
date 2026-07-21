@@ -94,7 +94,7 @@ fi
 if ! python -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
     echo "📦 Installing Python dependencies..."
     if [ -f "requirements.txt" ]; then
-        pip install -r requirements.txt
+        python -m pip install -r requirements.txt
     else
         echo "❌ Error: requirements.txt not found"
         exit 1
@@ -104,7 +104,7 @@ fi
 # Install package in development mode if not already installed
 if ! python -c "import inference_node" 2>/dev/null; then
     echo "📦 Installing LlamaNet package..."
-    pip install -e .
+    python -m pip install -e .
 fi
 
 # Health check endpoint
