@@ -369,13 +369,11 @@ class EventBasedDHTPublisher:
                 only_up_interfaces=True
             )
 
-            # Get primary IP
-            if available_ips:
-                primary_ip = available_ips[0]
-            else:
-                from common.utils import get_host_ip
-                primary_ip = get_host_ip()
-                available_ips = [primary_ip]
+            # Get primary IP (prefer configured public IP)
+            from common.utils import get_host_ip
+            primary_ip = get_host_ip(public_ip=self.config.public_ip or None)
+            if primary_ip not in available_ips:
+                available_ips.insert(0, primary_ip)
 
             # Classify IP types
             ip_types = {}
@@ -453,13 +451,11 @@ class EventBasedDHTPublisher:
                 only_up_interfaces=True
             )
 
-            # Get primary IP
-            if available_ips:
-                primary_ip = available_ips[0]
-            else:
-                from common.utils import get_host_ip
-                primary_ip = get_host_ip()
-                available_ips = [primary_ip]
+            # Get primary IP (prefer configured public IP)
+            from common.utils import get_host_ip
+            primary_ip = get_host_ip(public_ip=self.config.public_ip or None)
+            if primary_ip not in available_ips:
+                available_ips.insert(0, primary_ip)
 
             # Classify IP types
             ip_types = {}
@@ -535,7 +531,7 @@ class EventBasedDHTPublisher:
             self._join_timestamp = join_timestamp
             
             # Get current network info
-            primary_ip = get_host_ip()
+            primary_ip = get_host_ip(public_ip=self.config.public_ip or None)
             available_ips = [primary_ip]
             
             try:

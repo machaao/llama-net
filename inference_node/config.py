@@ -57,6 +57,9 @@ class InferenceConfig:
             parser.add_argument('--bootstrap-nodes', default='',
                               help='Comma-separated list of bootstrap nodes (ip:port)')
 
+            parser.add_argument('--public-ip',
+                              help='Public IP address for internet-accessible nodes')
+
             parser.add_argument('--ctx-size', default=4096, type=int,
                                 help='Llama Server Context Size (in tokens)')
 
@@ -91,6 +94,11 @@ class InferenceConfig:
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(args.node_id, self.port)
             self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
+
+            # Public IP support for internet-accessible nodes
+            self.public_ip = args.public_ip or load_env_var("PUBLIC_IP", "")
+            if self.public_ip:
+                logger.info(f"Configured public IP: {self.public_ip}")
         else:
             # Direct initialization (for programmatic use)
             self.model_path = model_path
@@ -107,6 +115,11 @@ class InferenceConfig:
             # Generate hardware-based node_id after port is determined
             self.node_id = self._load_or_generate_node_id(None, self.port)
             self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
+
+            # Public IP support for internet-accessible nodes
+            self.public_ip = load_env_var("PUBLIC_IP", "")
+            if self.public_ip:
+                logger.info(f"Configured public IP: {self.public_ip}")
             
             # LLM configuration from environment
             self.n_ctx = int(load_env_var("N_CTX", 4096))
@@ -316,6 +329,7 @@ class InferenceConfig:
             "host": self.host,
             "port": self.port,
             "dht_port": self.dht_port,
+            "public_ip": self.public_ip or "auto-detected",
             "bootstrap_nodes": self.bootstrap_nodes,
             "heartbeat_interval": self.heartbeat_interval,
             "n_ctx": self.n_ctx,
