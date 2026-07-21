@@ -863,6 +863,34 @@ class LlamaNetUI {
                 fetch(`${this.baseUrl}/models/statistics`).catch(() => null)
             ]);
             
+            // Fetch current node info FIRST (before clearing activeNodes)
+            // so fresh model name survives the DHT rebuild
+            let freshLocalNode = null;
+            try {
+                const infoResponse = await fetch(`${this.baseUrl}/info`);
+                if (infoResponse.ok) {
+                    const infoData = await infoResponse.json();
+                    const currentModel = infoData.model || this.selectedModel || 'unknown';
+                    const currentNodeId = infoData.node_id;
+                    if (currentNodeId) {
+                        const existingNode = this.activeNodes.get(currentNodeId);
+                        freshLocalNode = this.normalizeNodeDataWithValidation({
+                            node_id: currentNodeId,
+                            ip: infoData.system?.network?.local_ip || window.location.hostname,
+                            port: infoData.port || window.location.port,
+                            model: currentModel,
+                            load: existingNode?.load || 0,
+                            tps: existingNode?.tps || 0,
+                            uptime: existingNode?.uptime || 0,
+                            last_seen: Math.floor(Date.now() / 1000),
+                            dht_port: infoData.dht_port
+                        });
+                    }
+                }
+            } catch (infoErr) {
+                console.debug('Could not pre-fetch current node info:', infoErr);
+            }
+
             if (dhtResponse && dhtResponse.ok && modelsResponse && modelsResponse.ok) {
                 const dhtData = await dhtResponse.json();
                 const modelsData = await modelsResponse.json();
@@ -878,37 +906,12 @@ class LlamaNetUI {
                 // Update activeNodes from fresh API data
                 this.updateActiveNodesFromAPI(modelsData);
                 
-                // Also fetch current node info to ensure local model name is up-to-date
-                try {
-                    const infoResponse = await fetch(`${this.baseUrl}/info`);
-                    if (infoResponse.ok) {
-                        const infoData = await infoResponse.json();
-                        const currentModel = infoData.model || this.selectedModel || 'unknown';
-                        
-                        // Update or add current node in activeNodes with fresh model info
-                        const currentNodeId = infoData.node_id;
-                        if (currentNodeId) {
-                            const currentNode = this.activeNodes.get(currentNodeId);
-                            const normalizedCurrent = this.normalizeNodeDataWithValidation({
-                                node_id: currentNodeId,
-                                ip: infoData.system?.network?.local_ip || window.location.hostname,
-                                port: infoData.port || window.location.port,
-                                model: currentModel,
-                                load: currentNode?.load || 0,
-                                tps: currentNode?.tps || 0,
-                                uptime: currentNode?.uptime || 0,
-                                last_seen: Math.floor(Date.now() / 1000),
-                                dht_port: infoData.dht_port
-                            });
-                            if (normalizedCurrent) {
-                                this.activeNodes.set(currentNodeId, normalizedCurrent);
-                                this.nodeStatuses.set(currentNodeId, 'online');
-                                this.nodeLastEvent.set(currentNodeId, Date.now());
-                            }
-                        }
-                    }
-                } catch (infoErr) {
-                    console.debug('Could not refresh current node info:', infoErr);
+                // Override local node with fresh model info (DHT may still have stale data)
+                if (freshLocalNode) {
+                    this.activeNodes.set(freshLocalNode.node_id, freshLocalNode);
+                    this.nodeStatuses.set(freshLocalNode.node_id, 'online');
+                    this.nodeLastEvent.set(freshLocalNode.node_id, Date.now());
+                    console.log(`🔄 Overrode local node model: ${freshLocalNode.model}`);
                 }
                 
                 // Update network stats from server statistics if available
