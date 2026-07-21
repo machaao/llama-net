@@ -59,7 +59,8 @@ class DownloadManager:
             url = "https://huggingface.co/api/models"
             params = {
                 "search": search_term,
-                "sort": "trending",
+                "sort": "trendingScore",
+                "direction": "-1",
                 "limit": limit * 2,  # Fetch extra since we filter client-side
             }
 
