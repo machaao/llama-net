@@ -20,6 +20,9 @@ class MetricsManager:
         self._latency_samples: list = []
         self._sample_window = 100
         
+        # Callback for metrics updates (used by server to broadcast via SSE)
+        self._on_metrics_updated = None
+        
     def get_comprehensive_metrics(self) -> Dict[str, Any]:
         """Get all metrics in one call"""
         return {
@@ -99,6 +102,13 @@ class MetricsManager:
         self.active_requests = max(0, self.active_requests - 1)
         self.total_tokens_generated += tokens_generated
         self.total_generation_time += generation_time
+        
+        # Notify listeners that metrics have been updated
+        if self._on_metrics_updated:
+            try:
+                self._on_metrics_updated()
+            except Exception as e:
+                logger.debug(f"Metrics update callback error: {e}")
     
     def record_ttft(self, ttft_seconds: float):
         """Record a time-to-first-token sample"""

@@ -238,6 +238,12 @@ async def lifespan(app: FastAPI):
             await service_manager.mark_service_ready("llm")
             logger.info("LLM initialized successfully")
             
+            # Register callback to broadcast metrics via SSE after each generation
+            def _on_metrics_updated():
+                asyncio.get_event_loop().create_task(_broadcast_current_node_metrics())
+            llm.metrics_manager._on_metrics_updated = _on_metrics_updated
+            logger.info("✅ Registered per-generation metrics broadcast callback")
+            
             await service_manager.mark_service_initializing("system_info")
             system_info = SystemInfo.get_all_info()
             await service_manager.mark_service_ready("system_info")
@@ -368,6 +374,34 @@ app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifesp
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+async def _broadcast_current_node_metrics():
+    """Broadcast current node metrics via SSE so UI updates immediately after generation"""
+    if not sse_manager or not llm or not config:
+        return
+    
+    try:
+        metrics = llm.get_metrics()
+        await sse_manager.broadcast_event("node_updated", {
+            "node_info": {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "model": config.model_name,
+                "load": metrics.get("load", 0.0),
+                "tps": metrics.get("tps", 0.0),
+                "uptime": metrics.get("uptime", 0),
+                "ttft": metrics.get("ttft", 0),
+                "latency": metrics.get("latency", 0),
+                "last_seen": int(time.time()),
+                "dht_port": config.dht_port
+            },
+            "timestamp": time.time(),
+            "source": "post_generation",
+            "event_driven": True
+        })
+    except Exception as e:
+        logger.debug(f"Post-generation metrics broadcast error: {e}")
 
 def _should_forward_request(request, target_node) -> bool:
     """Check if request should be forwarded to avoid loops"""
