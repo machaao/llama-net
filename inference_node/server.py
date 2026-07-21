@@ -544,6 +544,22 @@ async def list_network_models():
 @app.get("/models/statistics")
 async def get_models_statistics():
     """Get detailed statistics about models available on the network"""
+    if not config:
+        raise HTTPException(status_code=503, detail="Node not initialized")
+    
+    # In no-model mode with no DHT discovery, return empty stats gracefully
+    if config.no_model_mode and not dht_discovery:
+        return {
+            "network_summary": {
+                "total_models": 0,
+                "total_nodes": 0,
+                "avg_network_load": 0,
+                "total_network_tps": 0,
+                "timestamp": time.time()
+            },
+            "models": {}
+        }
+    
     if not dht_discovery:
         raise HTTPException(status_code=503, detail="DHT discovery not initialized")
     
@@ -556,8 +572,31 @@ async def get_models_statistics():
         total_load = 0
         total_tps = 0
         
+        # Include current node with fresh model info (DHT may have stale data)
+        current_node_included = False
+        if not config.no_model_mode and llm:
+            metrics = llm.get_metrics()
+            current_node_data = {
+                "node_id": config.node_id,
+                "ip": get_host_ip(),
+                "port": config.port,
+                "model": config.model_name,
+                "load": metrics.get("load", 0.0),
+                "tps": metrics.get("tps", 0.0),
+                "uptime": metrics.get("uptime", 0),
+                "last_seen": int(time.time())
+            }
+            current_node_included = True
+        
         for node in all_nodes:
-            model_name = node.model
+            # If this node is the current node, override with fresh local data
+            if current_node_included and node.node_id == config.node_id:
+                model_name = config.model_name
+                node_info = current_node_data
+            else:
+                model_name = node.model
+                node_info = node
+            
             if model_name not in models_dict:
                 models_dict[model_name] = {
                     "nodes": [],
@@ -565,18 +604,34 @@ async def get_models_statistics():
                     "total_tps": 0
                 }
             
-            models_dict[model_name]["nodes"].append(node)
-            models_dict[model_name]["total_load"] += node.load
-            models_dict[model_name]["total_tps"] += node.tps
-            total_load += node.load
-            total_tps += node.tps
+            models_dict[model_name]["nodes"].append(node_info)
+            if isinstance(node_info, dict):
+                models_dict[model_name]["total_load"] += node_info.get("load", 0)
+                models_dict[model_name]["total_tps"] += node_info.get("tps", 0)
+                total_load += node_info.get("load", 0)
+                total_tps += node_info.get("tps", 0)
+            else:
+                models_dict[model_name]["total_load"] += node_info.load
+                models_dict[model_name]["total_tps"] += node_info.tps
+                total_load += node_info.load
+                total_tps += node_info.tps
+        
+        # Add current node if it wasn't found in DHT results
+        if current_node_included and config.model_name not in models_dict:
+            models_dict[config.model_name] = {
+                "nodes": [current_node_data],
+                "total_load": current_node_data["load"],
+                "total_tps": current_node_data["tps"]
+            }
+        
+        total_node_count = len(all_nodes) + (1 if current_node_included and not any(n.node_id == config.node_id for n in all_nodes) else 0)
         
         # Format response
         statistics = {
             "network_summary": {
                 "total_models": len(models_dict),
-                "total_nodes": len(all_nodes),
-                "avg_network_load": total_load / len(all_nodes) if all_nodes else 0,
+                "total_nodes": total_node_count,
+                "avg_network_load": total_load / total_node_count if total_node_count > 0 else 0,
                 "total_network_tps": total_tps,
                 "timestamp": time.time()
             },
@@ -585,21 +640,36 @@ async def get_models_statistics():
         
         for model_name, model_data in models_dict.items():
             nodes = model_data["nodes"]
+            node_count = len(nodes)
+            
+            # Calculate stats handling both dict and object nodes
+            load_values = [n.get("load", 0) if isinstance(n, dict) else n.load for n in nodes]
+            tps_values = [n.get("tps", 0) if isinstance(n, dict) else n.tps for n in nodes]
+            
+            best_node = None
+            if nodes:
+                best_idx = load_values.index(min(load_values))
+                best_n = nodes[best_idx]
+                if isinstance(best_n, dict):
+                    best_node = best_n
+                else:
+                    best_node = best_n.__dict__
+            
             statistics["models"][model_name] = {
-                "node_count": len(nodes),
-                "avg_load": model_data["total_load"] / len(nodes),
-                "total_tps": model_data["total_tps"],
-                "best_node": min(nodes, key=lambda n: n.load).__dict__ if nodes else None,
-                "availability": "high" if len(nodes) > 2 else "medium" if len(nodes) > 1 else "low",
+                "node_count": node_count,
+                "avg_load": sum(load_values) / node_count if node_count > 0 else 0,
+                "total_tps": sum(tps_values),
+                "best_node": best_node,
+                "availability": "high" if node_count > 2 else "medium" if node_count > 1 else "low",
                 "nodes": [
                     {
-                        "node_id": n.node_id,
-                        "ip": n.ip,
-                        "port": n.port,
-                        "load": n.load,
-                        "tps": n.tps,
-                        "uptime": n.uptime,
-                        "last_seen": n.last_seen
+                        "node_id": n.get("node_id") if isinstance(n, dict) else n.node_id,
+                        "ip": n.get("ip") if isinstance(n, dict) else n.ip,
+                        "port": n.get("port") if isinstance(n, dict) else n.port,
+                        "load": n.get("load", 0) if isinstance(n, dict) else n.load,
+                        "tps": n.get("tps", 0) if isinstance(n, dict) else n.tps,
+                        "uptime": n.get("uptime", 0) if isinstance(n, dict) else n.uptime,
+                        "last_seen": n.get("last_seen") if isinstance(n, dict) else n.last_seen
                     } for n in nodes
                 ]
             }
