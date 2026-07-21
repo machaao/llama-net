@@ -2820,6 +2820,11 @@ async def download_status_stream(download_id: str = ""):
                 yield f"data: {json.dumps(status)}\n\n"
             return
         
+        # Send current status immediately so client has initial state
+        current_status = download_manager.get_download_status(download_id)
+        if current_status:
+            yield f"data: {json.dumps(current_status)}\n\n"
+        
         try:
             while True:
                 try:

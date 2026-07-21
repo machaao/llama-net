@@ -201,14 +201,15 @@ class DownloadManager:
             self.download_history[task.download_id] = task
 
     async def _download_with_progress(self, task: DownloadTask, hf_url: str) -> Optional[str]:
-        """Download model with progress callbacks"""
-        import requests as req
+        """Download model with non-blocking progress using aiohttp"""
+        import aiohttp
+        import re
 
         try:
             repo_id, _, tag = self.downloader.parse_hf_url(hf_url)
 
             quantization = None
-            if tag and __import__('re').match(r'^Q[0-9]+_[A-Z0-9_]+$', tag):
+            if tag and re.match(r'^Q[0-9]+_[A-Z0-9_]+$', tag):
                 quantization = tag
                 tag = None
 
@@ -225,35 +226,36 @@ class DownloadManager:
 
             download_url = f"https://huggingface.co/{repo_id}/resolve/{tag or 'main'}/{filename}"
 
-            response = req.get(download_url, stream=True, timeout=30)
-            response.raise_for_status()
+            timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(download_url) as response:
+                    response.raise_for_status()
 
-            task.total_bytes = int(response.headers.get('content-length', 0))
-            task.bytes_downloaded = 0
-            last_broadcast = time.time()
-            last_bytes = 0
+                    task.total_bytes = int(response.headers.get('content-length', 0))
+                    task.bytes_downloaded = 0
+                    last_broadcast = time.time()
+                    last_bytes = 0
 
-            local_path.parent.mkdir(parents=True, exist_ok=True)
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=65536):
-                    if self._cancel_flags.get(task.download_id):
-                        logger.info(f"Download cancelled: {task.download_id}")
-                        f.close()
-                        local_path.unlink(missing_ok=True)
-                        return None
+                    with open(local_path, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(65536):
+                            if self._cancel_flags.get(task.download_id):
+                                logger.info(f"Download cancelled: {task.download_id}")
+                                f.close()
+                                local_path.unlink(missing_ok=True)
+                                return None
 
-                    if chunk:
-                        f.write(chunk)
-                        task.bytes_downloaded += len(chunk)
+                            f.write(chunk)
+                            task.bytes_downloaded += len(chunk)
 
-                        now = time.time()
-                        if now - last_broadcast >= 0.5:
-                            elapsed = now - last_broadcast
-                            task.speed = (task.bytes_downloaded - last_bytes) / elapsed
-                            last_bytes = task.bytes_downloaded
-                            last_broadcast = now
-                            await self._broadcast_progress(task, "progress")
+                            now = time.time()
+                            if now - last_broadcast >= 0.5:
+                                elapsed = now - last_broadcast
+                                task.speed = (task.bytes_downloaded - last_bytes) / elapsed
+                                last_bytes = task.bytes_downloaded
+                                last_broadcast = now
+                                await self._broadcast_progress(task, "progress")
 
             return str(local_path)
 
