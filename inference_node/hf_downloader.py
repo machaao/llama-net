@@ -4,7 +4,7 @@ import json
 import hashlib
 import requests
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List
 from tqdm import tqdm
 from common.utils import get_logger
 
