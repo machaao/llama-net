@@ -174,7 +174,7 @@ start_cloudflare_tunnel() {
         fi
 
         # Extract hostname from ingress
-        EXISTING_DOMAIN=$(grep 'hostname:' "$config_file" 2>/dev/null | head -1 | awk '{print $2}')
+        EXISTING_DOMAIN=$(grep 'hostname:' "$config_file" 2>/dev/null | head -1 | awk -F': ' '{print $2}')
 
         echo "🌐 Starting Cloudflare tunnel: $EXISTING_TUNNEL"
         [ -n "$EXISTING_DOMAIN" ] && echo "   Domain: $EXISTING_DOMAIN"
