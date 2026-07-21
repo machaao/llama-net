@@ -94,6 +94,9 @@ class DownloadManager:
                 if len(results) >= limit:
                     break
 
+            # Sort by downloads descending
+            results.sort(key=lambda x: x.get("downloads", 0), reverse=True)
+
             return results
         except Exception as e:
             logger.error(f"Error searching models: {e}")
