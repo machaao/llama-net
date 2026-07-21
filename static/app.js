@@ -878,6 +878,39 @@ class LlamaNetUI {
                 // Update activeNodes from fresh API data
                 this.updateActiveNodesFromAPI(modelsData);
                 
+                // Also fetch current node info to ensure local model name is up-to-date
+                try {
+                    const infoResponse = await fetch(`${this.baseUrl}/info`);
+                    if (infoResponse.ok) {
+                        const infoData = await infoResponse.json();
+                        const currentModel = infoData.model || this.selectedModel || 'unknown';
+                        
+                        // Update or add current node in activeNodes with fresh model info
+                        const currentNodeId = infoData.node_id;
+                        if (currentNodeId) {
+                            const currentNode = this.activeNodes.get(currentNodeId);
+                            const normalizedCurrent = this.normalizeNodeDataWithValidation({
+                                node_id: currentNodeId,
+                                ip: infoData.system?.network?.local_ip || window.location.hostname,
+                                port: infoData.port || window.location.port,
+                                model: currentModel,
+                                load: currentNode?.load || 0,
+                                tps: currentNode?.tps || 0,
+                                uptime: currentNode?.uptime || 0,
+                                last_seen: Math.floor(Date.now() / 1000),
+                                dht_port: infoData.dht_port
+                            });
+                            if (normalizedCurrent) {
+                                this.activeNodes.set(currentNodeId, normalizedCurrent);
+                                this.nodeStatuses.set(currentNodeId, 'online');
+                                this.nodeLastEvent.set(currentNodeId, Date.now());
+                            }
+                        }
+                    }
+                } catch (infoErr) {
+                    console.debug('Could not refresh current node info:', infoErr);
+                }
+                
                 // Update network stats from server statistics if available
                 if (statsData) {
                     this.updateNetworkStatsFromAPI(statsData);
