@@ -5,6 +5,20 @@
 
 set -e
 
+# Detect Python interpreter (prefer python3 for portability)
+if [ -n "$VIRTUAL_ENV" ] && command -v python >/dev/null 2>&1; then
+    PYTHON_CMD="python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_CMD="python3"
+elif command -v python >/dev/null 2>&1; then
+    PYTHON_CMD="python"
+else
+    echo "❌ Python not found. Please install Python 3.8+ or activate your virtual environment."
+    exit 1
+fi
+
+echo "🐍 Using Python: $PYTHON_CMD ($($PYTHON_CMD --version 2>&1))"
+
 echo "🚀 Starting LlamaNet OpenAI-Compatible Inference Node..."
 
 # Check if we're in a containerized environment
@@ -34,7 +48,7 @@ if [ "$1" = "run" ]; then
     mkdir -p "$MODELS_DIR"
     
     # Run the Python model downloader
-    python -c "
+    $PYTHON_CMD -c "
 from inference_node.model_manager import ModelManager
 import sys
 
@@ -91,10 +105,10 @@ else
 fi
 
 # Check if Python dependencies are installed
-if ! python -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
+if ! $PYTHON_CMD -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
     echo "📦 Installing Python dependencies..."
     if [ -f "requirements.txt" ]; then
-        python -m pip install -r requirements.txt
+        $PYTHON_CMD -m pip install -r requirements.txt
     else
         echo "❌ Error: requirements.txt not found"
         exit 1
@@ -102,9 +116,9 @@ if ! python -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
 fi
 
 # Install package in development mode if not already installed
-if ! python -c "import inference_node" 2>/dev/null; then
+if ! $PYTHON_CMD -c "import inference_node" 2>/dev/null; then
     echo "📦 Installing LlamaNet package..."
-    python -m pip install -e .
+    $PYTHON_CMD -m pip install -e .
 fi
 
 # Health check endpoint
@@ -211,7 +225,7 @@ echo "   - POST /v1/completions"
 echo "   - POST /v1/chat/completions"
 
 # Start the server in background for health check
-python -m inference_node.server $ARGS &
+$PYTHON_CMD -m inference_node.server $ARGS &
 SERVER_PID=$!
 
 # Wait for service to be ready
