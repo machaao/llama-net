@@ -84,21 +84,18 @@ python -m inference_node.server \
   --bootstrap-nodes localhost:8001
 ```
 
-## Persistent Cloudflare Tunnel (Internet-Accessible)
+## Cloudflare Tunnel (Internet-Accessible)
 
-LlamaNet supports persistent public URLs via Cloudflare tunnels, enabling anyone on the internet to connect to your node — no port forwarding required.
+LlamaNet supports public URLs via Cloudflare tunnels — no port forwarding required.
 
 ### Quick Tunnel (No Account Needed)
 
 ```bash
-# Temporary URL — changes on every restart
 ./start-app.sh --tunnel
-
-# Or with Python directly:
-ENABLE_TUNNEL=true python -m inference_node.server
 ```
 
-Output:
+Generates a temporary URL (changes on restart). No Cloudflare account needed.
+
 ```
 ╔══════════════════════════════════════════════════════════════╗
 ║  🌍 Cloudflare Tunnel Active                                ║
@@ -109,46 +106,55 @@ Output:
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
-### Named Tunnel (Persistent URL)
+### Named Tunnel (Persistent URL, Free Cloudflare Account)
 
-For a URL that survives restarts, create a named Cloudflare tunnel:
+A persistent URL that survives restarts. One-time setup via `cloudflared` CLI:
 
 ```bash
-# One-time setup (requires free Cloudflare account):
+# 1. Login to Cloudflare (opens browser)
 cloudflared tunnel login
+
+# 2. Create a named tunnel
 cloudflared tunnel create bootstrap
+
+# 3. Route DNS — replace llamanet.app with your domain
 cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
 
-# Run with persistent tunnel:
-./start-app.sh --tunnel --tunnel-name bootstrap --tunnel-domain bootstrap.llamanet.app
+# 4. Edit the generated config at ~/.cloudflared/config.yml:
 ```
 
-The script auto-generates `~/.cloudflared/config.yml` with the correct ingress rules on first run. The URL `https://bootstrap.llamanet.app` stays the same across restarts.
+```yaml
+# ~/.cloudflared/config.yml
+tunnel: <your-tunnel-uuid>
+credentials-file: /Users/you/.cloudflared/<your-tunnel-uuid>.json
 
-For additional nodes, use descriptive tunnel names:
+ingress:
+  - hostname: bootstrap.llamanet.app
+    service: http://localhost:8000
+  - service: http_status:404
+```
+
+Then run LlamaNet with the tunnel:
 
 ```bash
-# Second node
+./start-app.sh --tunnel
+```
+
+The script detects `~/.cloudflared/config.yml`, starts the named tunnel, and `https://bootstrap.llamanet.app` stays the same across restarts.
+
+For additional nodes, repeat the process with different tunnel names:
+
+```bash
 cloudflared tunnel create gpu-m4
 cloudflared tunnel route dns gpu-m4 gpu-m4.llamanet.app
-./start-app.sh --tunnel --tunnel-name gpu-m4 --tunnel-domain gpu-m4.llamanet.app
-
-# Third node
-cloudflared tunnel create eu-node
-cloudflared tunnel route dns eu-node eu-node.llamanet.app
-./start-app.sh --tunnel --tunnel-name eu-node --tunnel-domain eu-node.llamanet.app
+# Update ~/.cloudflared/config.yml with new tunnel UUID and hostname
+./start-app.sh --tunnel
 ```
 
-Each operator gets their own subdomain under `llamanet.app`:
-```
-bootstrap.llamanet.app   → Primary bootstrap node
-gpu-m4.llamanet.app      → Mac M4 with GPU
-eu-node.llamanet.app     → European region node
-```
+### Connecting as an API Consumer
 
-### Connecting to a Tunneled Node
+Point your OpenAI-compatible client at the tunnel URL:
 
-**As an API consumer** — just use the URL:
 ```python
 import openai
 
@@ -163,24 +169,26 @@ response = client.chat.completions.create(
 )
 ```
 
-**As a peer LlamaNet node** — use `--bootstrap-peers`:
+### Connecting as a Peer Node
+
+Use `--bootstrap-peers` to join the network via HTTP (works through tunnels):
+
 ```bash
-python -m inference_node.server \
-  --model-path ./models/model.gguf \
+./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
   --tunnel \
   --bootstrap-peers https://bootstrap.llamanet.app
 ```
 
-This registers your node with the bootstrap peer via HTTP, and other nodes discover you through gossip — no UDP required.
+Your node registers with the bootstrap peer, discovers other peers via gossip, and becomes reachable at its own tunnel URL.
 
 ### How It Works
 
 LlamaNet implements a **dual-transport DHT**:
 
-- **UDP (default)**: Used for LAN nodes (fast, zero-overhead discovery)
-- **HTTP (tunnel)**: Used for nodes behind Cloudflare tunnels, NAT, or firewalls
+- **UDP** — Used for LAN nodes (fast, zero-overhead)
+- **HTTP** — Used for nodes behind Cloudflare tunnels, NAT, or firewalls
 
-Both transports share the same Kademlia routing table. When a node registers via `--bootstrap-peers`, it joins the DHT over HTTP. Other nodes discover it through periodic gossip and DHT lookups route through HTTP when the target peer is behind a tunnel.
+Both transports share the same Kademlia routing table. When a node registers via `--bootstrap-peers`, it joins the DHT over HTTP. Other nodes discover it through periodic gossip.
 
 ```
 ┌──────────┐  UDP  ┌──────────┐  HTTP  ┌──────────┐
@@ -194,7 +202,7 @@ Both transports share the same Kademlia routing table. When a node registers via
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/peers` | List known peers (HTTP-discovered + DHT) |
+| GET | `/peers` | List known peers |
 | POST | `/peers/register` | Register as a peer |
 | GET | `/tunnel/status` | Get tunnel status and public URL |
 | POST | `/dht/rpc` | DHT protocol messages over HTTP |
