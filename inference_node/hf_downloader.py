@@ -182,6 +182,47 @@ class HFModelDownloader:
             logger.error(f"Failed to fetch model info for {repo_id}: {e}")
             raise
     
+    def estimate_model_size(self, model_name: str, quantization: str = "Q4_K_M") -> Dict[str, Any]:
+        """
+        Estimate model size based on parameter count parsed from model name
+        and quantization type.
+        
+        Args:
+            model_name: Model name/ID (e.g., "TheBloke/Llama-2-7B-Chat-GGUF")
+            quantization: Quantization type (e.g., "Q4_K_M")
+            
+        Returns:
+            Dict with size estimate info
+        """
+        # Parse parameter count from model name (e.g., "7B", "13B", "1.2B", "70B")
+        param_match = re.search(r'(\d+\.?\d*)\s*[Bb]', model_name)
+        if not param_match:
+            return {"estimated": False, "reason": "Could not parse parameter count"}
+        
+        param_billions = float(param_match.group(1))
+        
+        # Bytes per parameter by quantization type
+        quant_bytes = {
+            "Q2_K": 0.32, "Q3_K_S": 0.37, "Q3_K_M": 0.40, "Q3_K_L": 0.43,
+            "Q4_0": 0.50, "Q4_K_S": 0.52, "Q4_K_M": 0.55, "Q5_0": 0.63,
+            "Q5_K_S": 0.65, "Q5_K_M": 0.70, "Q6_K": 0.80, "Q8_0": 1.05,
+            "F16": 2.00, "F32": 4.00
+        }
+        
+        bytes_per_param = quant_bytes.get(quantization.upper(), 0.55)
+        estimated_bytes = int(param_billions * 1e9 * bytes_per_param)
+        estimated_gb = round(estimated_bytes / (1024**3), 1)
+        
+        return {
+            "estimated": True,
+            "param_billions": param_billions,
+            "quantization": quantization,
+            "bytes_per_param": bytes_per_param,
+            "size_bytes": estimated_bytes,
+            "size_gb": estimated_gb,
+            "label": f"~{estimated_gb} GB"
+        }
+
     def find_gguf_file(self, repo_id: str, tag: Optional[str] = None, 
                       quantization: Optional[str] = None) -> str:
         """

@@ -78,6 +78,9 @@ class DownloadManager:
                 if not has_gguf_tag:
                     continue
 
+                # Estimate size from model name + best quantization
+                size_estimate = self.downloader.estimate_model_size(model_id, "Q4_K_M")
+
                 results.append({
                     "repo_id": model_id,
                     "downloads": model.get("downloads", 0),
@@ -85,6 +88,7 @@ class DownloadManager:
                     "tags": model.get("tags", []),
                     "last_modified": model.get("lastModified", ""),
                     "pipeline_tag": model.get("pipeline_tag", ""),
+                    "size_estimate": size_estimate,
                 })
 
                 if len(results) >= limit:
@@ -266,6 +270,20 @@ class DownloadManager:
 
     async def _broadcast_progress(self, task: DownloadTask, event_type: str):
         """Broadcast progress to all registered SSE queues"""
+        
+        # Calculate ETA
+        eta_seconds = 0
+        eta_formatted = ""
+        if task.speed > 0 and task.total_bytes > 0:
+            remaining = task.total_bytes - task.bytes_downloaded
+            eta_seconds = int(remaining / task.speed)
+            if eta_seconds < 60:
+                eta_formatted = f"{eta_seconds}s"
+            elif eta_seconds < 3600:
+                eta_formatted = f"{eta_seconds // 60}m {eta_seconds % 60}s"
+            else:
+                eta_formatted = f"{eta_seconds // 3600}h {(eta_seconds % 3600) // 60}m"
+        
         event_data = {
             "type": event_type,
             "download_id": task.download_id,
@@ -278,6 +296,8 @@ class DownloadManager:
             "percent": round((task.bytes_downloaded / task.total_bytes * 100), 1) if task.total_bytes > 0 else 0,
             "file_path": task.file_path,
             "error": task.error_message,
+            "eta_seconds": eta_seconds,
+            "eta_formatted": eta_formatted,
             "timestamp": time.time()
         }
 
@@ -315,6 +335,19 @@ class DownloadManager:
         if not task:
             return None
 
+        # Calculate ETA
+        eta_seconds = 0
+        eta_formatted = ""
+        if task.speed > 0 and task.total_bytes > 0:
+            remaining = task.total_bytes - task.bytes_downloaded
+            eta_seconds = int(remaining / task.speed)
+            if eta_seconds < 60:
+                eta_formatted = f"{eta_seconds}s"
+            elif eta_seconds < 3600:
+                eta_formatted = f"{eta_seconds // 60}m {eta_seconds % 60}s"
+            else:
+                eta_formatted = f"{eta_seconds // 3600}h {(eta_seconds % 3600) // 60}m"
+
         return {
             "download_id": task.download_id,
             "repo_id": task.repo_id,
@@ -328,6 +361,8 @@ class DownloadManager:
             "error": task.error_message,
             "started_at": task.started_at,
             "completed_at": task.completed_at,
+            "eta_seconds": eta_seconds,
+            "eta_formatted": eta_formatted,
         }
 
     def get_all_downloads(self) -> Dict[str, Dict[str, Any]]:

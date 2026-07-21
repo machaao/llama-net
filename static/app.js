@@ -2948,12 +2948,17 @@ class ModelDownloaderUI {
             return;
         }
         const header = isTrending ? '<div class="mb-2"><span class="badge bg-primary me-1"><i class="fas fa-fire"></i> Trending</span><small class="text-muted">Popular GGUF models on Hugging Face</small></div>' : '';
-        resultsDiv.innerHTML = header + this.searchResults.map(model => `
+        resultsDiv.innerHTML = header + this.searchResults.map(model => {
+            const sizeDisplay = model.size_estimate && model.size_estimate.estimated
+                ? `<span class="me-3" title="Estimated Q4_K_M size"><i class="fas fa-hdd"></i> ${model.size_estimate.label}</span>`
+                : '';
+            return `
             <div class="model-search-result-item border rounded p-3 mb-2">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1">
                         <h6 class="mb-1"><i class="fas fa-brain text-primary"></i> <span class="fw-bold">${this.escapeHtml(model.repo_id)}</span></h6>
                         <div class="text-muted small mb-2">
+                            ${sizeDisplay}
                             <span class="me-3"><i class="fas fa-download"></i> ${this.formatNumber(model.downloads)}</span>
                             <span class="me-3"><i class="fas fa-heart"></i> ${this.formatNumber(model.likes)}</span>
                             ${(model.tags || []).slice(0, 5).map(t => `<span class="badge bg-light text-dark me-1">${this.escapeHtml(t)}</span>`).join('')}
@@ -2964,8 +2969,8 @@ class ModelDownloaderUI {
                         <button class="btn btn-sm btn-primary" onclick="modelDownloader.showDownloadDialog('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-download"></i> Download</button>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     async showModelDetails(repoId) {
@@ -3031,7 +3036,11 @@ class ModelDownloaderUI {
     }
 
     showDownloadDialog(repoId) {
-        const quant = prompt(`Select quantization for ${repoId}:\n\n1. Q4_K_M (Recommended)\n2. Q5_K_M (Better quality)\n3. Q8_0 (High quality)\n\nEnter choice (default: Q4_K_M):`, 'Q4_K_M');
+        const model = this.searchResults.find(m => m.repo_id === repoId);
+        const sizeHint = model && model.size_estimate && model.size_estimate.estimated
+            ? `\nEstimated Q4_K_M size: ${model.size_estimate.label}`
+            : '';
+        const quant = prompt(`Select quantization for ${repoId}:${sizeHint}\n\n1. Q4_K_M (Recommended)\n2. Q5_K_M (Better quality)\n3. Q8_0 (High quality)\n\nEnter choice (default: Q4_K_M):`, 'Q4_K_M');
         if (quant !== null) this.startDownload(repoId, quant.trim() || 'Q4_K_M');
     }
 
@@ -3101,6 +3110,9 @@ class ModelDownloaderUI {
             const percent = dl.percent || 0;
             const isTerminal = ['completed', 'failed', 'cancelled'].includes(dl.status);
             const progressClass = dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : '';
+            const etaDisplay = dl.eta_formatted && !isTerminal
+                ? ` &bull; ETA: ${dl.eta_formatted}`
+                : '';
             return `
                 <div class="download-item border rounded p-3 mb-2">
                     <div class="d-flex justify-content-between align-items-center mb-2">
@@ -3117,6 +3129,7 @@ class ModelDownloaderUI {
                     <div class="small text-muted">
                         ${this.formatBytes(dl.bytes_downloaded || 0)} / ${this.formatBytes(dl.total_bytes || 0)}
                         ${!isTerminal ? ` &bull; ${this.formatBytes(dl.speed || 0)}/s` : ''}
+                        ${etaDisplay}
                         ${dl.error ? ` <span class="text-danger">&bull; ${this.escapeHtml(dl.error)}</span>` : ''}
                     </div>
                 </div>`;
