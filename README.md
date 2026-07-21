@@ -120,7 +120,7 @@ cloudflared tunnel create bootstrap
 cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
 
 # Run with persistent tunnel:
-./start-app.sh --tunnel --tunnel-name bootstrap
+./start-app.sh --tunnel --tunnel-name bootstrap --tunnel-domain bootstrap.llamanet.app
 ```
 
 The URL `https://bootstrap.llamanet.app` stays the same across restarts.
@@ -131,10 +131,12 @@ For additional nodes, use descriptive tunnel names:
 # Second node
 cloudflared tunnel create gpu-m4
 cloudflared tunnel route dns gpu-m4 gpu-m4.llamanet.app
+./start-app.sh --tunnel --tunnel-name gpu-m4 --tunnel-domain gpu-m4.llamanet.app
 
 # Third node
 cloudflared tunnel create eu-node
 cloudflared tunnel route dns eu-node eu-node.llamanet.app
+./start-app.sh --tunnel --tunnel-name eu-node --tunnel-domain eu-node.llamanet.app
 ```
 
 Each operator gets their own subdomain under `llamanet.app`:

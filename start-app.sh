@@ -33,9 +33,11 @@ fi
 # ── Cloudflare Tunnel Support ──
 ENABLE_TUNNEL=false
 TUNNEL_NAME=""
+TUNNEL_DOMAIN=""
 TUNNEL_PID=""
 TUNNEL_URL=""
 NEXT_IS_TUNNEL_NAME=false
+NEXT_IS_TUNNEL_DOMAIN=false
 
 REMAINING_ARGS=""
 for arg in "$@"; do
@@ -43,10 +45,15 @@ for arg in "$@"; do
         --tunnel) ENABLE_TUNNEL=true ;;
         --tunnel-name=*) TUNNEL_NAME="${arg#*=}" ;;
         --tunnel-name) NEXT_IS_TUNNEL_NAME=true ;;
+        --tunnel-domain=*) TUNNEL_DOMAIN="${arg#*=}" ;;
+        --tunnel-domain) NEXT_IS_TUNNEL_DOMAIN=true ;;
         *) 
             if [ "$NEXT_IS_TUNNEL_NAME" = "true" ]; then
                 TUNNEL_NAME="$arg"
                 NEXT_IS_TUNNEL_NAME=false
+            elif [ "$NEXT_IS_TUNNEL_DOMAIN" = "true" ]; then
+                TUNNEL_DOMAIN="$arg"
+                NEXT_IS_TUNNEL_DOMAIN=false
             else
                 REMAINING_ARGS="$REMAINING_ARGS $arg"
             fi
@@ -175,22 +182,28 @@ start_cloudflare_tunnel() {
     echo ""
     if [ -n "$TUNNEL_NAME" ]; then
         echo "🌐 Starting named Cloudflare tunnel: $TUNNEL_NAME"
+        [ -n "$TUNNEL_DOMAIN" ] && echo "🌐 Custom domain: $TUNNEL_DOMAIN"
         cloudflared tunnel run "$TUNNEL_NAME" > "$tunnel_log" 2>&1 &
         TUNNEL_PID=$!
         
-        # Named tunnels use configured DNS, wait for connection
+        # Wait for cloudflared to establish connection
         local attempts=0
         while [ $attempts -lt 20 ]; do
             if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
                grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
-                # Try to extract URL from config or use tunnel name
-                TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' "$tunnel_log" 2>/dev/null | head -1)
-                [ -z "$TUNNEL_URL" ] && TUNNEL_URL="https://${TUNNEL_NAME}.trycloudflare.com"
                 break
             fi
             sleep 1
             attempts=$((attempts + 1))
         done
+        
+        # Priority 1: Use explicit --tunnel-domain if provided
+        if [ -n "$TUNNEL_DOMAIN" ]; then
+            TUNNEL_URL="https://${TUNNEL_DOMAIN}"
+        else
+            # Priority 2: Extract URL from cloudflared logs
+            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' "$tunnel_log" 2>/dev/null | head -1)
+        fi
         
         export LLAMANET_TUNNEL_NAME="$TUNNEL_NAME"
     else
