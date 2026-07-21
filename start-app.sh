@@ -30,6 +30,41 @@ else
     CONTAINER_MODE=false
 fi
 
+# ── Cloudflare Tunnel Support ──
+ENABLE_TUNNEL=false
+TUNNEL_PID=""
+TUNNEL_URL=""
+
+REMAINING_ARGS=""
+for arg in "$@"; do
+    case "$arg" in
+        --tunnel) ENABLE_TUNNEL=true ;;
+        *) REMAINING_ARGS="$REMAINING_ARGS $arg" ;;
+    esac
+done
+[ "$ENABLE_CLOUDFLARE_TUNNEL" = "true" ] && ENABLE_TUNNEL=true
+set -- $REMAINING_ARGS
+
+if [ "$ENABLE_TUNNEL" = "true" ] && ! command -v cloudflared >/dev/null 2>&1; then
+    echo "📦 Installing cloudflared..."
+    if [ "$(uname)" = "Darwin" ]; then
+        if command -v brew >/dev/null 2>&1; then
+            brew install cloudflared
+        else
+            CF_ARCH=$(uname -m); [ "$CF_ARCH" = "arm64" ] && CF_ARCH="arm64" || CF_ARCH="amd64"
+            curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${CF_ARCH}.tgz" -o /tmp/cf.tgz
+            tar -xzf /tmp/cf.tgz -C /tmp && sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
+            rm -f /tmp/cf.tgz /tmp/cloudflared
+        fi
+    elif [ "$(uname)" = "Linux" ]; then
+        curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+        sudo chmod +x /usr/local/bin/cloudflared
+    else
+        echo "❌ Install cloudflared manually"; ENABLE_TUNNEL=false
+    fi
+fi
+[ "$ENABLE_TUNNEL" = "true" ] && command -v cloudflared >/dev/null 2>&1 && echo "✅ cloudflared: $(cloudflared --version 2>&1 | head -1)" || { ENABLE_TUNNEL=false; }
+
 # Handle 'run' command
 if [ "$1" = "run" ]; then
     if [ -z "$2" ]; then
@@ -122,6 +157,39 @@ if ! $PYTHON_CMD -c "import inference_node" 2>/dev/null; then
     $PYTHON_CMD -m pip install -e .
 fi
 
+start_cloudflare_tunnel() {
+    local port=$1
+    local tunnel_log="/tmp/llamanet_tunnel_$$.log"
+
+    echo ""
+    echo "🌐 Starting Cloudflare Tunnel on port $port..."
+
+    cloudflared tunnel --url "http://localhost:$port" > "$tunnel_log" 2>&1 &
+    TUNNEL_PID=$!
+
+    local attempts=0
+    while [ $attempts -lt 30 ]; do
+        TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$tunnel_log" 2>/dev/null | head -1)
+        [ -n "$TUNNEL_URL" ] && break
+        sleep 0.5
+        attempts=$((attempts + 1))
+    done
+
+    if [ -n "$TUNNEL_URL" ]; then
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║  🌍 Cloudflare Tunnel Active                                ║"
+        echo "║                                                              ║"
+        echo "║  Public URL: $TUNNEL_URL"
+        echo "║                                                              ║"
+        echo "║  Share this URL to access LlamaNet from anywhere.            ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
+        echo ""
+    else
+        echo "⚠️  Tunnel starting... URL will appear in logs: $tunnel_log"
+    fi
+}
+
 # Health check endpoint
 health_check() {
     local port=$1
@@ -148,11 +216,16 @@ health_check() {
 # Signal handler for graceful shutdown
 cleanup() {
     echo "🛑 Received shutdown signal, stopping LlamaNet node..."
+    if [ ! -z "$TUNNEL_PID" ]; then
+        echo "🌐 Stopping Cloudflare Tunnel..."
+        kill $TUNNEL_PID 2>/dev/null || true
+    fi
+
     if [ ! -z "$SERVER_PID" ]; then
         echo "📤 Sending SIGTERM to server process $SERVER_PID..."
         # Send SIGTERM and let the application handle graceful shutdown
         kill -TERM $SERVER_PID 2>/dev/null || true
-        
+
         # Wait for graceful shutdown with appropriate timeout
         echo "⏳ Waiting for graceful shutdown (max 10 seconds)..."
         for i in $(seq 1 10); do
@@ -237,6 +310,11 @@ SERVER_PID=$!
 # Wait for service to be ready
 if health_check $DEFAULT_PORT; then
     echo "🎉 LlamaNet OpenAI-Compatible Inference Node is running!"
+    
+    if [ "$ENABLE_TUNNEL" = "true" ]; then
+        start_cloudflare_tunnel $DEFAULT_PORT
+    fi
+
     echo "📊 Monitor network status: python -m tools.monitor"
     echo "🔍 Quick network check: python -m tools.quick_check"
     echo "🛑 Press Ctrl+C for graceful shutdown"
