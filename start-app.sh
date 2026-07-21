@@ -90,6 +90,7 @@ DEFAULT_PORT="${PORT:-8000}"
 DEFAULT_DHT_PORT="${DHT_PORT:-8001}"
 DEFAULT_NODE_ID="${NODE_ID:-}"
 DEFAULT_BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-}"
+DEFAULT_PUBLIC_IP="${PUBLIC_IP:-}"
 
 # Suppress Python semaphore warnings for cleaner output
 export PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tracker,ignore:resource_tracker"
@@ -203,6 +204,10 @@ if [ -n "$DEFAULT_BOOTSTRAP_NODES" ]; then
     ARGS="$ARGS --bootstrap-nodes $DEFAULT_BOOTSTRAP_NODES"
 fi
 
+if [ -n "$DEFAULT_PUBLIC_IP" ]; then
+    ARGS="$ARGS --public-ip $DEFAULT_PUBLIC_IP"
+fi
+
 echo "🔧 Configuration:"
 if [ -n "$DEFAULT_MODEL_PATH" ]; then
     echo "   Model: $DEFAULT_MODEL_PATH"
@@ -214,6 +219,7 @@ echo "   HTTP Port: $DEFAULT_PORT"
 echo "   DHT Port: $DEFAULT_DHT_PORT"
 echo "   Node ID: ${DEFAULT_NODE_ID:-auto-generated}"
 echo "   Bootstrap Nodes: ${DEFAULT_BOOTSTRAP_NODES:-none (bootstrap mode)}"
+echo "   Public IP: ${DEFAULT_PUBLIC_IP:-auto-detect}"
 
 # Start the inference node
 echo "🚀 Starting inference node with OpenAI-compatible API..."

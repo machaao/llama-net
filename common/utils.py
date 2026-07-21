@@ -28,45 +28,64 @@ def is_private_ip(ip: str) -> bool:
         return True
 
 
+# Module-level cache for public IP detection (API call only once)
+_detected_public_ip_cache = None
+_detection_attempted = False
+
 def detect_public_ip() -> Optional[str]:
-    """Detect public IP by scanning local network interfaces.
+    """Detect public IP using free APIs, with interface scanning as fallback.
     
-    Returns the first public (non-private) IP found, or None if behind NAT.
+    Results are cached after the first attempt to avoid repeated API calls.
+    Returns the public IP address, or None if detection fails.
     """
+    global _detected_public_ip_cache, _detection_attempted
+    
+    # Return cached result if we've already attempted detection
+    if _detection_attempted:
+        return _detected_public_ip_cache
+    
+    _detection_attempted = True
     logger = get_logger(__name__)
     
+    # Priority 1: Free IP detection APIs (works behind NAT)
+    ip_services = [
+        ("https://api.ipify.org", "ipify"),
+        ("https://ifconfig.me/ip", "ifconfig.me"),
+        ("https://icanhazip.com", "icanhazip"),
+        ("https://checkip.amazonaws.com", "aws"),
+        ("https://api.my-ip.io/v2/ip.txt", "my-ip.io"),
+    ]
+    
+    for url, name in ip_services:
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "llamanet/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                ip = response.read().decode("utf-8").strip()
+                if ip and not is_private_ip(ip):
+                    logger.info(f"Detected public IP: {ip} (from {name})")
+                    _detected_public_ip_cache = ip
+                    return ip
+        except Exception as e:
+            logger.debug(f"IP service {name} failed: {e}")
+            continue
+    
+    # Priority 2: Interface scanning (works on cloud VPS with public IP on interface)
     try:
-        # Try psutil interface scanning first (most reliable)
-        try:
-            import psutil
-            for name, addrs in psutil.net_if_addrs().items():
-                for addr in addrs:
-                    if addr.family == socket.AF_INET:
-                        ip = addr.address
-                        if not is_private_ip(ip):
-                            logger.info(f"Detected public IP: {ip} (from interface {name})")
-                            return ip
-        except (ImportError, Exception) as e:
-            logger.debug(f"psutil scan skipped: {e}")
-        
-        # Fallback: bind to outbound socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(('8.8.8.8', 80))
-            ip = s.getsockname()[0]
-            if not is_private_ip(ip):
-                logger.info(f"Detected public IP: {ip} (from outbound socket)")
-                return ip
-        except Exception:
-            pass
-        finally:
-            s.close()
-        
-        return None
-        
-    except Exception as e:
-        logger.debug(f"Public IP detection failed: {e}")
-        return None
+        import psutil
+        for iface_name, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    ip = addr.address
+                    if not is_private_ip(ip):
+                        logger.info(f"Detected public IP: {ip} (from interface {iface_name})")
+                        _detected_public_ip_cache = ip
+                        return ip
+    except (ImportError, Exception) as e:
+        logger.debug(f"psutil interface scan skipped: {e}")
+    
+    logger.debug("Could not detect public IP (likely behind NAT)")
+    return None
 
 
 def get_host_ip(public_ip: Optional[str] = None) -> str:
@@ -74,7 +93,7 @@ def get_host_ip(public_ip: Optional[str] = None) -> str:
     
     Priority:
       1. Explicit public_ip parameter (from CLI/env)
-      2. Auto-detected public IP from network interfaces
+      2. Auto-detected public IP (cached from API call)
       3. Private LAN IP from outbound socket
       4. 127.0.0.1 as last resort
     """
@@ -82,10 +101,9 @@ def get_host_ip(public_ip: Optional[str] = None) -> str:
     
     # Priority 1: Explicit public IP from user
     if public_ip:
-        logger.info(f"Using configured public IP: {public_ip}")
         return public_ip
     
-    # Priority 2: Auto-detect public IP from interfaces
+    # Priority 2: Auto-detect public IP (cached - API called only once)
     detected_public = detect_public_ip()
     if detected_public:
         return detected_public
