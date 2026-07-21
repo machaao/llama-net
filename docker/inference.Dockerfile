@@ -76,7 +76,7 @@ RUN mkdir -p /models
 # Environment variables for configuration
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV MODEL_PATH=/models/model.gguf
+ENV MODEL_PATH=""
 ENV HOST=0.0.0.0
 ENV PORT=8000
 ENV DHT_PORT=8001
@@ -85,7 +85,7 @@ ENV HARDWARE_MODE=auto
 ENV N_GPU_LAYERS=0
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Expose ports

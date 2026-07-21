@@ -47,24 +47,24 @@ validate_environment() {
     
     local validation_failed=false
     
-    # Check required environment variables
+    # MODEL_PATH is optional - no-model mode supported
     if [ -z "$MODEL_PATH" ]; then
-        log_error "MODEL_PATH environment variable is required"
-        log_info "Please set MODEL_PATH to point to your GGUF model file"
-        log_info "Example: -e MODEL_PATH=/models/your-model.gguf"
-        validation_failed=true
+        log_warning "MODEL_PATH not set - starting in no-model mode"
+        log_info "Use the Web UI Model Manager to download and select a model"
     fi
     
-    # Check if model file exists
+    # Check if model file exists (only when MODEL_PATH is set)
     if [ -n "$MODEL_PATH" ] && [ ! -f "$MODEL_PATH" ]; then
-        log_error "Model file not found at $MODEL_PATH"
-        log_info "Available files in /models:"
+        log_warning "Model file not found at $MODEL_PATH - falling back to no-model mode"
+        log_info "Use the Web UI Model Manager to download and select a model"
         if [ -d "/models" ]; then
+            log_info "Available files in /models:"
             ls -la /models/ 2>/dev/null || log_warning "Models directory is empty or not accessible"
         else
             log_warning "Models directory not mounted"
         fi
-        validation_failed=true
+        # Clear MODEL_PATH so inference_node enters no-model mode
+        unset MODEL_PATH
     fi
     
     # Validate model file format
@@ -239,14 +239,16 @@ perform_health_checks() {
         log_warning "Low memory available: ${available_memory}MB"
     fi
     
-    # Test model file accessibility
-    if [ -f "$MODEL_PATH" ]; then
+    # Test model file accessibility (skip in no-model mode)
+    if [ -n "$MODEL_PATH" ] && [ -f "$MODEL_PATH" ]; then
         if [ -r "$MODEL_PATH" ]; then
             log_success "Model file is readable"
         else
             log_error "Model file is not readable"
             exit 1
         fi
+    elif [ -z "$MODEL_PATH" ]; then
+        log_info "No-model mode: skipping model file check"
     fi
     
     # Test network connectivity (if bootstrap nodes specified)

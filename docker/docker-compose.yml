@@ -10,13 +10,15 @@ services:
       - "8000:8000"
       - "8001:8001"  # DHT port
     environment:
-      - MODEL_PATH=/models/model.gguf
       - PORT=8000
       - DHT_PORT=8001
       - NODE_ID=bootstrap-node
       - BOOTSTRAP_NODES=""
+      # MODEL_PATH is optional - set it if you have a model, omit for no-model mode
+      - MODEL_PATH=/models/model.gguf
     volumes:
       - ../models:/models
+      - llamanet-models:/root/.llamanet/models
     restart: unless-stopped
 
   # Additional inference nodes
