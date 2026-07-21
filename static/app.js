@@ -2813,8 +2813,354 @@ class LlamaNetUI {
     }
 }
 
+class ModelDownloaderUI {
+    constructor() {
+        this.baseUrl = window.location.origin;
+        this.searchResults = [];
+        this.activeDownloads = new Map();
+        this.localModels = [];
+        this.downloadEventSources = new Map();
+    }
+
+    async searchModels() {
+        const input = document.getElementById('modelSearchInput');
+        const query = input.value.trim();
+        if (!query) return;
+
+        const resultsDiv = document.getElementById('modelSearchResults');
+        resultsDiv.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Searching...</p></div>';
+
+        try {
+            const response = await fetch(`${this.baseUrl}/models/search?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            if (data.success && data.data) {
+                this.searchResults = data.data;
+                this.renderSearchResults();
+            } else {
+                resultsDiv.innerHTML = '<div class="alert alert-warning">No results found</div>';
+            }
+        } catch (error) {
+            resultsDiv.innerHTML = `<div class="alert alert-danger">Search failed: ${error.message}</div>`;
+        }
+    }
+
+    renderSearchResults() {
+        const resultsDiv = document.getElementById('modelSearchResults');
+        if (!this.searchResults.length) {
+            resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>No models found</p></div>';
+            return;
+        }
+        resultsDiv.innerHTML = this.searchResults.map(model => `
+            <div class="model-search-result-item border rounded p-3 mb-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1"><i class="fas fa-brain text-primary"></i> <span class="fw-bold">${this.escapeHtml(model.repo_id)}</span></h6>
+                        <div class="text-muted small mb-2">
+                            <span class="me-3"><i class="fas fa-download"></i> ${this.formatNumber(model.downloads)}</span>
+                            <span class="me-3"><i class="fas fa-heart"></i> ${this.formatNumber(model.likes)}</span>
+                            ${(model.tags || []).slice(0, 5).map(t => `<span class="badge bg-light text-dark me-1">${this.escapeHtml(t)}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-info" onclick="modelDownloader.showModelDetails('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-info-circle"></i> Details</button>
+                        <button class="btn btn-sm btn-primary" onclick="modelDownloader.showDownloadDialog('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-download"></i> Download</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async showModelDetails(repoId) {
+        const content = document.getElementById('modelDetailsContent');
+        content.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Loading...</p></div>';
+        const modal = new bootstrap.Modal(document.getElementById('modelDetailsModal'));
+        modal.show();
+
+        try {
+            const response = await fetch(`${this.baseUrl}/models/details/${encodeURIComponent(repoId)}`);
+            const data = await response.json();
+            if (data.success && data.data) {
+                const info = data.data;
+                const ggufFiles = info.gguf_files || [];
+                content.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-brain"></i> Model Overview</h6>
+                            <div class="network-detail-item">
+                                <strong>Repository:</strong> ${this.escapeHtml(repoId)}<br>
+                                <strong>Downloads:</strong> ${this.formatNumber(info.downloads || 0)}<br>
+                                <strong>Likes:</strong> ${this.formatNumber(info.likes || 0)}<br>
+                                <strong>SHA:</strong> <code>${(info.sha || '').substring(0, 12)}</code>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-file-archive"></i> GGUF Files (${ggufFiles.length})</h6>
+                            <div class="network-detail-item" style="max-height: 300px; overflow-y: auto;">
+                                ${ggufFiles.length > 0 ? ggufFiles.map(f => `
+                                    <div class="d-flex justify-content-between align-items-center mb-1 p-1 border-bottom">
+                                        <span class="small"><i class="fas fa-file"></i> ${this.escapeHtml(f)}</span>
+                                        ${['Q4_K_M','Q4_K_S','Q5_K_M'].some(p => f.toUpperCase().includes(p)) ? '<span class="badge bg-success">Recommended</span>' : ''}
+                                    </div>
+                                `).join('') : '<div class="text-muted">No GGUF files found</div>'}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-center">
+                        <div class="d-flex justify-content-center gap-2 align-items-center">
+                            <label class="form-label mb-0">Quantization:</label>
+                            <select id="detailQuantSelect" class="form-select form-select-sm" style="width: auto;">
+                                <option value="Q4_K_M">Q4_K_M (Recommended)</option>
+                                <option value="Q5_K_M">Q5_K_M</option>
+                                <option value="Q8_0">Q8_0 (Higher Quality)</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="bootstrap.Modal.getInstance(document.getElementById('modelDetailsModal')).hide(); modelDownloader.startDownload('${this.escapeHtml(repoId)}', document.getElementById('detailQuantSelect').value);">
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                    </div>`;
+            } else {
+                content.innerHTML = '<div class="alert alert-warning">Could not load details</div>';
+            }
+        } catch (error) {
+            content.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        }
+    }
+
+    showDownloadDialog(repoId) {
+        const quant = prompt(`Select quantization for ${repoId}:\n\n1. Q4_K_M (Recommended)\n2. Q5_K_M (Better quality)\n3. Q8_0 (High quality)\n\nEnter choice (default: Q4_K_M):`, 'Q4_K_M');
+        if (quant !== null) this.startDownload(repoId, quant.trim() || 'Q4_K_M');
+    }
+
+    async startDownload(repoId, quantization = 'Q4_K_M') {
+        try {
+            const response = await fetch(`${this.baseUrl}/models/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo_id: repoId, quantization })
+            });
+            const data = await response.json();
+            if (data.success && data.data) {
+                this.showToast('success', `Download started: ${repoId}:${quantization}`);
+                document.getElementById('downloads-tab').click();
+                this.trackDownloadProgress(data.data.download_id);
+            } else {
+                this.showToast('error', `Failed: ${data.message || 'Unknown error'}`);
+            }
+        } catch (error) {
+            this.showToast('error', `Download error: ${error.message}`);
+        }
+    }
+
+    trackDownloadProgress(downloadId) {
+        const existing = this.downloadEventSources.get(downloadId);
+        if (existing) existing.close();
+
+        const eventSource = new EventSource(`${this.baseUrl}/models/download/status?download_id=${downloadId}`);
+        this.downloadEventSources.set(downloadId, eventSource);
+
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'heartbeat') return;
+                this.activeDownloads.set(downloadId, data);
+                this.renderDownloads();
+
+                if (data.status === 'completed') {
+                    this.showToast('success', `Download complete: ${data.repo_id}`);
+                    eventSource.close();
+                    this.downloadEventSources.delete(downloadId);
+                    this.loadLocalModels();
+                } else if (data.status === 'failed' || data.status === 'cancelled') {
+                    this.showToast('error', `Download ${data.status}: ${data.error || data.repo_id}`);
+                    eventSource.close();
+                    this.downloadEventSources.delete(downloadId);
+                }
+            } catch (e) {
+                console.error('Download progress parse error:', e);
+            }
+        };
+        eventSource.onerror = () => { eventSource.close(); this.downloadEventSources.delete(downloadId); };
+    }
+
+    renderDownloads() {
+        const container = document.getElementById('activeDownloadsList');
+        const badge = document.getElementById('activeDownloadsBadge');
+        if (this.activeDownloads.size === 0) {
+            container.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-cloud-download-alt fa-2x mb-2"></i><p>No active downloads</p></div>';
+            badge.style.display = 'none';
+            return;
+        }
+        badge.style.display = 'inline';
+        badge.textContent = this.activeDownloads.size;
+
+        container.innerHTML = Array.from(this.activeDownloads.entries()).map(([id, dl]) => {
+            const percent = dl.percent || 0;
+            const isTerminal = ['completed', 'failed', 'cancelled'].includes(dl.status);
+            const progressClass = dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : '';
+            return `
+                <div class="download-item border rounded p-3 mb-2">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <strong><i class="fas fa-file-archive"></i> ${this.escapeHtml(dl.repo_id || id)}</strong>
+                            <span class="badge bg-secondary ms-2">${this.escapeHtml(dl.quantization || '')}</span>
+                            <span class="badge ${dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : 'bg-primary'} ms-1">${dl.status}</span>
+                        </div>
+                        ${!isTerminal ? `<button class="btn btn-sm btn-outline-danger" onclick="modelDownloader.cancelDownload('${id}')"><i class="fas fa-times"></i> Cancel</button>` : ''}
+                    </div>
+                    <div class="progress mb-1" style="height: 20px;">
+                        <div class="progress-bar progress-bar-striped ${!isTerminal ? 'progress-bar-animated' : ''} ${progressClass}" role="progressbar" style="width: ${percent}%">${percent}%</div>
+                    </div>
+                    <div class="small text-muted">
+                        ${this.formatBytes(dl.bytes_downloaded || 0)} / ${this.formatBytes(dl.total_bytes || 0)}
+                        ${!isTerminal ? ` &bull; ${this.formatBytes(dl.speed || 0)}/s` : ''}
+                        ${dl.error ? ` <span class="text-danger">&bull; ${this.escapeHtml(dl.error)}</span>` : ''}
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    async cancelDownload(downloadId) {
+        try {
+            await fetch(`${this.baseUrl}/models/download/${downloadId}`, { method: 'DELETE' });
+            this.activeDownloads.delete(downloadId);
+            this.renderDownloads();
+            this.showToast('info', 'Download cancelled');
+        } catch (error) {
+            this.showToast('error', `Cancel failed: ${error.message}`);
+        }
+    }
+
+    async loadLocalModels() {
+        const container = document.getElementById('localModelsList');
+        try {
+            const response = await fetch(`${this.baseUrl}/models/local`);
+            const data = await response.json();
+            if (data.success && data.data) {
+                this.localModels = data.data;
+                this.renderLocalModels(data.disk_usage);
+            } else {
+                container.innerHTML = '<div class="alert alert-warning">Could not load local models</div>';
+            }
+        } catch (error) {
+            container.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        }
+    }
+
+    renderLocalModels(diskUsage) {
+        const container = document.getElementById('localModelsList');
+        if (!this.localModels.length) {
+            container.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-hdd fa-2x mb-2"></i><p>No models downloaded yet</p><p class="small">Use the Search tab to find and download models</p></div>';
+            return;
+        }
+        const diskHtml = diskUsage ? `<div class="mb-3 p-2 bg-light rounded d-flex justify-content-between"><span><i class="fas fa-hdd"></i> ${this.escapeHtml(diskUsage.cache_dir)}</span><span><strong>${diskUsage.model_count}</strong> models &bull; <strong>${diskUsage.total_size_gb} GB</strong></span></div>` : '';
+        container.innerHTML = diskHtml + this.localModels.map(model => `
+            <div class="local-model-item border rounded p-3 mb-2 ${model.exists ? '' : 'border-warning'}">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1"><i class="fas fa-file-archive ${model.exists ? 'text-success' : 'text-warning'}"></i> ${this.escapeHtml(model.filename || model.repo_id)}</h6>
+                        <div class="small text-muted mb-1">
+                            <div><strong>Source:</strong> ${this.escapeHtml(model.repo_id)}</div>
+                            <div><strong>Size:</strong> ${model.size_gb} GB</div>
+                            ${model.exists ? '' : '<div class="text-warning"><i class="fas fa-exclamation-triangle"></i> File missing</div>'}
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        ${model.exists ? `<button class="btn btn-sm btn-primary" onclick="modelDownloader.selectModel('${this.escapeHtml(model.local_path)}')"><i class="fas fa-check"></i> Use</button>` : ''}
+                        <button class="btn btn-sm btn-outline-danger" onclick="modelDownloader.deleteModel('${this.escapeHtml(model.id)}')"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <div class="small text-muted mt-1"><code class="text-break">${this.escapeHtml(model.local_path)}</code></div>
+            </div>
+        `).join('');
+    }
+
+    async selectModel(modelPath) {
+        const overlay = document.getElementById('model-reload-overlay');
+        overlay.style.display = 'flex';
+        try {
+            const response = await fetch(`${this.baseUrl}/models/select`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_path: modelPath })
+            });
+            const data = await response.json();
+            if (data.success) {
+                this.showToast('success', data.message);
+                const managerModal = bootstrap.Modal.getInstance(document.getElementById('modelManagerModal'));
+                if (managerModal) managerModal.hide();
+                // Hide no-model banner if it was showing
+                const banner = document.getElementById('no-model-banner');
+                if (banner) banner.style.display = 'none';
+            } else {
+                this.showToast('error', `Failed: ${data.message}`);
+            }
+        } catch (error) {
+            this.showToast('error', `Error: ${error.message}`);
+        } finally {
+            overlay.style.display = 'none';
+        }
+    }
+
+    async deleteModel(modelId) {
+        if (!confirm('Delete this model from disk?')) return;
+        try {
+            const response = await fetch(`${this.baseUrl}/models/local/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (data.success) {
+                this.showToast('success', 'Model deleted');
+                this.loadLocalModels();
+            } else {
+                this.showToast('error', 'Failed to delete model');
+            }
+        } catch (error) {
+            this.showToast('error', `Error: ${error.message}`);
+        }
+    }
+
+    show() {
+        const modal = new bootstrap.Modal(document.getElementById('modelManagerModal'));
+        modal.show();
+        document.getElementById('local-tab').addEventListener('shown.bs.tab', () => this.loadLocalModels());
+        document.getElementById('downloads-tab').addEventListener('shown.bs.tab', () => this.renderDownloads());
+    }
+
+    showToast(type, message) {
+        if (typeof llamaNetUI !== 'undefined' && llamaNetUI.showToast) {
+            llamaNetUI.showToast(type, message);
+        }
+    }
+
+    formatNumber(num) {
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return num.toString();
+    }
+
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+}
+
 // Global functions for HTML event handlers
 let llamaNetUI;
+let modelDownloader;
+
+function showModelManager() {
+    if (!modelDownloader) {
+        modelDownloader = new ModelDownloaderUI();
+    }
+    modelDownloader.show();
+}
 
 // System Prompt Functions
 function toggleSystemPrompt() {
@@ -2925,6 +3271,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('🚀 Initializing LlamaNet UI...');
     
     llamaNetUI = new LlamaNetUI();
+    modelDownloader = new ModelDownloaderUI();
+
+    // Check if server is in no-model mode
+    try {
+        const healthResp = await fetch(`${window.location.origin}/health`);
+        if (healthResp.ok) {
+            const health = await healthResp.json();
+            if (health.status === 'no_model' || health.no_model_mode) {
+                const banner = document.getElementById('no-model-banner');
+                if (banner) banner.style.display = 'block';
+                setTimeout(() => showModelManager(), 500);
+            }
+        }
+    } catch (e) {
+        // Server might not be ready yet
+    }
     
     // Setup system prompt event listeners
     const presets = document.getElementById('system-prompt-presets');
