@@ -86,6 +86,32 @@ class RequestQueueManager:
                 
         logger.info("Request queue manager stopped")
         
+    async def set_reloading(self, is_reloading: bool):
+        """Set the reloading state - pauses/resumes request processing"""
+        self.reloading = is_reloading
+        if is_reloading:
+            logger.info("Request queue entering RELOADING state - new requests will wait")
+        else:
+            logger.info("Request queue exiting RELOADING state - resuming processing")
+
+    async def drain_active_requests(self, timeout: float = 30.0):
+        """Wait for in-flight requests to complete"""
+        if not self.processing_request:
+            logger.info("No active requests to drain")
+            return True
+
+        logger.info(f"Draining active request: {self.processing_request.request_id}")
+        start = time.time()
+        while self.processing_request and (time.time() - start) < timeout:
+            await asyncio.sleep(0.5)
+
+        if self.processing_request:
+            logger.warning(f"Drain timeout after {timeout}s - request still active")
+            return False
+
+        logger.info("All active requests drained successfully")
+        return True
+
     async def submit_request(self, 
                            request_type: str, 
                            request_data: Dict[str, Any],
