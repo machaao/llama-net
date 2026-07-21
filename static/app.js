@@ -1382,6 +1382,7 @@ class LlamaNetUI {
                             <div class="text-muted small">
                                 <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
                                 <div><i class="fas fa-clock"></i> Up: ${node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown'} | ${lastSeenText}</div>
+                                ${this.renderNodeMetricsBadge(node)}
                                 ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
                             </div>
                         </div>
