@@ -488,16 +488,31 @@ async def list_network_models():
             models_dict[model_name]["node_count"] += 1
             
             # Add node info with chat format if available
-            node_info = {
-                "node_id": node.node_id,
-                "ip": node.ip,
-                "port": node.port,
-                "load": node.load,
-                "tps": node.tps,
-                "last_seen": node.last_seen,
-                "ttft": getattr(node, 'ttft', None),
-                "latency": getattr(node, 'latency', None)
-            }
+            # For current node, use fresh local metrics (DHT data may be stale)
+            if not config.no_model_mode and node.node_id == config.node_id and llm:
+                fresh_metrics = llm.get_metrics()
+                node_info = {
+                    "node_id": node.node_id,
+                    "ip": node.ip,
+                    "port": node.port,
+                    "load": fresh_metrics.get('load', node.load),
+                    "tps": fresh_metrics.get('tps', node.tps),
+                    "uptime": fresh_metrics.get('uptime', node.uptime),
+                    "last_seen": int(time.time()),
+                    "ttft": fresh_metrics.get('ttft', 0),
+                    "latency": fresh_metrics.get('latency', 0)
+                }
+            else:
+                node_info = {
+                    "node_id": node.node_id,
+                    "ip": node.ip,
+                    "port": node.port,
+                    "load": node.load,
+                    "tps": node.tps,
+                    "last_seen": node.last_seen,
+                    "ttft": getattr(node, 'ttft', None),
+                    "latency": getattr(node, 'latency', None)
+                }
             
             # Try to get chat format info from the node
             try:

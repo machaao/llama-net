@@ -476,18 +476,38 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                                     logger.error(f"  This indicates port {http_port} belongs to a different node!")
                                     return None  # Reject this contact completely
                                 
-                                # Create NodeInfo with verified data
+                                # Fetch live metrics from /status endpoint
+                                node_load = 0.0
+                                node_tps = 0.0
+                                node_uptime = 0
+                                node_ttft = None
+                                node_latency = None
+                                try:
+                                    async with session.get(f"http://{contact.ip}:{http_port}/status") as status_resp:
+                                        if status_resp.status == 200:
+                                            status_data = await status_resp.json()
+                                            node_load = status_data.get('load', 0.0)
+                                            node_tps = status_data.get('tps', 0.0)
+                                            node_uptime = status_data.get('uptime', 0)
+                                            node_ttft = status_data.get('ttft', None)
+                                            node_latency = status_data.get('latency', None)
+                                except Exception as status_err:
+                                    logger.debug(f"Could not fetch /status for {contact.node_id[:8]}...: {status_err}")
+
+                                # Create NodeInfo with verified data including live metrics
                                 node_info = NodeInfo(
                                     node_id=contact.node_id,  # Use contact node_id as authoritative
                                     ip=contact.ip,
                                     port=http_port,
                                     model=info.get('model', 'unknown'),
-                                    load=info.get('load', 0.0),
-                                    tps=info.get('tps', 0.0),
-                                    uptime=info.get('uptime', 0),
+                                    load=node_load,
+                                    tps=node_tps,
+                                    uptime=node_uptime,
                                     last_seen=int(time.time()),
                                     event_driven=True,
-                                    change_reason='verified_http_discovery'
+                                    change_reason='verified_http_discovery',
+                                    ttft=node_ttft,
+                                    latency=node_latency
                                 )
                                 
                                 logger.info(f"✅ Got verified node info for {contact.node_id[:8]}... via HTTP on port {http_port} (attempt {attempt + 1})")
@@ -1004,28 +1024,53 @@ class EventBasedDHTDiscovery(DiscoveryInterface):
                 await asyncio.sleep(60)
 
     async def _get_updated_node_info(self, node_info: NodeInfo) -> Optional[NodeInfo]:
-        """Try to get updated node info via HTTP"""
+        """Try to get updated node info via HTTP including live metrics"""
         import aiohttp
         
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
-                async with session.get(f"http://{node_info.ip}:{node_info.port}/info") as resp:
-                    if resp.status == 200:
-                        info = await resp.json()
-                        
-                        # Update the node info with new data
-                        updated_info = NodeInfo(
-                            node_id=node_info.node_id,
-                            ip=node_info.ip,
-                            port=node_info.port,
-                            model=info.get('model', node_info.model),
-                            load=node_info.load,  # Keep current metrics
-                            tps=node_info.tps,
-                            uptime=node_info.uptime,
-                            last_seen=int(time.time())
-                        )
-                        
-                        return updated_info
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                # Fetch static info
+                info = {}
+                try:
+                    async with session.get(f"http://{node_info.ip}:{node_info.port}/info") as resp:
+                        if resp.status == 200:
+                            info = await resp.json()
+                except Exception:
+                    pass
+
+                # Fetch live metrics from /status
+                load = node_info.load
+                tps = node_info.tps
+                uptime = node_info.uptime
+                ttft = getattr(node_info, 'ttft', None)
+                latency = getattr(node_info, 'latency', None)
+                try:
+                    async with session.get(f"http://{node_info.ip}:{node_info.port}/status") as status_resp:
+                        if status_resp.status == 200:
+                            status_data = await status_resp.json()
+                            load = status_data.get('load', load)
+                            tps = status_data.get('tps', tps)
+                            uptime = status_data.get('uptime', uptime)
+                            ttft = status_data.get('ttft', ttft)
+                            latency = status_data.get('latency', latency)
+                except Exception:
+                    pass
+
+                # Update the node info with new data
+                updated_info = NodeInfo(
+                    node_id=node_info.node_id,
+                    ip=node_info.ip,
+                    port=node_info.port,
+                    model=info.get('model', node_info.model),
+                    load=load,
+                    tps=tps,
+                    uptime=uptime,
+                    last_seen=int(time.time()),
+                    ttft=ttft,
+                    latency=latency
+                )
+                
+                return updated_info
         except Exception as e:
             logger.debug(f"Failed to get updated info for {node_info.node_id[:8]}...: {e}")
         
