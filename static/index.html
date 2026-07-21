@@ -276,24 +276,26 @@
                     </ul>
                     <div class="tab-content p-3">
                         <div class="tab-pane fade show active" id="searchPanel">
-                            <div class="input-group mb-3">
-                                <input type="text" class="form-control" id="modelSearchInput"
-                                    placeholder="Search Hugging Face for GGUF models..."
-                                    onkeypress="if(event.key==='Enter') modelDownloader.searchModels()">
-                                <button class="btn btn-primary" onclick="modelDownloader.searchModels()">
-                                    <i class="fas fa-search"></i> Search
-                                </button>
+                            <div class="position-relative mb-3">
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                    <input type="text" class="form-control" id="modelSearchInput"
+                                        placeholder="Search models or browse trending..."
+                                        autocomplete="off">
+                                </div>
+                                <div id="searchAutocomplete" class="autocomplete-dropdown" style="display:none;"></div>
                             </div>
                             <div class="mb-2 d-flex gap-2 flex-wrap">
-                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='llama'; modelDownloader.searchModels()">Llama</button>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='mistral'; modelDownloader.searchModels()">Mistral</button>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='phi'; modelDownloader.searchModels()">Phi</button>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('modelSearchInput').value='qwen'; modelDownloader.searchModels()">Qwen</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="modelDownloader.quickSearch('llama')">Llama</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="modelDownloader.quickSearch('mistral')">Mistral</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="modelDownloader.quickSearch('phi')">Phi</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="modelDownloader.quickSearch('qwen')">Qwen</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="modelDownloader.quickSearch('')">Trending</button>
                             </div>
                             <div id="modelSearchResults" class="model-search-results">
                                 <div class="text-center text-muted py-4">
-                                    <i class="fas fa-search fa-2x mb-2"></i>
-                                    <p>Search for models to download</p>
+                                    <i class="fas fa-fire fa-2x mb-2"></i>
+                                    <p>Loading trending models...</p>
                                 </div>
                             </div>
                         </div>

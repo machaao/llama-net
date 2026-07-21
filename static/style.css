@@ -1286,3 +1286,52 @@ pre {
     border-color: var(--primary-color);
     color: white;
 }
+
+/* Autocomplete dropdown */
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1050;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-top: none;
+    border-radius: 0 0 0.375rem 0.375rem;
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.autocomplete-item {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
+    background-color: rgba(13, 110, 253, 0.08);
+}
+
+.autocomplete-item .repo-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #212529;
+}
+
+.autocomplete-item .repo-meta {
+    font-size: 0.75rem;
+    color: #6c757d;
+}
+
+.autocomplete-loading {
+    padding: 0.75rem 1rem;
+    text-align: center;
+    color: #6c757d;
+}

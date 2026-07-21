@@ -2858,45 +2858,87 @@ class ModelDownloaderUI {
         this.downloadEventSources = new Map();
     }
 
-    async searchModels() {
+    searchModels() {
         const input = document.getElementById('modelSearchInput');
         const query = input.value.trim();
-        if (!query) return;
+        this._debouncedSearch(query);
+    }
 
+    quickSearch(query) {
+        const input = document.getElementById('modelSearchInput');
+        input.value = query;
+        this._debouncedSearch(query);
+    }
+
+    _initSearchAutocomplete() {
+        const input = document.getElementById('modelSearchInput');
+        if (!input || this._autocompleteInitialized) return;
+        this._autocompleteInitialized = true;
+        this._searchTimer = null;
+        this._lastQuery = null;
+
+        input.addEventListener('input', () => {
+            const query = input.value.trim();
+            if (this._searchTimer) clearTimeout(this._searchTimer);
+            this._searchTimer = setTimeout(() => {
+                if (query !== this._lastQuery) {
+                    this._lastQuery = query;
+                    this._executeSearch(query);
+                }
+            }, 300);
+        });
+
+        input.addEventListener('focus', () => {
+            const dropdown = document.getElementById('searchAutocomplete');
+            if (dropdown && dropdown.children.length > 0) {
+                dropdown.style.display = 'block';
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('searchAutocomplete');
+            if (dropdown && !e.target.closest('#modelSearchInput') && !e.target.closest('#searchAutocomplete')) {
+                dropdown.style.display = 'none';
+            }
+        });
+    }
+
+    _debouncedSearch(query) {
+        if (this._searchTimer) clearTimeout(this._searchTimer);
+        this._lastQuery = query;
+        this._executeSearch(query);
+    }
+
+    async _executeSearch(query) {
         const resultsDiv = document.getElementById('modelSearchResults');
-        resultsDiv.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Searching...</p></div>';
+        const dropdown = document.getElementById('searchAutocomplete');
+        const isTrending = !query;
+
+        if (!query) {
+            resultsDiv.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Loading trending models...</p></div>';
+            if (dropdown) dropdown.style.display = 'none';
+        }
 
         try {
             const response = await fetch(`${this.baseUrl}/models/search?q=${encodeURIComponent(query)}`);
             const data = await response.json();
             if (data.success && data.data) {
                 this.searchResults = data.data;
-                this.renderSearchResults();
+                this.renderSearchResults(isTrending);
+                if (dropdown) dropdown.style.display = 'none';
             } else {
-                resultsDiv.innerHTML = '<div class="alert alert-warning">No results found</div>';
+                resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>No models found</p></div>';
             }
         } catch (error) {
-            resultsDiv.innerHTML = `<div class="alert alert-danger">Search failed: ${error.message}</div>`;
+            if (!isTrending) {
+                resultsDiv.innerHTML = `<div class="alert alert-danger">Search failed: ${error.message}</div>`;
+            }
         }
     }
 
     async loadTrendingModels() {
-        const resultsDiv = document.getElementById('modelSearchResults');
-        if (!resultsDiv) return;
-        resultsDiv.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Loading trending GGUF models...</p></div>';
-
-        try {
-            const response = await fetch(`${this.baseUrl}/models/search?q=`);
-            const data = await response.json();
-            if (data.success && data.data) {
-                this.searchResults = data.data;
-                this.renderSearchResults(true);
-            } else {
-                resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>Could not load trending models</p></div>';
-            }
-        } catch (error) {
-            resultsDiv.innerHTML = `<div class="alert alert-danger">Failed to load trending models: ${error.message}</div>`;
-        }
+        this._initSearchAutocomplete();
+        await this._executeSearch('');
     }
 
     renderSearchResults(isTrending = false) {
@@ -3190,8 +3232,8 @@ class ModelDownloaderUI {
         modal.show();
         document.getElementById('local-tab').addEventListener('shown.bs.tab', () => this.loadLocalModels());
         document.getElementById('downloads-tab').addEventListener('shown.bs.tab', () => this.renderDownloads());
-        // Auto-load trending models on open
         this.loadTrendingModels();
+        this._initSearchAutocomplete();
     }
 
     showToast(type, message) {
