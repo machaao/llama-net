@@ -334,7 +334,7 @@ class EventBasedDHTPublisher:
             return True
         
         # Check for significant changes in key metrics
-        for key in ['load', 'tps']:
+        for key in ['load', 'tps', 'ttft', 'latency']:
             if key in current_metrics and key in self.last_published_metrics:
                 old_value = self.last_published_metrics[key]
                 new_value = current_metrics[key]
@@ -394,6 +394,8 @@ class EventBasedDHTPublisher:
                 'uptime': metrics['uptime'],
                 'last_seen': int(time.time()),
                 'dht_port': self.config.dht_port,
+                'ttft': metrics.get('ttft', 0),
+                'latency': metrics.get('latency', 0),
                 'available_ips': available_ips,
                 'ip_types': ip_types,
                 'multi_ip_enabled': True,
@@ -475,6 +477,8 @@ class EventBasedDHTPublisher:
                 'uptime': metrics['uptime'],
                 'last_seen': int(time.time()),
                 'dht_port': self.config.dht_port,
+                'ttft': metrics.get('ttft', 0),
+                'latency': metrics.get('latency', 0),
                 'available_ips': available_ips,
                 'ip_types': ip_types,
                 'multi_ip_enabled': True,
@@ -600,9 +604,9 @@ class EventBasedDHTPublisher:
         """Broadcast node events via SSE with enhanced metadata"""
         try:
             # Import here to avoid circular imports
-            from inference_node.server import sse_handler
+            from inference_node.server import sse_manager as _sse_mgr
             
-            if sse_handler and hasattr(sse_handler, 'broadcast_event'):
+            if _sse_mgr:
                 # Enhanced event data
                 event_data = {
                     'node_info': node_info,
@@ -613,7 +617,7 @@ class EventBasedDHTPublisher:
                     'network_size': len(getattr(self, '_last_known_nodes', set()))
                 }
                 
-                await sse_handler.broadcast_event(event_type, event_data)
+                await _sse_mgr.broadcast_event(event_type, event_data)
                 logger.info(f"✅ Broadcasted {event_type} event: {node_info.get('node_id', 'unknown')[:12]}...")
             else:
                 logger.debug(f"SSE handler not available for {event_type}")

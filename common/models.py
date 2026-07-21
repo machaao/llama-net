@@ -26,6 +26,10 @@ class NodeInfo(BaseModel):
     ip_types: Optional[Dict[str, str]] = None  # IP classification (public/private/loopback)
     preferred_ip: Optional[str] = None  # Client's preferred IP after testing
     
+    # Performance metrics (rolling averages)
+    ttft: Optional[float] = None      # Average time-to-first-token in seconds
+    latency: Optional[float] = None   # Average end-to-end latency in seconds
+    
     # Additional metadata
     cpu_info: Optional[str] = None
     ram_total: Optional[int] = None

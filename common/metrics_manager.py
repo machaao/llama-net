@@ -15,6 +15,11 @@ class MetricsManager:
         self.request_count = 0
         self.active_requests = 0
         
+        # Rolling-window samples for TTFT and latency (last 100 requests)
+        self._ttft_samples: list = []
+        self._latency_samples: list = []
+        self._sample_window = 100
+        
     def get_comprehensive_metrics(self) -> Dict[str, Any]:
         """Get all metrics in one call"""
         return {
@@ -33,7 +38,9 @@ class MetricsManager:
             "uptime": uptime,
             "load": round(load, 2),
             "tps": round(tps, 2),
-            "total_tokens": self.total_tokens_generated
+            "total_tokens": self.total_tokens_generated,
+            "ttft": round(self.get_avg_ttft(), 3),
+            "latency": round(self.get_avg_latency(), 3)
         }
     
     def get_system_metrics(self) -> Dict[str, Any]:
@@ -92,6 +99,30 @@ class MetricsManager:
         self.active_requests = max(0, self.active_requests - 1)
         self.total_tokens_generated += tokens_generated
         self.total_generation_time += generation_time
+    
+    def record_ttft(self, ttft_seconds: float):
+        """Record a time-to-first-token sample"""
+        self._ttft_samples.append(ttft_seconds)
+        if len(self._ttft_samples) > self._sample_window:
+            self._ttft_samples.pop(0)
+    
+    def record_latency(self, latency_seconds: float):
+        """Record an end-to-end latency sample"""
+        self._latency_samples.append(latency_seconds)
+        if len(self._latency_samples) > self._sample_window:
+            self._latency_samples.pop(0)
+    
+    def get_avg_ttft(self) -> float:
+        """Get average time-to-first-token in seconds"""
+        if not self._ttft_samples:
+            return 0.0
+        return sum(self._ttft_samples) / len(self._ttft_samples)
+    
+    def get_avg_latency(self) -> float:
+        """Get average end-to-end latency in seconds"""
+        if not self._latency_samples:
+            return 0.0
+        return sum(self._latency_samples) / len(self._latency_samples)
     
     def is_overloaded(self, cpu_threshold: float = 80.0, 
                      memory_threshold: float = 85.0,

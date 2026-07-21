@@ -453,6 +453,10 @@ class LlamaWrapper:
             
             generation_time = time.time() - start_time
             
+            # Record TTFT and latency for non-streaming (TTFT ≈ latency for non-streaming)
+            self.metrics_manager.record_ttft(generation_time)
+            self.metrics_manager.record_latency(generation_time)
+            
             # Extract response with reasoning separation
             response_content = ""
             reasoning_content = ""
@@ -505,6 +509,7 @@ class LlamaWrapper:
         """Generate streaming chat completion with reasoning content separation"""
         self.metrics_manager.record_request_start()
         start_time = time.time()
+        first_token_time = None  # Track TTFT for streaming
         
         # Prepare stop tokens
         stop_tokens = normalize_stop_tokens(stop)
@@ -537,6 +542,12 @@ class LlamaWrapper:
                     if 'content' in delta and delta['content']:
                         content = delta['content']
                         total_tokens += 1
+                        
+                        # Record TTFT on first content token
+                        if first_token_time is None:
+                            first_token_time = time.time()
+                            self.metrics_manager.record_ttft(first_token_time - start_time)
+                        
                         accumulated_text += content
                         
                         # Check for message marker
@@ -626,6 +637,7 @@ class LlamaWrapper:
         finally:
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)
+            self.metrics_manager.record_latency(final_time)
         
     def generate(self, 
                 prompt: str, 
@@ -678,6 +690,7 @@ class LlamaWrapper:
         """Generate text with streaming support"""
         self.metrics_manager.record_request_start()
         start_time = time.time()
+        first_token_time = None
         
         # Normalize stop tokens for llama-cpp-python
         stop_tokens = normalize_stop_tokens(stop)
@@ -703,6 +716,12 @@ class LlamaWrapper:
                     choice = chunk['choices'][0]
                     if 'text' in choice and choice['text']:
                         total_tokens += 1
+                        
+                        # Record TTFT on first content token
+                        if first_token_time is None:
+                            first_token_time = time.time()
+                            self.metrics_manager.record_ttft(first_token_time - start_time)
+                        
                         accumulated_text += choice['text']
                         generation_time = time.time() - start_time
                         
@@ -720,6 +739,7 @@ class LlamaWrapper:
             # Update metrics using consolidated manager
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)
+            self.metrics_manager.record_latency(final_time)
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get metrics about the model using consolidated manager"""

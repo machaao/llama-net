@@ -1335,3 +1335,57 @@ pre {
     text-align: center;
     color: #6c757d;
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* NODE PERFORMANCE METRICS                                */
+/* ═══════════════════════════════════════════════════════ */
+
+.node-metrics-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+}
+
+.node-metric-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.75rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.6rem;
+    font-weight: 500;
+    color: #495057;
+    white-space: nowrap;
+    transition: all 0.3s ease;
+}
+
+.node-metric-badge i {
+    font-size: 0.55rem;
+    opacity: 0.7;
+}
+
+.node-metric-badge:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+}
+
+/* TPS specific - subtle green tint */
+.node-metric-badge:has(.fa-bolt) {
+    border-color: rgba(25, 135, 84, 0.3);
+    color: #198754;
+}
+
+/* TTFT specific - subtle blue tint */
+.node-metric-badge:has(.fa-stopwatch) {
+    border-color: rgba(13, 110, 253, 0.3);
+    color: #0d6efd;
+}
+
+/* Latency specific - subtle orange tint */
+.node-metric-badge:has(.fa-tachometer-alt) {
+    border-color: rgba(255, 193, 7, 0.4);
+    color: #997404;
+}
