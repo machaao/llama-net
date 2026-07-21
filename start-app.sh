@@ -179,33 +179,46 @@ start_cloudflare_tunnel() {
         echo "🌐 Starting Cloudflare tunnel: $EXISTING_TUNNEL"
         [ -n "$EXISTING_DOMAIN" ] && echo "   Domain: $EXISTING_DOMAIN"
         echo "   Config: $config_file"
+        echo "   Log: $tunnel_log"
+
+        # Pre-flight: verify credentials file exists
+        CRED_FILE=$(grep 'credentials-file:' "$config_file" 2>/dev/null | awk '{print $2}')
+        # Expand ~ if present
+        CRED_FILE_EXPANDED=$(eval echo "$CRED_FILE")
+        if [ -n "$CRED_FILE_EXPANDED" ] && [ ! -f "$CRED_FILE_EXPANDED" ]; then
+            echo "❌ Credentials file not found: $CRED_FILE_EXPANDED"
+            echo "   Check 'credentials-file' in $config_file"
+            echo "   Run: ls -la ~/.cloudflared/*.json"
+            return
+        fi
 
         cloudflared tunnel --config "$config_file" run > "$tunnel_log" 2>&1 &
         TUNNEL_PID=$!
 
-        # Wait for tunnel to connect — verify process stays alive
+        # Wait for tunnel to connect — use strict error matching
         local attempts=0
         local connected=false
-        while [ $attempts -lt 20 ]; do
+        while [ $attempts -lt 30 ]; do
             # Check if cloudflared is still running
             if ! kill -0 $TUNNEL_PID 2>/dev/null; then
                 echo ""
-                echo "❌ cloudflared exited unexpectedly. Last 20 lines of log:"
-                tail -20 "$tunnel_log"
+                echo "❌ cloudflared exited unexpectedly (exit code: $?). Log:"
+                cat "$tunnel_log"
                 break
             fi
 
+            # Success indicators
             if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
                grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
                 connected=true
                 break
             fi
 
-            # Check for errors
-            if grep -qi "error\|failed\|unable" "$tunnel_log" 2>/dev/null; then
+            # Only match FATAL/ERR level errors (not info messages containing "error")
+            if grep -qE "^.*(ERR |FTL |error failed to serve|couldn.t connect)" "$tunnel_log" 2>/dev/null; then
                 echo ""
-                echo "❌ cloudflared error detected:"
-                grep -i "error\|failed\|unable" "$tunnel_log" | tail -5
+                echo "❌ cloudflared fatal error detected:"
+                tail -10 "$tunnel_log"
                 break
             fi
 
@@ -217,7 +230,15 @@ start_cloudflare_tunnel() {
         if [ "$connected" = "true" ] && [ -n "$EXISTING_DOMAIN" ]; then
             TUNNEL_URL="https://${EXISTING_DOMAIN}"
         elif [ "$connected" = "false" ]; then
-            echo "⚠️  Tunnel may not have connected. Check log: $tunnel_log"
+            echo "⚠️  Tunnel may not have connected after ${attempts}s."
+            echo "   Log output:"
+            tail -20 "$tunnel_log"
+            echo ""
+            echo "   Troubleshooting:"
+            echo "   1. Verify credentials: ls -la $CRED_FILE_EXPANDED"
+            echo "   2. Verify tunnel exists: cloudflared tunnel list"
+            echo "   3. Verify DNS: dig $EXISTING_DOMAIN"
+            echo "   4. Try manually: cloudflared tunnel --config $config_file run"
         fi
 
     # ── Quick temporary tunnel (no config.yml) ──
