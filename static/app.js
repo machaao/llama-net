@@ -542,6 +542,10 @@ class LlamaNetUI {
                 gpu_info: nodeData.gpu_info || null,
                 context_size: nodeData.context_size || null,
                 
+                // Performance metrics from node
+                ttft: parseFloat(nodeData.ttft) || null,
+                latency: parseFloat(nodeData.latency) || null,
+                
                 // UI validation metadata
                 validated: true,
                 validation_timestamp: Date.now()
@@ -730,6 +734,7 @@ class LlamaNetUI {
                             <div class="text-muted small">
                                 <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
                                 <div><i class="fas fa-clock"></i> Up: ${uptimeText} | ${lastSeenText}</div>
+                                ${this.renderNodeMetricsBadge(node)}
                                 ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
                             </div>
                         </div>
@@ -747,6 +752,29 @@ class LlamaNetUI {
         if (diff < 60) return `${Math.floor(diff)}s ago`;
         if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
         return `${Math.floor(diff / 3600)}h ago`;
+    }
+    
+    renderNodeMetricsBadge(node) {
+        const parts = [];
+        
+        // TPS (always show, even if 0)
+        const tps = typeof node.tps === 'number' ? node.tps : parseFloat(node.tps) || 0;
+        parts.push(`<span class="node-metric-badge"><i class="fas fa-bolt"></i> ${tps.toFixed(1)} TPS</span>`);
+        
+        // TTFT (show if > 0)
+        const ttft = typeof node.ttft === 'number' ? node.ttft : parseFloat(node.ttft);
+        if (ttft && ttft > 0) {
+            parts.push(`<span class="node-metric-badge"><i class="fas fa-stopwatch"></i> ${ttft < 1 ? (ttft * 1000).toFixed(0) + 'ms' : ttft.toFixed(2) + 's'} TTFT</span>`);
+        }
+        
+        // Latency (show if > 0)
+        const latency = typeof node.latency === 'number' ? node.latency : parseFloat(node.latency);
+        if (latency && latency > 0) {
+            parts.push(`<span class="node-metric-badge"><i class="fas fa-tachometer-alt"></i> ${latency < 1 ? (latency * 1000).toFixed(0) + 'ms' : latency.toFixed(2) + 's'} Latency</span>`);
+        }
+        
+        if (parts.length === 0) return '';
+        return `<div class="node-metrics-container">${parts.join('')}</div>`;
     }
     
     calculateNetworkHealth(avgLoadOrSummary, nodeCount) {
