@@ -178,20 +178,37 @@ fi
 start_cloudflare_tunnel() {
     local port=$1
     local tunnel_log="/tmp/llamanet_tunnel_$$.log"
+    local cloudflared_dir="$HOME/.cloudflared"
+    local config_file="$cloudflared_dir/config.yml"
 
     echo ""
-    if [ -n "$TUNNEL_NAME" ]; then
-        echo "🌐 Starting named Cloudflare tunnel: $TUNNEL_NAME"
-        [ -n "$TUNNEL_DOMAIN" ] && echo "🌐 Custom domain: $TUNNEL_DOMAIN"
 
-        # Auto-generate config.yml for named tunnels if it doesn't exist
-        local cloudflared_dir="$HOME/.cloudflared"
-        local config_file="$cloudflared_dir/config.yml"
+    # ── MODE 1: Existing config.yml → just run it ──
+    if [ -f "$config_file" ]; then
+        echo "🌐 Starting Cloudflare tunnel with existing config"
+        echo "   Config: $config_file"
 
-        if [ ! -f "$config_file" ]; then
-            echo "📝 Generating cloudflared config at $config_file"
-            mkdir -p "$cloudflared_dir"
-            cat > "$config_file" << CFGEOF
+        # Extract tunnel name from config.yml (the 'tunnel:' field)
+        EXISTING_TUNNEL=$(grep '^tunnel:' "$config_file" 2>/dev/null | awk '{print $2}')
+
+        if [ -z "$EXISTING_TUNNEL" ]; then
+            echo "❌ No 'tunnel:' field found in $config_file"
+            exit 1
+        fi
+
+        echo "   Tunnel: $EXISTING_TUNNEL"
+        cloudflared tunnel --config "$config_file" run > "$tunnel_log" 2>&1 &
+        TUNNEL_PID=$!
+        TUNNEL_NAME="$EXISTING_TUNNEL"
+
+    # ── MODE 2: Named tunnel args provided → generate config then run ──
+    elif [ -n "$TUNNEL_NAME" ]; then
+        echo "🌐 Creating Cloudflare tunnel config: $TUNNEL_NAME"
+        [ -n "$TUNNEL_DOMAIN" ] && echo "   Domain: $TUNNEL_DOMAIN"
+
+        mkdir -p "$cloudflared_dir"
+
+        cat > "$config_file" << CFGEOF
 tunnel: $TUNNEL_NAME
 credentials-file: $cloudflared_dir/$TUNNEL_NAME.json
 
@@ -200,36 +217,13 @@ ingress:
     service: http://localhost:$port
   - service: http_status:404
 CFGEOF
-            echo "✅ Config generated: $config_file"
-            echo "   Ingress: ${TUNNEL_DOMAIN:-$TUNNEL_NAME.llamanet.app} → http://localhost:$port"
-        else
-            echo "ℹ️  Using existing config: $config_file"
-        fi
+        echo "✅ Config generated: $config_file"
+        echo "   Ingress: ${TUNNEL_DOMAIN:-$TUNNEL_NAME.llamanet.app} → http://localhost:$port"
 
-        # Run named tunnel with config
         cloudflared tunnel --config "$config_file" run "$TUNNEL_NAME" > "$tunnel_log" 2>&1 &
         TUNNEL_PID=$!
 
-        # Wait for cloudflared to establish connection
-        local attempts=0
-        while [ $attempts -lt 20 ]; do
-            if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
-               grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
-                break
-            fi
-            sleep 1
-            attempts=$((attempts + 1))
-        done
-
-        # Priority 1: Use explicit --tunnel-domain if provided
-        if [ -n "$TUNNEL_DOMAIN" ]; then
-            TUNNEL_URL="https://${TUNNEL_DOMAIN}"
-        else
-            # Priority 2: Use hostname from config or fallback
-            TUNNEL_URL="https://${TUNNEL_NAME}.llamanet.app"
-        fi
-
-        export LLAMANET_TUNNEL_NAME="$TUNNEL_NAME"
+    # ── MODE 3: Quick temporary tunnel ──
     else
         echo "🌐 Starting quick Cloudflare tunnel on port $port"
         cloudflared tunnel --url "http://localhost:$port" > "$tunnel_log" 2>&1 &
@@ -242,7 +236,43 @@ CFGEOF
             sleep 0.5
             attempts=$((attempts + 1))
         done
+
+        if [ -n "$TUNNEL_URL" ]; then
+            export LLAMANET_TUNNEL_URL="$TUNNEL_URL"
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════╗"
+            echo "║  🌍 Cloudflare Tunnel Active                                ║"
+            echo "║                                                              ║"
+            echo "║  Public URL: $TUNNEL_URL"
+            echo "║                                                              ║"
+            echo "║  Share this URL to access LlamaNet from anywhere.            ║"
+            echo "╚══════════════════════════════════════════════════════════════╝"
+            echo ""
+        else
+            echo "⚠️  Tunnel starting... URL will appear in logs: $tunnel_log"
+        fi
+        return
     fi
+
+    # ── Wait for named/config-based tunnel connection ──
+    local attempts=0
+    while [ $attempts -lt 20 ]; do
+        if grep -q "Registered" "$tunnel_log" 2>/dev/null || \
+           grep -q "connIndex" "$tunnel_log" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        attempts=$((attempts + 1))
+    done
+
+    # Resolve tunnel URL: explicit domain > config hostname > tunnel name
+    if [ -n "$TUNNEL_DOMAIN" ]; then
+        TUNNEL_URL="https://${TUNNEL_DOMAIN}"
+    elif [ -n "$TUNNEL_NAME" ]; then
+        TUNNEL_URL="https://${TUNNEL_NAME}.llamanet.app"
+    fi
+
+    export LLAMANET_TUNNEL_NAME="$TUNNEL_NAME"
 
     if [ -n "$TUNNEL_URL" ]; then
         export LLAMANET_TUNNEL_URL="$TUNNEL_URL"
