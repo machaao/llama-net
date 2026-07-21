@@ -2015,19 +2015,22 @@ async def network_events():
             }
             yield f"data: {json.dumps(connection_event)}\n\n"
             
-            # Send current network state
-            try:
-                current_nodes = await dht_discovery.get_nodes()
-                for node in current_nodes:
-                    initial_event = {
-                        "type": "node_joined",
-                        "timestamp": time.time(),
-                        "node_info": node.dict(),
-                        "connection_id": connection_id
-                    }
-                    yield f"data: {json.dumps(initial_event)}\n\n"
-            except Exception as e:
-                logger.warning(f"Failed to send initial nodes: {e}")
+            # Send current network state (only if DHT discovery is available)
+            if dht_discovery:
+                try:
+                    current_nodes = await dht_discovery.get_nodes()
+                    for node in current_nodes:
+                        initial_event = {
+                            "type": "node_joined",
+                            "timestamp": time.time(),
+                            "node_info": node.dict(),
+                            "connection_id": connection_id
+                        }
+                        yield f"data: {json.dumps(initial_event)}\n\n"
+                except Exception as e:
+                    logger.warning(f"Failed to send initial nodes: {e}")
+            else:
+                logger.debug("DHT discovery not available - skipping initial node broadcast")
             
             # Main event loop - pure SSE, no polling
             heartbeat_interval = 25  # Send heartbeat every 25 seconds
