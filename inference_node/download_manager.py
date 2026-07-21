@@ -47,10 +47,14 @@ class DownloadManager:
         self._cancel_flags: Dict[str, bool] = {}
 
     async def search_models(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
-        """Search Hugging Face for GGUF models"""
+        """Search Hugging Face for GGUF models. Empty query returns trending models."""
         import requests as req
         try:
-            url = f"https://huggingface.co/api/models?search={query}&limit={limit}&filter=gguf"
+            if query and query.strip():
+                url = f"https://huggingface.co/api/models?search={query}&limit={limit}&filter=gguf"
+            else:
+                url = f"https://huggingface.co/api/models?sort=trending&limit={limit}&filter=gguf&pipeline_tag=text-generation"
+            
             response = req.get(url, timeout=30)
             response.raise_for_status()
             models = response.json()

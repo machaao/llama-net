@@ -2880,13 +2880,33 @@ class ModelDownloaderUI {
         }
     }
 
-    renderSearchResults() {
+    async loadTrendingModels() {
+        const resultsDiv = document.getElementById('modelSearchResults');
+        if (!resultsDiv) return;
+        resultsDiv.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Loading trending GGUF models...</p></div>';
+
+        try {
+            const response = await fetch(`${this.baseUrl}/models/search?q=`);
+            const data = await response.json();
+            if (data.success && data.data) {
+                this.searchResults = data.data;
+                this.renderSearchResults(true);
+            } else {
+                resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>Could not load trending models</p></div>';
+            }
+        } catch (error) {
+            resultsDiv.innerHTML = `<div class="alert alert-danger">Failed to load trending models: ${error.message}</div>`;
+        }
+    }
+
+    renderSearchResults(isTrending = false) {
         const resultsDiv = document.getElementById('modelSearchResults');
         if (!this.searchResults.length) {
             resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>No models found</p></div>';
             return;
         }
-        resultsDiv.innerHTML = this.searchResults.map(model => `
+        const header = isTrending ? '<div class="mb-2"><span class="badge bg-primary me-1"><i class="fas fa-fire"></i> Trending</span><small class="text-muted">Popular GGUF models on Hugging Face</small></div>' : '';
+        resultsDiv.innerHTML = header + this.searchResults.map(model => `
             <div class="model-search-result-item border rounded p-3 mb-2">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1">
@@ -3170,6 +3190,8 @@ class ModelDownloaderUI {
         modal.show();
         document.getElementById('local-tab').addEventListener('shown.bs.tab', () => this.loadLocalModels());
         document.getElementById('downloads-tab').addEventListener('shown.bs.tab', () => this.renderDownloads());
+        // Auto-load trending models on open
+        this.loadTrendingModels();
     }
 
     showToast(type, message) {
