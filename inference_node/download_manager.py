@@ -50,25 +50,44 @@ class DownloadManager:
         """Search Hugging Face for GGUF models. Empty query returns trending models."""
         import requests as req
         try:
+            # Build search query - ensure "gguf" is in the search terms
             if query and query.strip():
-                url = f"https://huggingface.co/api/models?search={query}&limit={limit}&filter=gguf"
+                search_term = f"{query} gguf"
             else:
-                url = f"https://huggingface.co/api/models?sort=trending&limit={limit}&filter=gguf&pipeline_tag=text-generation"
-            
-            response = req.get(url, timeout=30)
+                search_term = "gguf"
+
+            url = "https://huggingface.co/api/models"
+            params = {
+                "search": search_term,
+                "sort": "trending",
+                "limit": limit * 2,  # Fetch extra since we filter client-side
+            }
+
+            response = req.get(url, params=params, timeout=30)
             response.raise_for_status()
             models = response.json()
 
+            # Filter client-side for models that have GGUF tags or gguf in the name
             results = []
             for model in models:
+                model_id = model.get("modelId", model.get("id", ""))
+                tags = [t.lower() for t in model.get("tags", [])]
+                has_gguf_tag = "gguf" in tags or "gguf" in model_id.lower()
+
+                if not has_gguf_tag:
+                    continue
+
                 results.append({
-                    "repo_id": model.get("modelId", model.get("id", "")),
+                    "repo_id": model_id,
                     "downloads": model.get("downloads", 0),
                     "likes": model.get("likes", 0),
                     "tags": model.get("tags", []),
                     "last_modified": model.get("lastModified", ""),
                     "pipeline_tag": model.get("pipeline_tag", ""),
                 })
+
+                if len(results) >= limit:
+                    break
 
             return results
         except Exception as e:
