@@ -38,15 +38,20 @@
         <div class="card mb-4">
             <div class="card-header"><h5 class="mb-0"><i class="fas fa-plus-circle"></i> Register a New Node</h5></div>
             <div class="card-body">
-                <p>Run this command to register your node with LlamaNet:</p>
+                <p>Clone the repo and start your node:</p>
                 <div class="code-block">
                     <div class="code-header"><span>Terminal</span><button class="btn btn-sm btn-outline-light" onclick="dashApp.copyRegisterCmd()"><i class="fas fa-copy"></i> Copy</button></div>
-                    <pre><code id="register-cmd">./start-app.sh run hf.co/user/Model:Q4_K_M --register https://llamanet.app</code></pre>
+                    <pre><code id="register-cmd">git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+./start-app.sh --tunnel --bootstrap-peers https://llamanet.app</code></pre>
                 </div>
-                <p class="mt-3 text-muted small">Or with a tunnel for NAT'd nodes:</p>
+                <p class="mt-3 text-muted small">Or pre-load a model at startup:</p>
                 <div class="code-block">
-                    <div class="code-header"><span>Terminal (with tunnel)</span><button class="btn btn-sm btn-outline-light" onclick="dashApp.copyRegisterTunnelCmd()"><i class="fas fa-copy"></i> Copy</button></div>
-                    <pre><code id="register-tunnel-cmd">./start-app.sh run hf.co/user/Model:Q4_K_M --register https://llamanet.app --tunnel</code></pre>
+                    <div class="code-header"><span>Terminal (with model)</span><button class="btn btn-sm btn-outline-light" onclick="dashApp.copyRegisterTunnelCmd()"><i class="fas fa-copy"></i> Copy</button></div>
+                    <pre><code id="register-tunnel-cmd">./start-app.sh run hf.co/user/Model:Q4_K_M \
+  --tunnel \
+  --bootstrap-peers https://llamanet.app</code></pre>
                 </div>
             </div>
         </div>

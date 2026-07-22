@@ -71,8 +71,8 @@
         <div class="container">
             <h2 class="text-center mb-5">How It Works</h2>
             <div class="row g-4">
-                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">1</div><h5>Install</h5><p class="text-muted">pip install llamanet</p></div></div>
-                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">2</div><h5>Run a Model</h5><p class="text-muted">llamanet run hf.co/user/Model:Q4_K_M</p></div></div>
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">1</div><h5>Clone &amp; Run</h5><p class="text-muted"><code>./start-app.sh --tunnel</code></p></div></div>
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">2</div><h5>Download a Model</h5><p class="text-muted">Search &amp; download via the built-in Web UI</p></div></div>
                 <div class="col-md-3"><div class="step-card text-center"><div class="step-number">3</div><h5>Get API Key</h5><p class="text-muted">Sign in with Google at llamanet.app</p></div></div>
                 <div class="col-md-3"><div class="step-card text-center"><div class="step-number">4</div><h5>Use the API</h5><p class="text-muted">OpenAI-compatible, auto-routed</p></div></div>
             </div>
@@ -117,12 +117,12 @@ for chunk in response:
         <div class="container">
             <h2 class="text-center mb-5">Features</h2>
             <div class="row g-4">
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-rocket fa-2x text-primary mb-3"></i><h5>No-Model Mode</h5><p class="text-muted small">Start instantly, download models via Web UI</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-sync fa-2x text-primary mb-3"></i><h5>Hot Reload</h5><p class="text-muted small">Switch models without restarting your node</p></div></div>
                 <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-exchange-alt fa-2x text-primary mb-3"></i><h5>OpenAI Compatible</h5><p class="text-muted small">Drop-in replacement for any OpenAI client</p></div></div>
                 <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-globe fa-2x text-primary mb-3"></i><h5>Free Public URLs</h5><p class="text-muted small">Automatic Cloudflare tunnels, zero config</p></div></div>
-                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-search fa-2x text-primary mb-3"></i><h5>Model Discovery</h5><p class="text-muted small">Search and connect to models across the network</p></div></div>
-                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-sync fa-2x text-primary mb-3"></i><h5>Hot Reload</h5><p class="text-muted small">Switch models without restarting your node</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-search fa-2x text-primary mb-3"></i><h5>Model Manager</h5><p class="text-muted small">Search Hugging Face, download with progress tracking</p></div></div>
                 <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-brain fa-2x text-primary mb-3"></i><h5>Reasoning Support</h5><p class="text-muted small">DeepSeek-R1, Qwen reasoning models</p></div></div>
-                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-globe fa-2x text-primary mb-3"></i><h5>Gateway Routing</h5><p class="text-muted small">Central gateway with automatic node discovery</p></div></div>
                 <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-balance-scale fa-2x text-primary mb-3"></i><h5>Load Balancing</h5><p class="text-muted small">Auto-route to the best available node</p></div></div>
                 <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-microchip fa-2x text-primary mb-3"></i><h5>GPU Auto-detect</h5><p class="text-muted small">NVIDIA, Apple Silicon, CPU fallback</p></div></div>
             </div>
