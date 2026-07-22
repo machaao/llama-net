@@ -64,12 +64,24 @@ TUNNEL_PID=""
 TUNNEL_URL=""
 
 REMAINING_ARGS=""
+BOOTSTRAP_PEERS_VALUE=""
+SKIP_NEXT=false
 for arg in "$@"; do
+    if [ "$SKIP_NEXT" = "true" ]; then
+        SKIP_NEXT=false
+        continue
+    fi
     case "$arg" in
         --tunnel) ENABLE_TUNNEL=true ;;
+        --bootstrap-peers)
+            # Capture the next argument as the value
+            BOOTSTRAP_PEERS_VALUE="$2"
+            SKIP_NEXT=true
+            ;;
         *) REMAINING_ARGS="$REMAINING_ARGS $arg" ;;
     esac
 done
+[ -n "$BOOTSTRAP_PEERS_VALUE" ] && export BOOTSTRAP_PEERS="$BOOTSTRAP_PEERS_VALUE"
 [ "$ENABLE_CLOUDFLARE_TUNNEL" = "true" ] && ENABLE_TUNNEL=true
 set -- $REMAINING_ARGS
 
@@ -302,6 +314,8 @@ start_cloudflare_tunnel() {
 
     if [ -n "$TUNNEL_URL" ]; then
         export LLAMANET_TUNNEL_URL="$TUNNEL_URL"
+        # Write tunnel URL to file so the Python process can discover it
+        echo "$TUNNEL_URL" > /tmp/llamanet_tunnel_url
         echo ""
         echo "╔══════════════════════════════════════════════════════════════╗"
         echo "║  🌍 Cloudflare Tunnel Active                                ║"
@@ -407,6 +421,10 @@ if [ -n "$DEFAULT_PUBLIC_IP" ]; then
     ARGS="$ARGS --public-ip $DEFAULT_PUBLIC_IP"
 fi
 
+if [ -n "$DEFAULT_BOOTSTRAP_PEERS" ]; then
+    ARGS="$ARGS --bootstrap-peers $DEFAULT_BOOTSTRAP_PEERS"
+fi
+
 echo "🔧 Configuration:"
 if [ -n "$DEFAULT_MODEL_PATH" ]; then
     echo "   Model: $DEFAULT_MODEL_PATH"
@@ -418,6 +436,7 @@ echo "   HTTP Port: $DEFAULT_PORT"
 echo "   DHT Port: $DEFAULT_DHT_PORT"
 echo "   Node ID: ${DEFAULT_NODE_ID:-auto-generated}"
 echo "   Bootstrap Nodes: ${DEFAULT_BOOTSTRAP_NODES:-none (bootstrap mode)}"
+echo "   Bootstrap Peers: ${DEFAULT_BOOTSTRAP_PEERS:-none}"
 echo "   Public IP: ${DEFAULT_PUBLIC_IP:-auto-detect}"
 
 # Start the inference node

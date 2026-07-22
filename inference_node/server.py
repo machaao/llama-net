@@ -67,11 +67,36 @@ _peer_registry: Dict[str, Dict[str, Any]] = {}
 gossip_task = None
 
 
+_tunnel_url_cache = None
+
 def _get_own_url() -> str:
     """Get this node's public URL, preferring tunnel URL over IP-based URL"""
+    global _tunnel_url_cache
+    
+    # Return cached tunnel URL if we have one
+    if _tunnel_url_cache:
+        return _tunnel_url_cache.rstrip("/")
+    
+    # Check env var
     tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
     if tunnel_url:
+        _tunnel_url_cache = tunnel_url
         return tunnel_url.rstrip("/")
+    
+    # Check tunnel URL file (written by start-app.sh after tunnel starts)
+    tunnel_url_file = "/tmp/llamanet_tunnel_url"
+    try:
+        if os.path.exists(tunnel_url_file):
+            with open(tunnel_url_file, "r") as f:
+                url = f.read().strip()
+                if url and url.startswith("http"):
+                    _tunnel_url_cache = url
+                    os.environ["LLAMANET_TUNNEL_URL"] = url
+                    logger.info(f"✅ Loaded tunnel URL from file: {url}")
+                    return url.rstrip("/")
+    except Exception as e:
+        logger.debug(f"Could not read tunnel URL file: {e}")
+    
     return f"http://{get_host_ip()}:{config.port}"
 
 class DiscoverySSEBridge(NodeEventListener):
@@ -185,17 +210,32 @@ async def _connect_bootstrap_peers(peers_str: str):
     """Connect to bootstrap peers via HTTP (for tunnel-connected nodes)"""
     peer_urls = [url.strip() for url in peers_str.split(",") if url.strip()]
 
-    # Wait for tunnel URL to be available (up to 45 seconds)
+    # Wait for tunnel URL to be available (up to 90 seconds)
+    # The tunnel starts AFTER the Python process, so we must poll both
+    # the env var and the file written by start-app.sh
     tunnel_wait_attempts = 0
-    while tunnel_wait_attempts < 45:
-        if os.environ.get("LLAMANET_TUNNEL_URL"):
-            logger.info(f"✅ Tunnel URL available: {os.environ.get('LLAMANET_TUNNEL_URL')}")
+    tunnel_url_file = "/tmp/llamanet_tunnel_url"
+    while tunnel_wait_attempts < 90:
+        tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
+        if not tunnel_url:
+            # Check file-based tunnel URL (set by start-app.sh after tunnel starts)
+            try:
+                if os.path.exists(tunnel_url_file):
+                    with open(tunnel_url_file, "r") as f:
+                        tunnel_url = f.read().strip()
+            except Exception:
+                pass
+        if tunnel_url:
+            os.environ["LLAMANET_TUNNEL_URL"] = tunnel_url
+            global _tunnel_url_cache
+            _tunnel_url_cache = tunnel_url
+            logger.info(f"✅ Tunnel URL available: {tunnel_url}")
             break
         await asyncio.sleep(1)
         tunnel_wait_attempts += 1
 
     if not os.environ.get("LLAMANET_TUNNEL_URL"):
-        logger.warning("⚠️ No tunnel URL after 45s — will publish IP-based URL (remote peers may not reach this node)")
+        logger.warning("⚠️ No tunnel URL after 90s — will publish IP-based URL (remote peers may not reach this node)")
 
     for url in peer_urls:
         try:
