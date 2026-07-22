@@ -191,6 +191,7 @@ class LandingApp {
                     <span class="model-stat"><i class="fas fa-bolt"></i> <span class="value">${(model.total_tps || 0).toFixed(1)}</span> TPS</span>
                     <span class="model-stat"><i class="fas fa-tachometer-alt"></i> <span class="value">${(model.avg_load || 0).toFixed(2)}</span> load</span>
                     ${model.avg_ttft ? `<span class="model-stat"><i class="fas fa-stopwatch"></i> <span class="value">${(model.avg_ttft * 1000).toFixed(0)}ms</span> TTFT</span>` : ''}
+                    ${(model.total_tokens || 0) > 0 ? `<span class="model-stat"><i class="fas fa-coins"></i> <span class="value">${this.formatTokens(model.total_tokens)}</span> Tokens</span>` : ''}
                 </div>${nodesHtml}</div>`;
         }).join('') + '</div>';
     }
