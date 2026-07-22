@@ -55,9 +55,7 @@ auth_mgr = None
 router = None
 registry = None
 sse_mgr = None
-auth_mgr = None
-router = None
-registry = None
+_heartbeat_last_seen_map = {}  # node_hash -> {last_seen, metrics}
 
 
 async def _heartbeat_monitor_loop():
