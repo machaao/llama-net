@@ -55,6 +55,131 @@ pip install -r requirements-inference.txt
                 </div>
             </div>
         </div>
+
+        <!-- Live API Tester -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-play-circle"></i> Try It — Live API Tester</h5>
+            </div>
+            <div class="card-body">
+                <div id="live-models-loading" class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="text-muted ms-2">Loading available models...</span>
+                </div>
+                <div id="live-models-content" style="display:none;">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold">Model</label>
+                            <select id="live-model-select" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Max Tokens</label>
+                            <input type="number" id="live-max-tokens" class="form-control form-control-sm" value="256" min="1" max="4096">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Temperature</label>
+                            <input type="number" id="live-temperature" class="form-control form-control-sm" value="0.7" min="0" max="2" step="0.1">
+                        </div>
+                    </div>
+                    <div id="live-model-info" class="mb-2 small text-muted"></div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold">Prompt</label>
+                        <textarea id="live-prompt" class="form-control form-control-sm" rows="3" placeholder="Type a message to test the API...">Explain quantum computing in one paragraph.</textarea>
+                    </div>
+                    <div class="d-flex gap-2 mb-3">
+                        <button class="btn btn-primary btn-sm" onclick="dashApp.sendLiveTest()" id="live-send-btn"><i class="fas fa-paper-plane"></i> Send</button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="dashApp.clearLiveTest()"><i class="fas fa-times"></i> Clear</button>
+                    </div>
+                    <div id="live-response" class="border rounded p-3 bg-light" style="min-height: 80px; display: none;">
+                        <div class="small fw-bold text-muted mb-2"><i class="fas fa-robot"></i> Response</div>
+                        <div id="live-response-text" class="markdown-content" style="white-space: pre-wrap;"></div>
+                        <div id="live-response-meta" class="small text-muted mt-2"></div>
+                    </div>
+                </div>
+                <div id="live-models-empty" style="display:none;" class="text-center text-muted py-3">
+                    <i class="fas fa-server fa-2x mb-2"></i>
+                    <p>No models available on the network yet.</p>
+                    <p class="small">Register a node above to get started.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inference Examples -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-code"></i> API Usage Examples</h5>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs mb-3" id="exampleTabs">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#exPython">Python</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#exCurl">curl</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#exJS">JavaScript</a></li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="exPython">
+                        <div class="code-block">
+                            <div class="code-header"><span>Python</span><button class="btn btn-sm btn-outline-light" onclick="dashApp.copyExample(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                            <pre><code>import openai
+
+client = openai.OpenAI(
+    base_url="https://llamanet.app/v1",
+    api_key="ln-your-api-key"
+)
+
+# Streaming chat completion
+response = client.chat.completions.create(
+    model="MODEL_NAME",
+    messages=[{"role": "user", "content": "Hello!"}],
+    stream=True,
+    max_tokens=512,
+    temperature=0.7
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")</code></pre>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="exCurl">
+                        <div class="code-block">
+                            <div class="code-header"><span>curl</span><button class="btn btn-sm btn-outline-light" onclick="dashApp.copyExample(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                            <pre><code>curl https://llamanet.app/v1/chat/completions \
+  -H "Authorization: Bearer ln-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "MODEL_NAME",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 512,
+    "temperature": 0.7,
+    "stream": false
+  }'</code></pre>
+                        </div>
+                    </div>
+                    <div class="tab-pane fade" id="exJS">
+                        <div class="code-block">
+                            <div class="code-header"><span>JavaScript</span><button class="btn btn-sm btn-outline-light" onclick="dashApp.copyExample(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                            <pre><code>import OpenAI from "openai";
+
+const client = new OpenAI({
+    baseURL: "https://llamanet.app/v1",
+    apiKey: "ln-your-api-key"
+});
+
+const response = await client.chat.completions.create({
+    model: "MODEL_NAME",
+    messages: [{ role: "user", content: "Hello!" }],
+    stream: true,
+    max_tokens: 512
+});
+
+for await (const chunk of response) {
+    process.stdout.write(chunk.choices[0]?.delta?.content || "");
+}</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/dashboard.js"></script>
