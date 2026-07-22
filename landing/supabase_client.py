@@ -202,6 +202,8 @@ class SupabaseManager:
                 model["avg_ttft"] = sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes) if nodes else 0
                 model["best_node"] = min(nodes, key=lambda n: n.get("load", 1))
                 model["nodes"] = nodes
+            # Remove stale model entries left behind by hot-reload (0 nodes after model switch)
+            models = {slug: m for slug, m in models.items() if m["node_count"] > 0}
             return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
         except Exception as e:
             logger.error(f"Error listing active models: {e}")
