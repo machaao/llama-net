@@ -21,8 +21,8 @@ fi
 if [ "$LLAMANET_MODE" = "landing" ]; then
     echo "🌐 Starting llamanet.app gateway..."
 
-    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
-        echo "❌ SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for gateway mode"
+    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SECRET_KEY" ]; then
+        echo "❌ SUPABASE_URL and SUPABASE_SECRET_KEY must be set for gateway mode"
         exit 1
     fi
 

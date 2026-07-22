@@ -16,10 +16,10 @@ class SupabaseManager:
 
         self.url = os.environ.get("SUPABASE_URL", "")
         self.anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
-        self.service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        self.service_key = os.environ.get("SUPABASE_SECRET_KEY", "")
 
         if not self.url or not self.service_key:
-            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
+            raise ValueError("SUPABASE_URL and SUPABASE_SECRET_KEY must be set")
 
         self.client: Client = create_client(self.url, self.service_key)
         logger.info("Supabase client initialized")

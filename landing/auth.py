@@ -16,7 +16,7 @@ class AuthManager:
     def __init__(self, supabase_manager):
         self.supabase = supabase_manager
         self.supabase_url = os.environ.get("SUPABASE_URL", "")
-        self.supabase_anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+        self.supabase_anon_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
 
     async def get_current_user(self, request: Request) -> Optional[Dict[str, Any]]:
         try:
