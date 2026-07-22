@@ -60,27 +60,66 @@ router = None
 registry = None
 
 
-async def cleanup_stale_loop():
+async def _heartbeat_monitor_loop():
+    """Monitor heartbeat timestamps and detect stale nodes + metric changes — event-driven"""
+    STALE_THRESHOLD = 90  # seconds without heartbeat = stale
     while True:
         try:
-            await asyncio.sleep(60)
-            if not registry or not sse_mgr:
+            await asyncio.sleep(15)
+            if not supabase_mgr:
                 continue
-            before = {n["node_hash"]: n for n in supabase_mgr.search_nodes(status="active", limit=500)}
-            cleaned = await registry.cleanup_stale()
-            if cleaned > 0:
-                after = {n["node_hash"] for n in supabase_mgr.search_nodes(status="active", limit=500)}
-                for node_hash, node in before.items():
-                    if node_hash not in after:
-                        await sse_mgr.broadcast("node_left", {
-                            "node_hash": node_hash,
-                            "model_name": node.get("model_name", "unknown"),
-                        })
-                        logger.info(f"📡 Broadcast node_left for stale node {node_hash[:8]}")
+
+            active_nodes = supabase_mgr.search_nodes(status="active", limit=500)
+            current_time = time.time()
+
+            for node in active_nodes:
+                node_hash = node["node_hash"]
+                hb = _heartbeat_last_seen_map.get(node_hash)
+
+                if hb:
+                    elapsed = current_time - hb["last_seen"]
+
+                    if elapsed > STALE_THRESHOLD:
+                        logger.info(f"🕐 Node {node_hash} stale (no heartbeat for {elapsed:.0f}s)")
+
+                        supabase_mgr.deregister_node(node_hash)
+                        _heartbeat_last_seen_map.pop(node_hash, None)
+
+                        if sse_mgr:
+                            await sse_mgr.broadcast("node_left", {
+                                "node_hash": node_hash,
+                                "model_name": node.get("model_name", "unknown"),
+                                "reason": "heartbeat_timeout",
+                                "last_seen": hb["last_seen"]
+                            })
+                            logger.info(f"📡 Broadcast node_left for stale node {node_hash[:8]}")
+
+                elif node.get("last_heartbeat"):
+                    from datetime import datetime
+                    try:
+                        hb_time = datetime.fromisoformat(node["last_heartbeat"].replace("Z", "+00:00"))
+                        if current_time - hb_time.timestamp() > 120:
+                            logger.info(f"🕐 DB-stale node {node_hash}")
+                            supabase_mgr.deregister_node(node_hash)
+
+                            if sse_mgr:
+                                await sse_mgr.broadcast("node_left", {
+                                    "node_hash": node_hash,
+                                    "model_name": node.get("model_name", "unknown"),
+                                    "reason": "db_heartbeat_timeout"
+                                })
+                    except Exception:
+                        pass
+
+            active_hashes = {n["node_hash"] for n in active_nodes}
+            stale_keys = [k for k in _heartbeat_last_seen_map if k not in active_hashes]
+            for k in stale_keys:
+                _heartbeat_last_seen_map.pop(k, None)
+
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(f"Cleanup error: {e}")
+            logger.error(f"Heartbeat monitor error: {e}")
 
 
 @asynccontextmanager
@@ -98,7 +137,7 @@ async def lifespan(app: FastAPI):
             logger.info("Cloudflare tunnel provisioning enabled")
         else:
             logger.warning("Cloudflare not configured - tunnel provisioning disabled")
-        cleanup_task = asyncio.create_task(cleanup_stale_loop())
+        cleanup_task = asyncio.create_task(_heartbeat_monitor_loop())
         logger.info("✅ Gateway started successfully")
     except Exception as e:
         logger.error(f"Failed to start gateway: {e}")
@@ -146,6 +185,18 @@ async def network_events():
             models = supabase_mgr.list_active_models()
             stats = supabase_mgr.get_network_stats()
             yield f"data: {json.dumps({'type': 'initial_state', 'models': models, 'stats': stats})}\n\n"
+
+            # Send recent heartbeat state for nodes to provide current metrics
+            try:
+                recent_nodes = supabase_mgr.search_nodes(status="active", limit=50)
+                for node in recent_nodes:
+                    node_hash = node.get("node_hash", "")
+                    hb = _heartbeat_last_seen_map.get(node_hash)
+                    if hb:
+                        yield f"data: {json.dumps({'type': 'node_updated', 'node_hash': node_hash, 'model_name': node.get('model_name', 'unknown'), 'metrics': hb.get('metrics', {})})}\n\n"
+            except Exception:
+                pass
+
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=25)
@@ -267,7 +318,44 @@ async def node_heartbeat(request: Request):
     if len(node_hash) > 12:
         import hashlib
         node_hash = hashlib.sha256(node_hash.encode()).hexdigest()[:12]
-    return {"success": await registry.heartbeat(node_hash, body.get("metrics", {}))}
+    metrics = body.get("metrics", {})
+
+    # Track heartbeat timestamps and detect significant metric changes
+    prev = _heartbeat_last_seen_map.get(node_hash, {})
+    prev_metrics = prev.get("metrics", {})
+
+    should_broadcast = False
+    if sse_mgr and metrics and prev_metrics:
+        for key in ["load", "tps"]:
+            old_val = prev_metrics.get(key, 0)
+            new_val = metrics.get(key, 0)
+            if old_val == 0 and new_val == 0:
+                continue
+            denom = max(abs(old_val), 0.01)
+            if abs(new_val - old_val) / denom > 0.30:
+                should_broadcast = True
+                break
+
+    _heartbeat_last_seen_map[node_hash] = {
+        "last_seen": time.time(),
+        "metrics": metrics
+    }
+
+    if should_broadcast and sse_mgr:
+        try:
+            node = supabase_mgr.client.table("nodes").select("*").eq(
+                "node_hash", node_hash
+            ).eq("status", "active").execute()
+            if node.data:
+                await sse_mgr.broadcast("node_updated", {
+                    "node_hash": node_hash,
+                    "model_name": node.data[0].get("model_name", "unknown"),
+                    "metrics": metrics
+                })
+        except Exception:
+            pass
+
+    return {"success": await registry.heartbeat(node_hash, metrics)}
 
 
 @app.delete("/api/nodes/{node_hash}")
@@ -365,6 +453,154 @@ async def unpublish_node(request: Request):
         return {"success": True, "node_hash": node_hash}
     except Exception as e:
         logger.error(f"Error in unpublish_node: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/nodes/event")
+async def publish_node_event(request: Request):
+    """Endpoint for inference nodes to publish state-change events (join/leave/update/peer_discovered)"""
+    try:
+        body = await request.json()
+        event_type = body.get("event_type", "")
+        node_id = body.get("node_id", "")
+
+        if not node_id or not event_type:
+            return JSONResponse(status_code=400, content={"error": "node_id and event_type required"})
+
+        node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
+        model_name = body.get("model", "unknown")
+        model_slug = model_name_to_slug(model_name)
+
+        if event_type == "node_joined":
+            system_user_id = "00000000-0000-0000-0000-000000000000"
+            try:
+                existing_user = supabase_mgr.get_user(system_user_id)
+                if not existing_user:
+                    supabase_mgr.client.table("users").upsert({
+                        "id": system_user_id, "email": "system@llamanet.app", "full_name": "LlamaNet System"
+                    }, on_conflict="id").execute()
+            except Exception:
+                pass
+
+            supabase_mgr.register_node(
+                user_id=system_user_id, node_hash=node_hash, model_name=model_name,
+                model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
+                port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
+                metrics=body.get("metrics", {})
+            )
+
+            _heartbeat_last_seen_map[node_hash] = {
+                "last_seen": time.time(),
+                "metrics": body.get("metrics", {})
+            }
+
+            if sse_mgr:
+                await sse_mgr.broadcast("node_joined", {
+                    "node_hash": node_hash, "model_name": model_name,
+                    "model_slug": model_slug, "url": body.get("url", ""),
+                    "ip": body.get("ip", ""), "port": body.get("port", 8000)
+                })
+            logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
+
+        elif event_type == "node_left":
+            supabase_mgr.deregister_node(node_hash)
+            _heartbeat_last_seen_map.pop(node_hash, None)
+
+            if sse_mgr:
+                await sse_mgr.broadcast("node_left", {
+                    "node_hash": node_hash, "model_name": model_name,
+                    "reason": body.get("reason", "node_event")
+                })
+            logger.info(f"📡 Node left via event: {node_hash} model={model_name}")
+
+        elif event_type == "node_updated":
+            supabase_mgr.update_node_metrics(node_hash, body.get("metrics", {}))
+
+            _heartbeat_last_seen_map[node_hash] = {
+                "last_seen": time.time(),
+                "metrics": body.get("metrics", {})
+            }
+
+            if sse_mgr:
+                await sse_mgr.broadcast("node_updated", {
+                    "node_hash": node_hash, "model_name": model_name,
+                    "metrics": body.get("metrics", {})
+                })
+
+        elif event_type == "peer_discovered":
+            if sse_mgr:
+                await sse_mgr.broadcast("peer_discovered", {
+                    "peer_node_id": body.get("peer_node_id", ""),
+                    "peer_url": body.get("peer_url", ""),
+                    "peer_model": body.get("peer_model", "unknown"),
+                    "discovered_by": node_id
+                })
+            logger.info(f"📡 Peer discovered via event: {body.get('peer_node_id', '')[:8]}...")
+
+        return {"success": True, "event_type": event_type, "node_hash": node_hash}
+    except Exception as e:
+        logger.error(f"Error in publish_node_event: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/nodes/notify")
+async def handle_peer_notification(request: Request):
+    """Endpoint for inference nodes to notify gateway about other peers they've discovered"""
+    try:
+        body = await request.json()
+        peers = body.get("peers", [])
+        notifier_node_id = body.get("notifier_node_id", "")
+
+        new_peers_count = 0
+        for peer in peers:
+            peer_url = peer.get("url", "")
+            peer_node_id = peer.get("node_id", "")
+            peer_model = peer.get("model", "unknown")
+
+            if not peer_url or not peer_node_id:
+                continue
+
+            peer_hash = hashlib.sha256(peer_node_id.encode()).hexdigest()[:12]
+
+            existing = supabase_mgr.client.table("nodes").select("node_hash").eq(
+                "node_hash", peer_hash
+            ).eq("status", "active").execute()
+
+            if not existing.data:
+                system_user_id = "00000000-0000-0000-0000-000000000000"
+                model_slug = model_name_to_slug(peer_model)
+
+                supabase_mgr.register_node(
+                    user_id=system_user_id, node_hash=peer_hash,
+                    model_name=peer_model, model_slug=model_slug,
+                    url=peer_url, ip=peer.get("ip", ""),
+                    port=peer.get("port", 8000),
+                    metrics=peer.get("metrics", {})
+                )
+
+                _heartbeat_last_seen_map[peer_hash] = {
+                    "last_seen": time.time(),
+                    "metrics": peer.get("metrics", {})
+                }
+
+                if sse_mgr:
+                    await sse_mgr.broadcast("node_joined", {
+                        "node_hash": peer_hash, "model_name": peer_model,
+                        "model_slug": model_slug, "url": peer_url,
+                        "discovered_by": notifier_node_id
+                    })
+
+                new_peers_count += 1
+                logger.info(f"📡 New peer registered via notification: {peer_hash} model={peer_model}")
+            else:
+                _heartbeat_last_seen_map[peer_hash] = {
+                    "last_seen": time.time(),
+                    "metrics": peer.get("metrics", {})
+                }
+
+        return {"success": True, "new_peers_count": new_peers_count}
+    except Exception as e:
+        logger.error(f"Error in handle_peer_notification: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
