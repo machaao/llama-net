@@ -195,6 +195,109 @@ The URL persists across restarts.
 | `/events/network` | GET | SSE stream for network events |
 | `/auth/google` | GET | Google OAuth login |
 
+## Setup
+
+### macOS
+
+**Apple Silicon (M1/M2/M3/M4)** — full GPU acceleration via Metal, no extra steps:
+
+```bash
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+```
+
+**Intel Macs** — Metal shaders in `llama-cpp-python` 0.3.x are incompatible with Intel GPUs.
+LlamaNet auto-detects Intel Macs and disables Metal at startup (CPU-only mode). No manual configuration needed.
+
+If you need to force it manually:
+
+```bash
+export LLAMA_NO_METAL=1
+sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+```
+
+You can also pass `--no-gpu` to the inference node directly:
+
+```bash
+python -m inference_node.server --no-gpu --tunnel --bootstrap-peers https://llamanet.app
+```
+
+### Linux
+
+Works on any Linux distro with Python 3.8+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
+
+```bash
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+```
+
+For CPU-only or non-NVIDIA setups:
+
+```bash
+N_GPU_LAYERS=0 sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+```
+
+### Cloud / Remote Operators
+
+Run a node on any VPS or cloud instance (AWS, GCP, Azure, Hetzner, etc.):
+
+```bash
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+  --tunnel \
+  --bootstrap-peers https://llamanet.app
+```
+
+**GPU instances:** Install NVIDIA drivers + CUDA toolkit before running. The node auto-detects GPU availability.
+
+**CPU instances:** Set `N_GPU_LAYERS=0` or use `--no-gpu`. Smaller models (≤3B parameters) work well on CPU.
+
+**Persistent tunnel:** For a stable URL across restarts, set up a named Cloudflare tunnel:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create my-node
+cloudflared tunnel route dns my-node node.mydomain.com
+sh start-app.sh run hf.co/user/Model:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
+```
+
+### Operating Your Own Rig
+
+For dedicated GPU machines (desktop, workstation, or server):
+
+1. **Clone and install:**
+   ```bash
+   git clone https://github.com/machaao/llama-net.git
+   cd llama-net
+   pip install -r requirements-inference.txt
+   ```
+
+2. **Start with a model:**
+   ```bash
+   sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+     --tunnel --bootstrap-peers https://llamanet.app
+   ```
+
+3. **Or start empty and download via Web UI:**
+   ```bash
+   sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+   ```
+   Open `http://localhost:8000` → Model Manager → search → download → chat.
+
+4. **Switch models at any time** via the Web UI without restarting.
+
+**Tips:**
+- Use `--ctx-size` to control context window (default: 4096)
+- Use `--gpu-layers -1` to offload all layers to GPU (default)
+- Use `--gpu-layers N` to split between GPU and CPU for large models
+- The node auto-generates a persistent ID stored in `~/.llamanet_node_id`
+
 ## Requirements
 
 - Python 3.8+
