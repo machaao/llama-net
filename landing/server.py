@@ -419,8 +419,6 @@ async def publish_node(request: Request):
                 "model_name": model_name,
                 "model_slug": model_slug,
                 "url": tunnel_url or body.get("url", ""),
-                "ip": body.get("ip", ""),
-                "port": body.get("port", 8000),
             })
 
         logger.info(f"{'Published' if is_new else 'Updated'} node {node_hash} model={model_name}")
@@ -502,7 +500,6 @@ async def publish_node_event(request: Request):
                 await sse_mgr.broadcast("node_joined", {
                     "node_hash": node_hash, "model_name": model_name,
                     "model_slug": model_slug, "url": body.get("url", ""),
-                    "ip": body.get("ip", ""), "port": body.get("port", 8000)
                 })
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
 
