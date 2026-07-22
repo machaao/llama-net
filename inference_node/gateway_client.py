@@ -123,8 +123,43 @@ class GatewayClient:
 
     async def heartbeat_loop(self):
         """Send heartbeats every 10 seconds. Auto-registers if tunnel URL appears late."""
+        last_heartbeat_time = time.time()
+
         while self.running:
             try:
+                # ── Wake-from-sleep detection ──
+                now = time.time()
+                elapsed_since_last = now - last_heartbeat_time
+
+                # If more than 60s passed since last heartbeat, system likely slept
+                if elapsed_since_last > 60 and last_heartbeat_time > 0:
+                    logger.warning(
+                        f"⏰ Detected {elapsed_since_last:.0f}s gap — "
+                        f"system may have hibernated. Re-registering..."
+                    )
+
+                    # Force re-detect tunnel URL (it may have changed)
+                    fresh_url = self._detect_tunnel_url()
+                    if fresh_url:
+                        self.own_url = fresh_url
+                        self.tunnel_url = fresh_url
+                        logger.info(f"🔄 Refreshed tunnel URL after wake: {fresh_url}")
+
+                    # Force re-register with gateway
+                    self.registered = False
+                    registered = await self.register()
+                    if registered:
+                        await self.send_event("node_joined")
+                        logger.info("✅ Re-registered with gateway after wake")
+                    else:
+                        logger.warning("⚠️ Failed to re-register after wake — will retry")
+
+                    last_heartbeat_time = now
+                    await asyncio.sleep(5)  # Brief pause before normal heartbeat
+                    continue
+
+                last_heartbeat_time = now
+
                 # Auto-detect tunnel URL if we didn't have one at startup
                 if not self.own_url:
                     detected = self._detect_tunnel_url()

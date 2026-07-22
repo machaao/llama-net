@@ -63,6 +63,7 @@ fi
 ENABLE_TUNNEL=false
 TUNNEL_PID=""
 TUNNEL_URL=""
+SLEEP_PID=""
 
 REMAINING_ARGS=""
 BOOTSTRAP_PEERS_VALUE=""
@@ -374,9 +375,61 @@ health_check() {
     return 1
 }
 
+# ── Sleep Prevention ──
+# Prevents the OS from sleeping while running a dedicated node (--tunnel mode).
+# Only called when --tunnel flag is active (operator intends persistent uptime).
+
+prevent_sleep() {
+    OS="$(uname)"
+    case "$OS" in
+        Darwin)
+            if command -v caffeinate >/dev/null 2>&1; then
+                caffeinate -s -i &
+                SLEEP_PID=$!
+                echo "✅ macOS sleep prevention active (caffeinate PID: $SLEEP_PID)"
+            else
+                echo "⚠️  caffeinate not found — system may sleep during idle periods"
+            fi
+            ;;
+        Linux)
+            if [ -w /sys/power/wake_lock ] 2>/dev/null; then
+                echo "llamanet-node" > /sys/power/wake_lock 2>/dev/null && \
+                    echo "✅ Linux wake lock acquired" || \
+                    echo "⚠️  Could not acquire wake lock (try running as root)"
+            else
+                echo "⚠️  Cannot write to /sys/power/wake_lock"
+                echo "   To prevent sleep manually: sudo systemctl mask sleep.target suspend.target"
+            fi
+            ;;
+        *)
+            echo "⚠️  Automatic sleep prevention not supported on $OS"
+            echo "   Please disable sleep manually in your power settings"
+            ;;
+    esac
+}
+
+cleanup_sleep() {
+    OS="$(uname)"
+    case "$OS" in
+        Darwin)
+            if [ -n "$SLEEP_PID" ]; then
+                kill $SLEEP_PID 2>/dev/null
+                echo "✅ Stopped caffeinate"
+            fi
+            ;;
+        Linux)
+            if [ -w /sys/power/wake_unlock ] 2>/dev/null; then
+                echo "llamanet-node" > /sys/power/wake_unlock 2>/dev/null
+                echo "✅ Released wake lock"
+            fi
+            ;;
+    esac
+}
+
 # Signal handler for graceful shutdown
 cleanup() {
     echo "🛑 Received shutdown signal, stopping LlamaNet node..."
+    cleanup_sleep
     if [ ! -z "$TUNNEL_PID" ]; then
         echo "🌐 Stopping Cloudflare Tunnel..."
         kill $TUNNEL_PID 2>/dev/null || true
@@ -473,6 +526,7 @@ if health_check $DEFAULT_PORT; then
     
     if [ "$ENABLE_TUNNEL" = "true" ]; then
         start_cloudflare_tunnel $DEFAULT_PORT
+        prevent_sleep
     fi
 
     echo "📊 Monitor network status: python -m tools.monitor"

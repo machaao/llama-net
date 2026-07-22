@@ -35,6 +35,14 @@
         </div>
     </nav>
 
+    <!-- Wake/Sleep Warning Banner (hidden by default) -->
+    <div id="wake-warning-banner" class="alert alert-warning text-center mb-0" style="display:none; border-radius: 0;">
+        <i class="fas fa-bed me-2"></i>
+        <strong>System sleep detected.</strong>
+        <span>The node was asleep and has automatically reconnected.
+        <a href="#" onclick="dismissWakeWarning(); return false;" class="alert-link">Dismiss</a></span>
+    </div>
+
     <!-- No Model Welcome Banner -->
     <div id="no-model-banner" class="alert alert-warning text-center mb-0" style="display:none; border-radius: 0;">
         <i class="fas fa-exclamation-triangle me-2"></i>

@@ -1279,7 +1279,16 @@ async def health():
         return {"status": "router", "no_model_mode": True, "workers_discovered": peer_count, "timestamp": time.time()}
 
     metrics = llm.get_metrics() if llm else {}
-    return {"status": "ok", "llm_loaded": llm is not None, "model": config.model_name, "timestamp": time.time(), **metrics}
+    heartbeat_health = heartbeat_manager.get_health_status() if heartbeat_manager else {}
+
+    return {
+        "status": "ok",
+        "llm_loaded": llm is not None,
+        "model": config.model_name,
+        "timestamp": time.time(),
+        "heartbeat": heartbeat_health,
+        **metrics,
+    }
 
 
 @app.get("/tunnel/status")

@@ -15,6 +15,9 @@ class HeartbeatManager:
         self.running = False
         self.heartbeat_task = None
         self.last_heartbeat = 0
+        self._last_heartbeat_wall_time = 0
+        self._max_gap_detected = 0
+        self._wake_events = 0
         
     async def start(self):
         """Start the heartbeat system"""
@@ -52,8 +55,20 @@ class HeartbeatManager:
         """Send a heartbeat signal"""
         current_time = time.time()
         metrics = self.metrics_callback()
-        
+
+        # Wake-from-sleep detection
+        if self._last_heartbeat_wall_time > 0:
+            gap = current_time - self._last_heartbeat_wall_time
+            if gap > self.interval * 3:
+                self._wake_events += 1
+                self._max_gap_detected = max(self._max_gap_detected, gap)
+                logger.warning(
+                    f"⏰ Heartbeat gap: {gap:.0f}s (expected {self.interval}s) — "
+                    f"possible wake from sleep (event #{self._wake_events})"
+                )
+
         # Update last heartbeat time
+        self._last_heartbeat_wall_time = current_time
         self.last_heartbeat = current_time
         
         # Log heartbeat (in production, this would send to monitoring system)
@@ -75,5 +90,7 @@ class HeartbeatManager:
             "running": self.running,
             "last_heartbeat": self.last_heartbeat,
             "time_since_last_heartbeat": time_since_last,
-            "heartbeat_interval": self.interval
+            "heartbeat_interval": self.interval,
+            "wake_events": self._wake_events,
+            "max_gap_detected": round(self._max_gap_detected, 1),
         }

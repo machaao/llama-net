@@ -144,6 +144,9 @@ class LlamaNetUI {
         // Load tunnel status
         this.loadTunnelStatus();
         
+        // Start wake-from-sleep detection (local health check only)
+        this.startWakeDetection();
+        
         // ONE-TIME initial network status load (not polling)
         this.loadInitialNetworkStatus();
         
@@ -282,6 +285,29 @@ class LlamaNetUI {
     
     setupEventListeners() {
         // No API mode selector needed - OpenAI only
+    }
+
+    async startWakeDetection() {
+        // Lightweight local health check every 30s to detect wake-from-sleep events.
+        // This is NOT network polling — it checks the local /health endpoint only.
+        this._wakeWarningDismissed = false;
+
+        setInterval(async () => {
+            try {
+                const resp = await fetch(`${this.baseUrl}/health`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.heartbeat && data.heartbeat.wake_events > 0 && !this._wakeWarningDismissed) {
+                        const banner = document.getElementById('wake-warning-banner');
+                        if (banner) {
+                            banner.style.display = 'block';
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore — server may not be ready
+            }
+        }, 30000);
     }
 
     async loadTunnelStatus() {
@@ -3319,6 +3345,12 @@ function confirmClearHistory() {
     if (llamaNetUI) {
         llamaNetUI.clearChatHistory();
     }
+}
+
+function dismissWakeWarning() {
+    const banner = document.getElementById('wake-warning-banner');
+    if (banner) banner.style.display = 'none';
+    if (llamaNetUI) llamaNetUI._wakeWarningDismissed = true;
 }
 
 function refreshNodeInfo(nodeId) {
