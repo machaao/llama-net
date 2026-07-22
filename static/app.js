@@ -410,9 +410,14 @@ class LlamaNetUI {
                 if (data.node_info) {
                     const normalizedNode = this.normalizeNodeDataWithValidation(data.node_info);
                     if (normalizedNode) {
+                        // Detect model name change (hot-reload)
+                        const previousNode = this.activeNodes.get(normalizedNode.node_id);
+                        const modelChanged = previousNode && previousNode.model !== normalizedNode.model
+                            && normalizedNode.model !== 'unknown';
+
                         this.activeNodes.set(normalizedNode.node_id, normalizedNode);
                         
-                        // Set status based on event (using consolidated validation)
+                        // Set status based on event
                         this.nodeStatuses.set(normalizedNode.node_id, 'online');
                         this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
                         this.nodeEventTypes.set(normalizedNode.node_id, data.type);
@@ -424,6 +429,15 @@ class LlamaNetUI {
                         
                         if (data.type === 'node_joined') {
                             this.showToast('success', `🆕 Node joined: ${normalizedNode.node_id.substring(0, 8)}... (${normalizedNode.model})`);
+                        }
+                        
+                        // Handle model change (hot-reload / switch)
+                        if (modelChanged) {
+                            console.log(`🔄 Model changed: ${previousNode.model} → ${normalizedNode.model}`);
+                            this.selectedModel = normalizedNode.model;
+                            this.updateChatInterface(normalizedNode.model);
+                            localStorage.setItem('llamanet_selected_model', normalizedNode.model);
+                            this.showToast('success', `🔄 Model switched to: ${normalizedNode.model}`);
                         }
                         
                         this.updateNetworkDisplayRealTime();
@@ -915,34 +929,49 @@ class LlamaNetUI {
     }
     
     updateActiveNodesFromAPI(modelsData) {
-        // Clear and rebuild activeNodes from fresh API data
+        // Preserve existing event-driven status before rebuild
+        const previousNodes = new Map(this.activeNodes);
+        
+        // Clear and rebuild from fresh API data
         this.activeNodes.clear();
         
         if (modelsData.data) {
             modelsData.data.forEach(model => {
-                const modelName = model.id; // The model name is in the 'id' field
+                const modelName = model.id;
                 
                 if (model.nodes) {
                     model.nodes.forEach(node => {
-                        // Ensure the node has the correct model name
                         const nodeWithModel = {
                             ...node,
-                            model: modelName, // Explicitly set the model name from the parent model object
-                            model_name: modelName // Add backup field
+                            model: modelName,
+                            model_name: modelName
                         };
                         
                         const normalizedNode = this.normalizeNodeDataWithValidation(nodeWithModel);
                         if (normalizedNode) {
                             this.activeNodes.set(normalizedNode.node_id, normalizedNode);
-                        
-                            // Set status based on last_seen time since we don't have event data
-                            const timeSinceLastSeen = (Date.now() / 1000) - normalizedNode.last_seen;
-                            if (timeSinceLastSeen < 60) {
-                                this.nodeStatuses.set(normalizedNode.node_id, 'online');
+                            
+                            // Preserve existing SSE event status if available
+                            const prevStatus = this.nodeStatuses.get(normalizedNode.node_id);
+                            if (prevStatus && prevStatus !== 'unknown') {
+                                // Keep existing SSE-driven status — don't overwrite with time-based
                                 this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
-                                this.nodeEventTypes.set(normalizedNode.node_id, 'topology_refresh');
                             } else {
-                                this.nodeStatuses.set(normalizedNode.node_id, 'unknown');
+                                // Fallback to time-based status for new/unknown nodes
+                                const timeSinceLastSeen = (Date.now() / 1000) - normalizedNode.last_seen;
+                                if (timeSinceLastSeen < 60) {
+                                    this.nodeStatuses.set(normalizedNode.node_id, 'online');
+                                    this.nodeLastEvent.set(normalizedNode.node_id, Date.now());
+                                    this.nodeEventTypes.set(normalizedNode.node_id, 'topology_refresh');
+                                } else {
+                                    this.nodeStatuses.set(normalizedNode.node_id, 'unknown');
+                                }
+                            }
+                            
+                            // Detect model change from API refresh
+                            const prevNode = previousNodes.get(normalizedNode.node_id);
+                            if (prevNode && prevNode.model !== normalizedNode.model && normalizedNode.model !== 'unknown') {
+                                console.log(`📊 Model change detected via API: ${prevNode.model} → ${normalizedNode.model}`);
                             }
                         }
                     });
@@ -3116,10 +3145,10 @@ class ModelDownloaderUI {
                     llamaNetUI.updateChatInterface(data.data.model_name);
                     localStorage.setItem('llamanet_selected_model', data.data.model_name);
 
-                    // Refresh network status to reflect new model
+                    // Refresh network status after model loads (heavier models need more time)
                     setTimeout(() => {
                         llamaNetUI.refreshNetworkDataOnTopologyChange();
-                    }, 1000);
+                    }, 3000);
                 }
             } else {
                 this.showToast('error', `Failed: ${data.message}`);

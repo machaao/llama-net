@@ -47,13 +47,25 @@ class LandingApp {
                 if (data.stats) this.updateStatsDisplay(data.stats);
                 break;
             case 'node_joined':
-            case 'node_updated':
                 this.debouncedRefresh();
-                if (data.type === 'node_joined') this.showToast(`🆕 New node online: ${this.escapeHtml(data.model_name || '')}`);
+                this.showToast(`🆕 New node online: ${this.escapeHtml(data.model_name || '')}`);
+                break;
+            case 'node_updated':
+                // Detect model name change (hot-reload)
+                const prevNode = this._lastKnownNodes?.[data.node_hash];
+                const modelChanged = prevNode && prevNode !== data.model_name && data.model_name;
+                this.debouncedRefresh();
+                if (modelChanged) {
+                    this.showToast(`🔄 Node ${data.node_hash?.substring(0, 8)}... switched to ${this.escapeHtml(data.model_name)}`);
+                    // Track model change for future detection
+                    if (!this._lastKnownNodes) this._lastKnownNodes = {};
+                    this._lastKnownNodes[data.node_hash] = data.model_name;
+                }
                 break;
             case 'node_left':
                 this.debouncedRefresh();
                 this.showToast(`👋 Node disconnected: ${this.escapeHtml(data.model_name || '')}`);
+                if (this._lastKnownNodes) delete this._lastKnownNodes[data.node_hash];
                 break;
             case 'heartbeat':
                 break;
@@ -140,6 +152,15 @@ class LandingApp {
     quickSearch(query) { document.getElementById('model-search').value = query; this.searchModels(); }
     renderModels(models) {
         const resultsDiv = document.getElementById('model-results');
+        
+        // Track known nodes for model change detection
+        if (!this._lastKnownNodes) this._lastKnownNodes = {};
+        models.forEach(m => {
+            (m.nodes || []).forEach(n => {
+                this._lastKnownNodes[n.node_hash] = m.model_name;
+            });
+        });
+        
         if (!models.length) { resultsDiv.innerHTML = '<div class="col-md-8 text-center text-muted py-4"><i class="fas fa-search fa-2x mb-2"></i><p>No models found. Be the first to <a href="https://github.com/machaao/llama-net">run a node</a>!</p></div>'; return; }
         resultsDiv.innerHTML = '<div class="col-md-8">' + models.map(model => {
             const avgLoad = model.avg_load || 0;
