@@ -162,6 +162,17 @@ DEFAULT_NODE_ID="${NODE_ID:-}"
 DEFAULT_BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-}"
 DEFAULT_PUBLIC_IP="${PUBLIC_IP:-}"
 
+# ── Intel Mac Metal Compatibility ──
+# Auto-detect Intel Macs and disable Metal to prevent shader compilation errors
+if [ "$(uname)" = "Darwin" ] && [ "$(uname -m)" = "x86_64" ]; then
+    if [ -z "$LLAMA_NO_METAL" ]; then
+        export LLAMA_NO_METAL=1
+        echo "⚠️  Intel Mac detected — setting LLAMA_NO_METAL=1 (CPU-only mode)"
+        echo "   Metal shaders in llama-cpp-python 0.3.x are incompatible with Intel Macs"
+        echo "   Set LLAMA_NO_METAL=0 to override (may fail)"
+    fi
+fi
+
 # Suppress Python semaphore warnings for cleaner output
 export PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tracker,ignore:resource_tracker"
 export PYTHONDONTWRITEBYTECODE=1

@@ -11,6 +11,50 @@ from inference_node.config import InferenceConfig
 
 logger = get_logger(__name__)
 
+
+def _detect_and_fix_metal_compatibility():
+    """Auto-detect Intel Macs and disable Metal to prevent shader compilation errors.
+
+    Intel Macs have limited Metal support that fails with newer llama-cpp-python
+    shader code (uint64_t buffer types, function pointer patterns).
+    This runs once at module import time before any Llama() calls.
+    """
+    import platform
+
+    system = platform.system()
+    machine = platform.machine()
+
+    if system != "Darwin":
+        return  # Not macOS
+
+    # Already explicitly set by user — respect it
+    if "LLAMA_NO_METAL" in os.environ:
+        logger.info(f"Metal override via LLAMA_NO_METAL={os.environ['LLAMA_NO_METAL']}")
+        return
+
+    # Already explicitly set GPU layers to 0
+    if os.environ.get("N_GPU_LAYERS", "-1") == "0":
+        return
+
+    # Intel Mac (x86_64) = Metal shader incompatibility with newer llama-cpp-python
+    if machine == "x86_64":
+        os.environ["LLAMA_NO_METAL"] = "1"
+        logger.warning("⚠️  Intel Mac detected — Metal GPU disabled automatically")
+        logger.warning("   Reason: Metal shader compilation fails on Intel Macs with llama-cpp-python 0.3.x")
+        logger.warning("   Model will run on CPU. To override, set LLAMA_NO_METAL=0")
+        return
+
+    # Apple Silicon — Metal should work fine
+    if machine == "arm64":
+        logger.info("Apple Silicon detected — Metal GPU enabled")
+        return
+
+    logger.info(f"macOS on {machine} — using default GPU settings")
+
+
+# Auto-detect at module import time
+_detect_and_fix_metal_compatibility()
+
 def detect_reasoning_model(model_name: str) -> bool:
     """
     Detect if the model supports reasoning based on model name patterns.

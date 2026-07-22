@@ -71,6 +71,9 @@ class InferenceConfig:
             parser.add_argument('--verbose', action='store_true',
                                 help='Enable verbose logging for llama-cpp-python')
 
+            parser.add_argument('--no-gpu', action='store_true',
+                                help='Disable GPU acceleration (forces CPU-only mode)')
+
             args = parser.parse_args()
             
             # Use command line args or fall back to environment variables
@@ -81,6 +84,12 @@ class InferenceConfig:
             # LLM configuration
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
             self.verbose = args.verbose or bool(load_env_var("VERBOSE", True))
+
+            # Handle --no-gpu flag (overrides GPU layers and disables Metal)
+            if args.no_gpu:
+                self.n_gpu_layers = 0
+                os.environ["LLAMA_NO_METAL"] = "1"
+                logger.info("GPU disabled via --no-gpu flag")
 
             # Handle HTTP port using consolidated utilities
             preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))
