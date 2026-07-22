@@ -2,8 +2,10 @@ import os
 import time
 import asyncio
 import hashlib
+import json
+import uuid
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +18,43 @@ from landing.router import ModelRouter
 
 logger = get_logger(__name__)
 
+
+class GatewaySSEManager:
+    """Lightweight SSE manager for real-time landing page updates"""
+
+    def __init__(self):
+        self.connections = {}
+
+    async def add_connection(self):
+        conn_id = f"sse_{uuid.uuid4().hex[:8]}"
+        queue = asyncio.Queue(maxsize=100)
+        self.connections[conn_id] = queue
+        logger.info(f"SSE connection added: {conn_id} (total: {len(self.connections)})")
+        return conn_id, queue
+
+    async def remove_connection(self, conn_id):
+        self.connections.pop(conn_id, None)
+        logger.info(f"SSE connection removed: {conn_id} (total: {len(self.connections)})")
+
+    async def broadcast(self, event_type, data):
+        if not self.connections:
+            return
+        event = json.dumps({"type": event_type, "timestamp": time.time(), **data})
+        dead = []
+        for cid, queue in self.connections.items():
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                dead.append(cid)
+        for cid in dead:
+            self.connections.pop(cid, None)
+
+
 supabase_mgr = None
+auth_mgr = None
+router = None
+registry = None
+sse_mgr = None
 auth_mgr = None
 router = None
 registry = None
@@ -26,8 +64,19 @@ async def cleanup_stale_loop():
     while True:
         try:
             await asyncio.sleep(60)
-            if registry:
-                await registry.cleanup_stale()
+            if not registry or not sse_mgr:
+                continue
+            before = {n["node_hash"]: n for n in supabase_mgr.search_nodes(status="active", limit=500)}
+            cleaned = await registry.cleanup_stale()
+            if cleaned > 0:
+                after = {n["node_hash"] for n in supabase_mgr.search_nodes(status="active", limit=500)}
+                for node_hash, node in before.items():
+                    if node_hash not in after:
+                        await sse_mgr.broadcast("node_left", {
+                            "node_hash": node_hash,
+                            "model_name": node.get("model_name", "unknown"),
+                        })
+                        logger.info(f"📡 Broadcast node_left for stale node {node_hash[:8]}")
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -36,7 +85,7 @@ async def cleanup_stale_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global supabase_mgr, auth_mgr, router, registry
+    global sse_mgr, supabase_mgr, auth_mgr, router, registry
     logger.info("Starting llamanet.app gateway...")
     try:
         supabase_mgr = SupabaseManager()
@@ -44,6 +93,7 @@ async def lifespan(app: FastAPI):
         cf_client = CloudflareClient()
         registry = NodeRegistry(supabase_mgr, cf_client)
         router = ModelRouter(supabase_mgr)
+        sse_mgr = GatewaySSEManager()
         if cf_client.is_configured:
             logger.info("Cloudflare tunnel provisioning enabled")
         else:
@@ -82,6 +132,41 @@ if os.path.exists(static_dir):
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "llamanet-gateway", "timestamp": time.time()}
+
+
+@app.get("/events/network")
+async def network_events():
+    if not sse_mgr:
+        raise HTTPException(status_code=503, detail="SSE not initialized")
+    conn_id, queue = await sse_mgr.add_connection()
+
+    async def event_generator():
+        try:
+            yield f"data: {json.dumps({'type': 'connected', 'connection_id': conn_id})}\n\n"
+            models = supabase_mgr.list_active_models()
+            stats = supabase_mgr.get_network_stats()
+            yield f"data: {json.dumps({'type': 'initial_state', 'models': models, 'stats': stats})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=25)
+                    yield f"data: {event}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await sse_mgr.remove_connection(conn_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/")
@@ -207,13 +292,32 @@ async def publish_node(request: Request):
         model_slug = model_name_to_slug(model_name)
         tunnel_url = body.get("tunnel_url", "")
 
-        result = registry.db.register_node(
+        # Check if node already exists to determine event type
+        existing = supabase_mgr.client.table("nodes").select("node_hash").eq(
+            "node_hash", node_hash
+        ).eq("status", "active").execute()
+        is_new = len(existing.data) == 0
+
+        result = supabase_mgr.register_node(
             user_id="public", node_hash=node_hash, model_name=model_name,
             model_slug=model_slug, url=tunnel_url or body.get("url", ""),
             ip=body.get("ip", ""), port=body.get("port", 8000),
             gpu_info=body.get("gpu", ""), metrics=body.get("metrics", {}),
         )
-        logger.info(f"Published node {node_hash} model={model_name}")
+
+        # Broadcast SSE event
+        if sse_mgr:
+            event_type = "node_joined" if is_new else "node_updated"
+            await sse_mgr.broadcast(event_type, {
+                "node_hash": node_hash,
+                "model_name": model_name,
+                "model_slug": model_slug,
+                "url": tunnel_url or body.get("url", ""),
+                "ip": body.get("ip", ""),
+                "port": body.get("port", 8000),
+            })
+
+        logger.info(f"{'Published' if is_new else 'Updated'} node {node_hash} model={model_name}")
         return {"success": True, "node_hash": node_hash}
     except Exception as e:
         logger.error(f"Error in publish_node: {e}")

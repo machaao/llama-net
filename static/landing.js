@@ -2,16 +2,87 @@ class LandingApp {
     constructor() {
         this.baseUrl = window.location.origin;
         this.user = null;
+        this.eventSource = null;
+        this._sseConnected = false;
+        this._refreshTimer = null;
+        this._initFallbackTimer = null;
         this.init();
     }
     async init() {
         await this.checkAuth();
-        await this.loadNetworkStats();
-        await this.loadModels();
+        this.connectSSE();
+        // Fallback: if SSE initial_state doesn't arrive within 3s, use API
+        this._initFallbackTimer = setTimeout(() => {
+            if (!this._sseConnected) {
+                this.loadNetworkStats();
+                this.loadModels();
+            }
+        }, 3000);
         const searchInput = document.getElementById('model-search');
         if (searchInput) {
             searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.searchModels(); });
         }
+    }
+    connectSSE() {
+        if (this.eventSource) this.eventSource.close();
+        this.eventSource = new EventSource(`${this.baseUrl}/events/network`);
+        this.eventSource.onopen = () => {
+            this._sseConnected = true;
+            if (this._initFallbackTimer) { clearTimeout(this._initFallbackTimer); this._initFallbackTimer = null; }
+            this.updateSSEStatus('connected');
+            console.log('✅ SSE connected to gateway');
+        };
+        this.eventSource.onmessage = (event) => {
+            try { this.handleSSEEvent(JSON.parse(event.data)); } catch (e) { console.error('SSE parse error:', e); }
+        };
+        this.eventSource.onerror = () => {
+            this._sseConnected = false;
+            this.updateSSEStatus('disconnected');
+        };
+    }
+    handleSSEEvent(data) {
+        switch (data.type) {
+            case 'initial_state':
+                if (data.models) this.renderModels(data.models);
+                if (data.stats) this.updateStatsDisplay(data.stats);
+                break;
+            case 'node_joined':
+            case 'node_updated':
+                this.debouncedRefresh();
+                if (data.type === 'node_joined') this.showToast(`🆕 New node online: ${this.escapeHtml(data.model_name || '')}`);
+                break;
+            case 'node_left':
+                this.debouncedRefresh();
+                this.showToast(`👋 Node disconnected: ${this.escapeHtml(data.model_name || '')}`);
+                break;
+            case 'heartbeat':
+                break;
+        }
+    }
+    debouncedRefresh() {
+        if (this._refreshTimer) clearTimeout(this._refreshTimer);
+        this._refreshTimer = setTimeout(() => {
+            this.loadModels();
+            this.loadNetworkStats();
+        }, 500);
+    }
+    updateSSEStatus(status) {
+        const el = document.getElementById('sse-status-indicator');
+        if (!el) return;
+        if (status === 'connected') {
+            el.className = 'badge bg-success me-2';
+            el.innerHTML = '<i class="fas fa-circle" style="font-size:0.5rem"></i> Live';
+        } else {
+            el.className = 'badge bg-secondary me-2';
+            el.innerHTML = '<i class="fas fa-circle" style="font-size:0.5rem"></i> Offline';
+        }
+    }
+    updateStatsDisplay(stats) {
+        this.animateCounter('stat-nodes', stats.total_nodes || 0);
+        this.animateCounter('stat-models', stats.total_models || 0);
+        this.animateCounter('stat-tps', stats.total_tps || 0, true);
+        const loadEl = document.getElementById('stat-load');
+        if (loadEl) loadEl.textContent = (stats.avg_load || 0).toFixed(2);
     }
     async checkAuth() {
         try {
@@ -34,13 +105,7 @@ class LandingApp {
     async loadNetworkStats() {
         try {
             const resp = await fetch(`${this.baseUrl}/api/network/stats`);
-            if (resp.ok) {
-                const stats = await resp.json();
-                this.animateCounter('stat-nodes', stats.total_nodes || 0);
-                this.animateCounter('stat-models', stats.total_models || 0);
-                this.animateCounter('stat-tps', stats.total_tps || 0, true);
-                document.getElementById('stat-load').textContent = (stats.avg_load || 0).toFixed(2);
-            }
+            if (resp.ok) { const stats = await resp.json(); this.updateStatsDisplay(stats); }
         } catch (e) { console.warn('Failed to load stats:', e); }
     }
     animateCounter(elementId, target, isFloat) {

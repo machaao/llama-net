@@ -190,6 +190,17 @@ async def _connect_bootstrap_peers(peers_str: str):
             own_model = config.model_name if not config.no_model_mode else "router"
             own_metrics = llm.get_metrics() if llm else {}
 
+            # Always register bootstrap peer for continued heartbeats via gossip loop
+            _peer_registry[url] = {
+                "node_id": url,
+                "url": url,
+                "model": "gateway",
+                "load": 0,
+                "tps": 0,
+                "last_seen": time.time(),
+                "registered_from": "bootstrap"
+            }
+
             async with _aiohttp_lib.ClientSession(
                 timeout=_aiohttp_lib.ClientTimeout(total=10)
             ) as session:
