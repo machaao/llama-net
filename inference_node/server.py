@@ -47,22 +47,38 @@ _active_sse_tasks: set = set()
 
 def _get_own_url() -> str:
     """Get this node's public tunnel URL. Returns empty string if no tunnel."""
-    if gateway_client:
+    # Try gateway client first (only if it has a URL)
+    if gateway_client and gateway_client.own_url:
         return gateway_client.own_url
+
+    # Try environment variable
     tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
     if tunnel_url:
-        return tunnel_url.rstrip("/")
-    # No tunnel — try file
+        url = tunnel_url.rstrip("/")
+        _sync_tunnel_url_to_gateway(url)
+        return url
+
+    # Try file
     tunnel_file = "/tmp/llamanet_tunnel_url"
     try:
         if os.path.exists(tunnel_file):
             with open(tunnel_file) as f:
                 url = f.read().strip()
                 if url.startswith("http"):
+                    _sync_tunnel_url_to_gateway(url.rstrip("/"))
                     return url.rstrip("/")
     except Exception:
         pass
     return ""
+
+
+def _sync_tunnel_url_to_gateway(url: str):
+    """Sync discovered tunnel URL back to gateway client and trigger registration."""
+    if gateway_client and not gateway_client.own_url and url:
+        gateway_client.own_url = url
+        gateway_client.tunnel_url = url
+        logger.info(f"🔄 Synced tunnel URL to gateway client: {url}")
+
 
 # Gateway client handles all peer communication — no DHT, P2P, or discovery needed
 
@@ -116,9 +132,13 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(gateway_client.heartbeat_loop())
                 asyncio.create_task(gateway_client.peer_refresh_loop())
 
-        # Schedule post-startup join event
-        if gateway_client:
+        # Schedule post-startup join event (only if already registered)
+        if gateway_client and gateway_client.registered:
             asyncio.create_task(trigger_post_uvicorn_join())
+
+        # Watch for tunnel URL availability and register when ready
+        if gateway_client:
+            asyncio.create_task(_wait_for_tunnel_and_register())
 
         logger.info("✅ All services started")
 
@@ -170,6 +190,45 @@ async def trigger_post_uvicorn_join():
             logger.info("✅ Join event sent to gateway")
     except Exception as e:
         logger.error(f"Failed to send join event: {e}")
+
+
+async def _wait_for_tunnel_and_register():
+    """Wait for tunnel URL to become available, then register with gateway."""
+    if not gateway_client:
+        return
+
+    # If already registered, nothing to do
+    if gateway_client.registered:
+        return
+
+    logger.info("⏳ Waiting for tunnel URL to become available...")
+    for i in range(60):  # Wait up to 60 seconds
+        await asyncio.sleep(1)
+        url = _get_own_url()  # This will auto-sync to gateway_client if found
+        if url:
+            break
+
+    if not gateway_client.own_url:
+        logger.warning("⚠️ No tunnel URL found after 60s — node not registered with gateway")
+        return
+
+    # Register with gateway now that we have a URL
+    try:
+        registered = await gateway_client.register()
+        if registered:
+            logger.info(f"✅ Registered with gateway after tunnel ready: {gateway_client.own_url}")
+            # Send join event
+            await gateway_client.send_event("node_joined")
+            logger.info("✅ Join event sent to gateway")
+            # Start heartbeat and peer refresh if not already running
+            if not gateway_client.heartbeat_task or gateway_client.heartbeat_task.done():
+                asyncio.create_task(gateway_client.heartbeat_loop())
+            if not gateway_client.peer_refresh_task or gateway_client.peer_refresh_task.done():
+                asyncio.create_task(gateway_client.peer_refresh_loop())
+        else:
+            logger.warning("⚠️ Gateway registration failed even with tunnel URL")
+    except Exception as e:
+        logger.error(f"Failed to register with gateway: {e}")
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 

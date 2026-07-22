@@ -122,23 +122,38 @@ class GatewayClient:
     # ─── background loops ───────────────────────────────────────
 
     async def heartbeat_loop(self):
-        """Send heartbeats every 10 seconds."""
+        """Send heartbeats every 10 seconds. Auto-registers if tunnel URL appears late."""
         while self.running:
             try:
-                metrics = self._get_metrics()
+                # Auto-detect tunnel URL if we didn't have one at startup
+                if not self.own_url:
+                    detected = self._detect_tunnel_url()
+                    if detected:
+                        self.own_url = detected
+                        self.tunnel_url = detected
+                        logger.info(f"🔄 Tunnel URL detected in heartbeat: {detected}")
 
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=8)
-                ) as session:
-                    async with session.post(
-                        f"{self.gateway_url}/api/nodes/heartbeat",
-                        json={
-                            "node_hash": self.node_hash,
-                            "metrics": metrics,
-                        },
-                    ) as resp:
-                        if resp.status != 200:
-                            logger.debug(f"Heartbeat returned {resp.status}")
+                # Try to register if we have a URL but aren't registered
+                if self.own_url and not self.registered:
+                    await self.register()
+                    if self.registered:
+                        await self.send_event("node_joined")
+
+                # Send heartbeat only if registered
+                if self.registered:
+                    metrics = self._get_metrics()
+                    async with aiohttp.ClientSession(
+                        timeout=aiohttp.ClientTimeout(total=8)
+                    ) as session:
+                        async with session.post(
+                            f"{self.gateway_url}/api/nodes/heartbeat",
+                            json={
+                                "node_hash": self.node_hash,
+                                "metrics": metrics,
+                            },
+                        ) as resp:
+                            if resp.status != 200:
+                                logger.debug(f"Heartbeat returned {resp.status}")
             except Exception as e:
                 logger.debug(f"Heartbeat error: {e}")
 
