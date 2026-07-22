@@ -110,7 +110,21 @@ class LandingApp {
             if (resp.ok) { const data = await resp.json(); this.user = data.user; this.updateNavbar(true); }
         } catch (e) {}
     }
-    signInWithGoogle() { window.location.href = `${this.baseUrl}/auth/google`; }
+    async signInWithGoogle() {
+        try {
+            const resp = await fetch(`${this.baseUrl}/auth/google`, { credentials: 'include' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            if (data.url) {
+                window.location.href = data.url;
+            } else {
+                this.showToast('error', 'Failed to get Google sign-in URL');
+            }
+        } catch (e) {
+            console.error('Google sign-in error:', e);
+            this.showToast('error', 'Sign-in failed: ' + e.message);
+        }
+    }
     updateNavbar(isAuthenticated) {
         const signin = document.getElementById('nav-signin');
         const dashboard = document.getElementById('nav-dashboard');
