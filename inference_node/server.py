@@ -2,6 +2,7 @@ import os
 import asyncio
 import time
 import uuid
+import hashlib
 import uvicorn
 import aiohttp
 import json
@@ -313,7 +314,13 @@ async def list_network_models():
         })
         models_dict[config.model_name]["node_count"] = 1
 
+    # Compute our own node_hash to exclude self from peers
+    own_node_hash = hashlib.sha256(config.node_id.encode()).hexdigest()[:12]
+
     for peer in peers:
+        # Skip ourselves — we're already added above
+        if peer.get("node_id") == own_node_hash:
+            continue
         model = peer.get("model", "unknown")
         if model not in models_dict:
             models_dict[model] = {
@@ -398,7 +405,13 @@ async def get_models_statistics():
         total_load += metrics.get("load", 0)
         total_tps += metrics.get("tps", 0)
 
+    # Compute our own node_hash to exclude self from peers
+    own_node_hash = hashlib.sha256(config.node_id.encode()).hexdigest()[:12]
+
     for peer in peers:
+        # Skip ourselves — we're already included above
+        if peer.get("node_id") == own_node_hash:
+            continue
         model = peer.get("model", "unknown")
         if model not in models_dict:
             models_dict[model] = {"nodes": [], "total_load": 0, "total_tps": 0}
