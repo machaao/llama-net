@@ -22,6 +22,10 @@ class SupabaseManager:
             raise ValueError("SUPABASE_URL and SUPABASE_SECRET_KEY must be set")
 
         self.client: Client = create_client(self.url, self.service_key)
+        
+        # Node token cache for detecting restarts (in-memory is fine for ephemeral comparison)
+        self._node_token_cache: Dict[str, int] = {}  # node_hash -> last known total_tokens
+        
         logger.info("Supabase client initialized")
 
     def get_or_create_user(
@@ -121,13 +125,50 @@ class SupabaseManager:
             logger.error(f"Error registering node: {e}")
             raise
 
+    def _get_cumulative_tokens(self) -> int:
+        """Get cumulative total tokens from the statistics table."""
+        try:
+            result = self.client.table("global_statistics").select("value").eq(
+                "key", "cumulative_total_tokens"
+            ).execute()
+            if result.data:
+                return int(result.data[0]["value"])
+            return 0
+        except Exception as e:
+            logger.debug(f"Could not read cumulative tokens: {e}")
+            return 0
+
+    def _add_cumulative_tokens(self, amount: int) -> None:
+        """Atomically add to cumulative total tokens in the statistics table."""
+        try:
+            current = self._get_cumulative_tokens()
+            new_value = current + amount
+            self.client.table("global_statistics").upsert(
+                {"key": "cumulative_total_tokens", "value": str(new_value)},
+                on_conflict="key"
+            ).execute()
+            logger.debug(f"Accumulated {amount} tokens → cumulative total: {new_value}")
+        except Exception as e:
+            logger.error(f"Error updating cumulative tokens: {e}")
+
     def update_node_metrics(self, node_hash: str, metrics: Dict[str, Any]) -> bool:
         try:
+            new_tokens = metrics.get("total_tokens", 0)
+            old_tokens = self._node_token_cache.get(node_hash, 0)
+
+            # If tokens decreased, the node restarted — accumulate the old value
+            if new_tokens < old_tokens and old_tokens > 0:
+                self._add_cumulative_tokens(old_tokens)
+                logger.info(f"Node {node_hash} restarted — accumulated {old_tokens} tokens to cumulative total")
+
+            # Update cache
+            self._node_token_cache[node_hash] = new_tokens
+
             update_data = {
                 "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                 "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
                 "uptime": metrics.get("uptime", 0),
-                "total_tokens": metrics.get("total_tokens", 0),
+                "total_tokens": new_tokens,
                 "last_heartbeat": "now()", "status": "active",
             }
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
@@ -138,6 +179,13 @@ class SupabaseManager:
 
     def deregister_node(self, node_hash: str) -> bool:
         try:
+            # Accumulate tokens before deactivating
+            cached = self._node_token_cache.get(node_hash, 0)
+            if cached > 0:
+                self._add_cumulative_tokens(cached)
+                self._node_token_cache.pop(node_hash, None)
+                logger.info(f"Accumulated {cached} tokens from departing node {node_hash}")
+
             result = self.client.table("nodes").update(
                 {"status": "inactive"}
             ).eq("node_hash", node_hash).execute()
@@ -243,14 +291,16 @@ class SupabaseManager:
         try:
             result = self.client.table("nodes").select("*").eq("status", "active").execute()
             nodes = result.data or []
+            cumulative = self._get_cumulative_tokens()
             if not nodes:
-                return {"total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0, "total_tokens": 0}
+                return {"total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0, "total_tokens": cumulative}
             models = set(n["model_slug"] for n in nodes)
+            active_tokens = sum(n.get("total_tokens", 0) for n in nodes)
             return {
                 "total_nodes": len(nodes), "total_models": len(models),
                 "total_tps": round(sum(n.get("tps", 0) for n in nodes), 1),
                 "avg_load": round(sum(n.get("load", 0) for n in nodes) / len(nodes), 3),
-                "total_tokens": sum(n.get("total_tokens", 0) for n in nodes),
+                "total_tokens": cumulative + active_tokens,
             }
         except Exception as e:
             logger.error(f"Error getting network stats: {e}")
