@@ -140,15 +140,24 @@ async def lifespan(app: FastAPI):
 
     if gateway_client:
         try:
-            await asyncio.wait_for(gateway_client.unregister(), timeout=5.0)
+            await asyncio.wait_for(gateway_client.unregister(), timeout=3.0)
         except Exception:
             pass
     if heartbeat_manager:
-        await heartbeat_manager.stop()
+        try:
+            await asyncio.wait_for(heartbeat_manager.stop(), timeout=2.0)
+        except Exception:
+            pass
     if request_queue_manager:
-        await request_queue_manager.stop()
+        try:
+            await asyncio.wait_for(request_queue_manager.stop(), timeout=2.0)
+        except Exception:
+            pass
     if sse_manager:
-        await sse_manager.stop()
+        try:
+            await asyncio.wait_for(sse_manager.stop(), timeout=1.0)
+        except Exception:
+            pass
     logger.info("✅ Shutdown complete")
 
 async def trigger_post_uvicorn_join():
@@ -1604,7 +1613,7 @@ def start_server():
     uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host, port=config.port, log_level=log_level,
-        timeout_keep_alive=2, timeout_graceful_shutdown=2,
+        timeout_keep_alive=2, timeout_graceful_shutdown=5,
         access_log=False, loop="asyncio", http="httptools",
         lifespan="on", proxy_headers=True, forwarded_allow_ips="*",
     )
