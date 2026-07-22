@@ -2,6 +2,8 @@
 body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:var(--text)}
 .hero-section{background:linear-gradient(135deg,#0d6efd 0%,#6610f2 100%);color:#fff;padding:5rem 0}
 .hero-section .lead{font-size:1.5rem;opacity:.9}
+.hero-description{opacity:.85;max-width:600px;margin-left:auto;margin-right:auto}
+.hero-badges .badge{font-size:.8rem;padding:.4rem .75rem;border-radius:1rem}
 .stats-bar{background-color:#f8f9fa;border-bottom:1px solid #dee2e6}
 .stat-item{display:flex;flex-direction:column;align-items:center}
 .stat-value{font-size:2rem;font-weight:700;color:var(--primary)}
