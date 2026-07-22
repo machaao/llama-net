@@ -30,8 +30,7 @@ if [ "$LLAMANET_MODE" = "landing" ]; then
     echo "🌐 Starting llamanet.app gateway..."
 
     if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SECRET_KEY" ]; then
-        echo "❌ SUPABASE_URL and SUPABASE_SECRET_KEY must be set for gateway mode"
-        exit 1
+        echo "⚠️  SUPABASE_URL or SUPABASE_SECRET_KEY not detected in shell — Python will validate at startup"
     fi
 
     if ! $PYTHON_CMD -c "import supabase" 2>/dev/null; then
