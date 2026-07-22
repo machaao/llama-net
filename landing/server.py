@@ -405,6 +405,12 @@ async def publish_node(request: Request):
             gpu_info=body.get("gpu", ""), metrics=body.get("metrics", {}),
         )
 
+        # Track heartbeat from gossip publishes so the monitor doesn't mark it stale
+        _heartbeat_last_seen_map[node_hash] = {
+            "last_seen": time.time(),
+            "metrics": body.get("metrics", {})
+        }
+
         # Broadcast SSE event
         if sse_mgr:
             event_type = "node_joined" if is_new else "node_updated"
