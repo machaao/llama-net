@@ -66,6 +66,7 @@ download_manager = None  # Model download manager
 _peer_registry: Dict[str, Dict[str, Any]] = {}
 gossip_task = None
 _unpublish_sent = False
+_heartbeat_last_seen_map = {}  # node_hash -> {last_seen, last_metrics}
 
 
 _tunnel_url_cache = None
@@ -278,6 +279,9 @@ async def _connect_bootstrap_peers(peers_str: str):
                     if response.status == 200:
                         data = await response.json()
                         logger.info(f"✅ Registered with bootstrap peer: {url}")
+
+                        # Notify gateway of join event
+                        asyncio.create_task(_notify_bootstrap_peers_of_event("node_joined"))
 
                         # Register the bootstrap peer in our registry
                         bootstrap_id = data.get("node_id")
@@ -634,6 +638,12 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Lifespan shutdown initiated")
     shutdown_event.set()
 
+    # Push leave event to bootstrap peers before unpublishing
+    try:
+        await asyncio.wait_for(_notify_bootstrap_peers_of_event("node_left", {"reason": "server_shutdown"}), timeout=3.0)
+    except Exception as e:
+        logger.debug(f"Leave event notification failed: {e}")
+
     # Notify bootstrap peers that we're leaving
     try:
         await asyncio.wait_for(_unpublish_from_bootstrap_peers("server_shutdown"), timeout=5.0)
@@ -734,6 +744,10 @@ async def _broadcast_current_node_metrics():
         })
     except Exception as e:
         logger.debug(f"Post-generation metrics broadcast error: {e}")
+
+    # Push metric update to bootstrap peers for gateway SSE broadcast
+    if _peer_registry:
+        asyncio.create_task(_notify_bootstrap_peers_of_event("node_updated"))
 
 def _should_forward_request(request, target_node) -> bool:
     """Check if request should be forwarded to avoid loops"""
@@ -2231,6 +2245,74 @@ async def info():
         **p2p_info
     }
 
+async def _notify_bootstrap_peers_of_event(event_type: str, extra_data: Dict[str, Any] = None):
+    """Push a state-change event to all registered bootstrap peers (gateway servers)"""
+    if not _peer_registry:
+        return
+
+    own_model = config.model_name if not config.no_model_mode else "router"
+    own_metrics = llm.get_metrics() if llm else {}
+    own_url = _get_own_url()
+
+    event_data = {
+        "event_type": event_type,
+        "node_id": config.node_id,
+        "model": own_model,
+        "url": own_url,
+        "ip": get_host_ip(),
+        "port": config.port,
+        "metrics": own_metrics,
+        "timestamp": time.time(),
+        **(extra_data or {})
+    }
+
+    for peer_url in list(_peer_registry.keys()):
+        try:
+            async with _aiohttp_lib.ClientSession(
+                timeout=_aiohttp_lib.ClientTimeout(total=5)
+            ) as session:
+                async with session.post(
+                    f"{peer_url}/api/nodes/event",
+                    json=event_data
+                ) as response:
+                    if response.status == 200:
+                        logger.debug(f"📡 Event '{event_type}' sent to {peer_url}")
+                    else:
+                        logger.debug(f"Event '{event_type}' to {peer_url} returned {response.status}")
+        except Exception as e:
+            logger.debug(f"Could not send event to {peer_url}: {e}")
+
+
+async def _notify_peers_of_discovered_peer(peer_node_id: str, peer_url: str, peer_model: str):
+    """Notify bootstrap peers about a newly discovered peer via gossip"""
+    if not _peer_registry:
+        return
+
+    own_model = config.model_name if not config.no_model_mode else "router"
+
+    for peer_url in list(_peer_registry.keys()):
+        try:
+            async with _aiohttp_lib.ClientSession(
+                timeout=_aiohttp_lib.ClientTimeout(total=5)
+            ) as session:
+                async with session.post(
+                    f"{peer_url}/api/nodes/notify",
+                    json={
+                        "notifier_node_id": config.node_id,
+                        "notifier_model": own_model,
+                        "peers": [{
+                            "node_id": peer_node_id,
+                            "url": peer_url,
+                            "model": peer_model
+                        }]
+                    }
+                ) as response:
+                    if response.status == 200:
+                        logger.debug(f"📡 Notified {peer_url} about peer {peer_node_id[:8]}...")
+        except Exception as e:
+            logger.debug(f"Could not notify {peer_url} about peer: {e}")
+
+
 @app.get("/health")
 async def health():
     """Get node health status"""
@@ -3687,8 +3769,11 @@ async def select_model(request: Request):
             
             logger.info(f"Hot-reloading model: {config.model_path} -> {model_path}")
             llm.reload_model(model_path)
-            
+
             config.save_active_model(model_path, config.model_name)
+
+            # Notify bootstrap peers of model change
+            asyncio.create_task(_notify_bootstrap_peers_of_event("node_updated"))
             
             # Re-publish to DHT with updated model info
             if dht_publisher and dht_publisher.running:
