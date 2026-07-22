@@ -299,7 +299,7 @@ async def publish_node(request: Request):
         is_new = len(existing.data) == 0
 
         result = supabase_mgr.register_node(
-            user_id="public", node_hash=node_hash, model_name=model_name,
+            user_id="00000000-0000-0000-0000-000000000000", node_hash=node_hash, model_name=model_name,
             model_slug=model_slug, url=tunnel_url or body.get("url", ""),
             ip=body.get("ip", ""), port=body.get("port", 8000),
             gpu_info=body.get("gpu", ""), metrics=body.get("metrics", {}),
