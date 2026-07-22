@@ -11,8 +11,10 @@ LlamaNet is a decentralized inference swarm for LLM models using llama.cpp. It p
 ```bash
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
-pip install -r requirements.txt
+pip install -r requirements-inference.txt
 ```
+
+> **Note:** `requirements-inference.txt` includes full inference support (`llama-cpp-python`, GPU detection, DHT, P2P). The base `requirements.txt` contains only lightweight gateway dependencies for the hosted landing page at [llamanet.app](https://llamanet.app).
 
 ### Launch LlamaNet
 
@@ -280,6 +282,13 @@ python -m inference_node.server --model-path ./models/file.gguf
 - Python 3.8+
 - GGUF format models
 - 4GB+ RAM (depends on model size)
+
+### Dependency Files
+
+| File | Purpose |
+|------|---------|
+| `requirements-inference.txt` | Full inference node — includes `llama-cpp-python`, GPU libs, DHT, P2P |
+| `requirements.txt` | Lightweight gateway only — FastAPI, Supabase, no native compilation |
 
 ## Architecture
 
