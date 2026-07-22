@@ -44,13 +44,23 @@ download_manager = None
 gateway_client: Optional[GatewayClient] = None
 
 def _get_own_url() -> str:
-    """Get this node's public URL."""
+    """Get this node's public tunnel URL. Returns empty string if no tunnel."""
     if gateway_client:
         return gateway_client.own_url
     tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
     if tunnel_url:
         return tunnel_url.rstrip("/")
-    return f"http://{get_host_ip()}:{config.port}" if config else "http://localhost:8000"
+    # No tunnel — try file
+    tunnel_file = "/tmp/llamanet_tunnel_url"
+    try:
+        if os.path.exists(tunnel_file):
+            with open(tunnel_file) as f:
+                url = f.read().strip()
+                if url.startswith("http"):
+                    return url.rstrip("/")
+    except Exception:
+        pass
+    return ""
 
 # Gateway client handles all peer communication — no DHT, P2P, or discovery needed
 
@@ -170,8 +180,6 @@ async def _broadcast_current_node_metrics():
             "node_info": {
                 "node_id": config.node_id,
                 "url": _get_own_url(),
-                "ip": get_host_ip(),
-                "port": config.port,
                 "model": config.model_name,
                 "load": metrics.get("load", 0.0),
                 "tps": metrics.get("tps", 0.0),
@@ -277,7 +285,7 @@ async def list_network_models():
             "owned_by": "llamanet", "node_count": 0, "nodes": [],
         }
         models_dict[config.model_name]["nodes"].append({
-            "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+            "node_id": config.node_id, "url": _get_own_url(),
             "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
             "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
             "ttft": metrics.get("ttft", 0), "latency": metrics.get("latency", 0),
@@ -328,14 +336,14 @@ async def get_models_statistics():
                     "avg_load": metrics.get("load", 0),
                     "total_tps": metrics.get("tps", 0),
                     "best_node": {
-                        "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+                        "node_id": config.node_id, "url": _get_own_url(),
                         "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                         "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
                     },
                     "availability": "low",
                     "nodes": [
                         {
-                            "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+                            "node_id": config.node_id, "url": _get_own_url(),
                             "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                             "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
                             "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
@@ -1208,7 +1216,7 @@ async def network_events():
         try:
             yield f"data: {json.dumps({'type': 'connected', 'connection_id': connection_id})}\n\n"
             if llm and config:
-                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name, 'url': _get_own_url(), 'ip': get_host_ip(), 'port': config.port}})}\n\n"
+                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name, 'url': _get_own_url()}})}\n\n"
             while True:
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=25)
@@ -1598,7 +1606,7 @@ Options:
   --model-path PATH     Path to the GGUF model file (required if not using run command)
   --host HOST          Host to bind the service (default: 0.0.0.0)
   --port PORT          HTTP API port (default: 8000)
-  --dht-port PORT      DHT protocol port (default: 8001)
+  --tunnel             Enable Cloudflare tunnel for public URL
   --node-id ID         Unique node identifier (default: auto-generated)
   --bootstrap-nodes    Comma-separated bootstrap nodes (ip:port)
 
@@ -1623,11 +1631,11 @@ Examples:
   python -m inference_node.server \\
     --model-path ./models/model.gguf \\
     --port 8002 \\
-    --dht-port 8003 \\
-    --bootstrap-nodes localhost:8001
+    --bootstrap-peers https://llamanet.app \\
+    --tunnel
 
 Environment Variables:
-  MODEL_PATH, HOST, PORT, DHT_PORT, NODE_ID, BOOTSTRAP_NODES
+  MODEL_PATH, HOST, PORT, NODE_ID, BOOTSTRAP_PEERS
   (Command line arguments take precedence)
 
 OpenAI-Compatible Endpoints:
