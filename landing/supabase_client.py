@@ -15,7 +15,7 @@ class SupabaseManager:
         from supabase import create_client, Client
 
         self.url = os.environ.get("SUPABASE_URL", "")
-        self.anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+        self.anon_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
         self.service_key = os.environ.get("SUPABASE_SECRET_KEY", "")
 
         if not self.url or not self.service_key:
