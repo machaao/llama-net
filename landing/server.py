@@ -338,6 +338,36 @@ async def publish_node(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.post("/api/nodes/unpublish")
+async def unpublish_node(request: Request):
+    """Public endpoint for inference nodes to signal departure (no user auth required)"""
+    try:
+        body = await request.json()
+        node_id = body.get("node_id")
+        if not node_id:
+            return JSONResponse(status_code=400, content={"error": "node_id required"})
+
+        node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
+        model_name = body.get("model", "unknown")
+
+        # Mark node as inactive in Supabase
+        supabase_mgr.deregister_node(node_hash)
+
+        # Broadcast SSE departure event
+        if sse_mgr:
+            await sse_mgr.broadcast("node_left", {
+                "node_hash": node_hash,
+                "model_name": model_name,
+                "reason": body.get("reason", "graceful_shutdown"),
+            })
+
+        logger.info(f"📡 Node unpublished: {node_hash} model={model_name}")
+        return {"success": True, "node_hash": node_hash}
+    except Exception as e:
+        logger.error(f"Error in unpublish_node: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/api/nodes/mine")
 async def my_nodes(request: Request):
     user = await auth_mgr.get_current_user(request)

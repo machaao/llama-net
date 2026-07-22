@@ -65,6 +65,7 @@ request_queue_manager = None  # Request queue manager
 download_manager = None  # Model download manager
 _peer_registry: Dict[str, Dict[str, Any]] = {}
 gossip_task = None
+_unpublish_sent = False
 
 
 _tunnel_url_cache = None
@@ -380,6 +381,36 @@ async def _gossip_loop():
             logger.error(f"Gossip loop error: {e}")
 
 
+async def _unpublish_from_bootstrap_peers(reason: str = "graceful_shutdown"):
+    """Notify all bootstrap peers that this node is leaving"""
+    global _unpublish_sent
+    if _unpublish_sent or not _peer_registry:
+        return
+    _unpublish_sent = True
+
+    own_model = config.model_name if not config.no_model_mode else "router"
+
+    for url in list(_peer_registry.keys()):
+        try:
+            async with _aiohttp_lib.ClientSession(
+                timeout=_aiohttp_lib.ClientTimeout(total=5)
+            ) as session:
+                async with session.post(
+                    f"{url}/api/nodes/unpublish",
+                    json={
+                        "node_id": config.node_id,
+                        "model": own_model,
+                        "reason": reason,
+                    }
+                ) as response:
+                    if response.status == 200:
+                        logger.info(f"✅ Unpublished from {url}")
+                    else:
+                        logger.warning(f"Unpublish to {url} returned {response.status}")
+        except Exception as e:
+            logger.debug(f"Could not unpublish from {url}: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -544,6 +575,12 @@ async def lifespan(app: FastAPI):
     # Shutdown - Signal shutdown event first
     logger.info("🛑 Lifespan shutdown initiated")
     shutdown_event.set()
+
+    # Notify bootstrap peers that we're leaving
+    try:
+        await asyncio.wait_for(_unpublish_from_bootstrap_peers("server_shutdown"), timeout=5.0)
+    except Exception as e:
+        logger.debug(f"Unpublish notification failed: {e}")
     
     # Clean up ProcessPoolExecutor first to prevent semaphore warnings
     if executor:
