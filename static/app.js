@@ -506,17 +506,10 @@ class LlamaNetUI {
                 return null;
             }
             
-            // Normalize IP if present (handle localhost)
-            if (nodeData.ip === 'localhost') nodeData.ip = '127.0.0.1';
-            
-            // Ensure port is a number
-            const port = parseInt(nodeData.port) || 0;
-            
             // Return normalized and validated data with all NodeInfo fields
             return {
                 node_id: nodeData.node_id,
-                ip: nodeData.ip,
-                port: port,
+                url: nodeData.url || '',
                 model: nodeData.model || nodeData.model_name || nodeData.id || 'unknown',
                 load: parseFloat(nodeData.load) || 0,
                 tps: parseFloat(nodeData.tps) || 0,
@@ -529,10 +522,7 @@ class LlamaNetUI {
                 last_significant_change: nodeData.last_significant_change || null,
                 change_reason: nodeData.change_reason || null,
                 
-                // Multi-IP support from NodeInfo model
-                available_ips: nodeData.available_ips || null,
-                ip_types: nodeData.ip_types || null,
-                preferred_ip: nodeData.preferred_ip || null,
+                // Tunnel URL (primary address)
                 
                 // Additional metadata from NodeInfo model
                 cpu_info: nodeData.cpu_info || null,
@@ -1608,7 +1598,7 @@ class LlamaNetUI {
                     <h6><i class="fas fa-server"></i> Node Information (Real-time)</h6>
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${nodeData.node_id}<br>
-                        <strong>Address:</strong> ${this.getNodeAddress(nodeData)}${nodeData.url ? '<br><code class="small">' + this.escapeHtml(nodeData.url) + '</code>' : ''}<br>
+                        <strong>Address:</strong> ${nodeData.url ? '<code class="small">' + this.escapeHtml(nodeData.url) + '</code>' : 'local'}<br>
                         <strong>Model:</strong> ${nodeData.model}<br>
                         <strong>Last Seen:</strong> ${lastSeenText}
                     </div>
@@ -1688,7 +1678,7 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${nodeInfo.node_id}<br>
                         <strong>Status:</strong> ${statusBadge} ${isCurrentNode ? '<span class="badge bg-primary ms-1">Current Node</span>' : ''}<br>
-                        <strong>Address:</strong> ${this.getNodeAddress(nodeInfo)}${nodeInfo.url ? '<br><code class="small">' + this.escapeHtml(nodeInfo.url) + '</code>' : ''}<br>
+                        <strong>Address:</strong> ${nodeInfo.url ? '<code class="small">' + this.escapeHtml(nodeInfo.url) + '</code>' : 'local'}<br>
                         <strong>Model:</strong> ${nodeInfo.model}<br>
                         ${nodeInfo.model_path ? `<strong>Model Path:</strong> ${nodeInfo.model_path}<br>` : ''}
                         <strong>Last Seen:</strong> ${lastSeenText}
@@ -2353,7 +2343,6 @@ class LlamaNetUI {
         if (node.url) {
             try { return new URL(node.url).hostname; } catch (e) { return node.url; }
         }
-        if (node.ip) return `${node.ip}:${node.port || '?'}`;
         return 'local';
     }
     
