@@ -14,7 +14,7 @@ cd llama-net
 pip install -r requirements-inference.txt
 
 # Start the node (no model needed — download via Web UI)
-./start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
 ```
 
 1. Open **http://localhost:8000** — the Model Manager opens automatically
@@ -25,7 +25,7 @@ pip install -r requirements-inference.txt
 You can also pre-load a model at startup:
 
 ```bash
-./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
   --tunnel \
   --bootstrap-peers https://llamanet.app
 ```
@@ -57,7 +57,7 @@ Get a free API key at [llamanet.app](https://llamanet.app).
 ```
 GPU Owner                          API Consumer
 ─────────                          ────────────
-./start-app.sh run \               client = openai.OpenAI(
+sh start-app.sh run \               client = openai.OpenAI(
   hf.co/user/Model:Q4_K_M \         base_url="https://llamanet.app/v1",
   --tunnel \                         api_key="ln-xxx"
   --bootstrap-peers \              )
@@ -136,7 +136,7 @@ A tunnel URL is **required** to join the LlamaNet network. The `--tunnel` flag h
 ### Quick Tunnel (No Account Needed)
 
 ```bash
-./start-app.sh run hf.co/user/Model:Q4_K_M --tunnel
+sh start-app.sh run hf.co/user/Model:Q4_K_M --tunnel
 ```
 
 Generates a temporary URL that changes on restart. No Cloudflare account needed.
@@ -147,7 +147,7 @@ Generates a temporary URL that changes on restart. No Cloudflare account needed.
 cloudflared tunnel login
 cloudflared tunnel create bootstrap
 cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
-./start-app.sh run hf.co/user/Model:Q4_K_M --tunnel
+sh start-app.sh run hf.co/user/Model:Q4_K_M --tunnel
 ```
 
 The URL persists across restarts.
