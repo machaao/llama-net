@@ -2485,7 +2485,7 @@ class LlamaNetUI {
         
         setTimeout(() => {
             if (!this.isConnected) {
-                this.startRealTimeNetworkMonitoring();
+                this.startUnifiedSSENetworkMonitoring();
             }
         }, delay);
     }
