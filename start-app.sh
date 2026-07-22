@@ -5,6 +5,14 @@
 
 set -e
 
+# ── MACHAAO Cloud Detection ──
+# When running on MACHAAO cloud, default to landing/gateway mode
+# because inference nodes need GPU and run on user machines
+if [ -n "$MACHAAO_APP_ID" ]; then
+    export LLAMANET_MODE="landing"
+    echo "🌐 MACHAAO cloud detected — starting gateway mode"
+fi
+
 # Detect Python interpreter (prefer python3 for portability)
 if [ -n "$VIRTUAL_ENV" ] && command -v python >/dev/null 2>&1; then
     PYTHON_CMD="python"
@@ -162,13 +170,29 @@ else
 fi
 
 # Check if Python dependencies are installed
-if ! $PYTHON_CMD -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
-    echo "📦 Installing Python dependencies..."
-    if [ -f "requirements.txt" ]; then
-        $PYTHON_CMD -m pip install -r requirements.txt
-    else
-        echo "❌ Error: requirements.txt not found"
-        exit 1
+if [ "$LLAMANET_MODE" = "landing" ]; then
+    # Gateway mode: only need lightweight dependencies
+    if ! $PYTHON_CMD -c "import fastapi, uvicorn" 2>/dev/null; then
+        echo "📦 Installing gateway dependencies..."
+        if [ -f "requirements.txt" ]; then
+            $PYTHON_CMD -m pip install -r requirements.txt
+        else
+            echo "❌ Error: requirements.txt not found"
+            exit 1
+        fi
+    fi
+else
+    # Inference mode: need full dependencies including llama-cpp-python
+    if ! $PYTHON_CMD -c "import fastapi, uvicorn, llama_cpp" 2>/dev/null; then
+        echo "📦 Installing inference dependencies..."
+        if [ -f "requirements-inference.txt" ]; then
+            $PYTHON_CMD -m pip install -r requirements-inference.txt
+        elif [ -f "requirements.txt" ]; then
+            $PYTHON_CMD -m pip install -r requirements.txt
+        else
+            echo "❌ Error: requirements.txt not found"
+            exit 1
+        fi
     fi
 fi
 

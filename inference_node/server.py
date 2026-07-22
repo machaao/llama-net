@@ -11,6 +11,7 @@ import sys
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, Union, List, Optional
 from contextlib import asynccontextmanager
 import json
@@ -520,6 +521,19 @@ async def trigger_post_uvicorn_join():
         logger.error(f"❌ Failed to trigger post-uvicorn join event: {e}")
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
+
+# CORS — allow MACHAAO cloud domains and local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8000",
+        "http://localhost:3000",
+    ],
+    allow_origin_regex=r"^https?://([a-zA-Z0-9-]+\.)*machaao\.com$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -3586,11 +3600,12 @@ def start_server():
     os.environ['PYTHONWARNINGS'] = "ignore:semaphore:UserWarning:multiprocessing.resource_tracker"
     
     # Configure uvicorn with optimized shutdown settings
+    log_level = os.environ.get("LOG_LEVEL", "info")
     uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host,
         port=config.port,
-        log_level="info",
+        log_level=log_level,
         # Optimized shutdown configuration
         timeout_keep_alive=2,
         timeout_graceful_shutdown=5,  # Reduced from 10 to 5 seconds
@@ -3598,7 +3613,9 @@ def start_server():
         # Additional uvicorn optimizations
         loop="asyncio",
         http="httptools",
-        lifespan="on"
+        lifespan="on",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )
     
     server = uvicorn.Server(uvicorn_config)

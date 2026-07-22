@@ -5,6 +5,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from common.utils import get_logger
 from landing.supabase_client import SupabaseManager
@@ -57,6 +58,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LlamaNet Gateway", lifespan=lifespan)
+
+# CORS — allow MACHAAO cloud domains and local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://llamanet.app",
+        "http://localhost:8000",
+        "http://localhost:3000",
+    ],
+    allow_origin_regex=r"^https?://([a-zA-Z0-9-]+\.)*machaao\.com$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -234,10 +250,13 @@ async def openai_completions(request: Request):
 def start_server():
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
+    log_level = os.environ.get("LOG_LEVEL", "info")
     uvicorn_config = uvicorn.Config(
-        "landing.server:app", host=host, port=port, log_level="info",
+        "landing.server:app", host=host, port=port, log_level=log_level,
         timeout_keep_alive=2, access_log=False, loop="asyncio",
         http="httptools", lifespan="on",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )
     server = uvicorn.Server(uvicorn_config)
     try:
