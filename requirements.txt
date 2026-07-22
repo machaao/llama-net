@@ -13,3 +13,5 @@ ipaddress>=1.0.23
 httptools
 tqdm>=4.64.0
 huggingface_hub>=0.0.1
+supabase>=2.0.0
+python-jose[cryptography]>=3.3.0

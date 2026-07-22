@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LlamaNet — Decentralized AI Inference Network</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦙</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/"><i class="fas fa-network-wired"></i> LlamaNet</a>
+            <div class="d-flex align-items-center">
+                <a href="#models" class="btn btn-outline-light me-2 btn-sm"><i class="fas fa-search"></i> Models</a>
+                <a href="#" class="btn btn-outline-light me-2 btn-sm" id="nav-signin" onclick="app.signInWithGoogle()"><i class="fab fa-google"></i> Sign In</a>
+                <a href="#" class="btn btn-light btn-sm d-none" id="nav-dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+                <span class="d-none ms-2" id="nav-user"><img id="nav-avatar" src="" alt="" class="rounded-circle" width="28" height="28"></span>
+            </div>
+        </div>
+    </nav>
+    <section class="hero-section">
+        <div class="container text-center">
+            <h1 class="display-4 fw-bold">🦙 LlamaNet</h1>
+            <p class="lead mb-4">Decentralized AI Inference Network</p>
+            <p class="mb-4">Run AI models on your hardware. Share compute with the world.<br>One API. Every model. Thousands of nodes.</p>
+            <div class="d-flex justify-content-center gap-3 mb-4">
+                <a href="#" class="btn btn-light btn-lg" onclick="app.signInWithGoogle()"><i class="fab fa-google"></i> Get Your Free API Key</a>
+                <a href="https://github.com/machaao/llama-net" class="btn btn-outline-light btn-lg" target="_blank"><i class="fab fa-github"></i> View on GitHub</a>
+            </div>
+        </div>
+    </section>
+    <section class="stats-bar py-3">
+        <div class="container">
+            <div class="row text-center">
+                <div class="col-3"><div class="stat-item"><span class="stat-value" id="stat-nodes">—</span><span class="stat-label"><i class="fas fa-server"></i> Nodes</span></div></div>
+                <div class="col-3"><div class="stat-item"><span class="stat-value" id="stat-models">—</span><span class="stat-label"><i class="fas fa-brain"></i> Models</span></div></div>
+                <div class="col-3"><div class="stat-item"><span class="stat-value" id="stat-tps">—</span><span class="stat-label"><i class="fas fa-bolt"></i> TPS</span></div></div>
+                <div class="col-3"><div class="stat-item"><span class="stat-value" id="stat-load">—</span><span class="stat-label"><i class="fas fa-tachometer-alt"></i> Avg Load</span></div></div>
+            </div>
+        </div>
+    </section>
+    <section id="models" class="py-5">
+        <div class="container">
+            <h2 class="text-center mb-4"><i class="fas fa-search"></i> Find a Model</h2>
+            <div class="row justify-content-center">
+                <div class="col-md-8">
+                    <div class="input-group input-group-lg mb-3">
+                        <input type="text" class="form-control" id="model-search" placeholder="Search models... (e.g. qwen, llama, mistral)" autocomplete="off">
+                        <button class="btn btn-primary" onclick="app.searchModels()"><i class="fas fa-search"></i> Search</button>
+                    </div>
+                    <div class="text-center mb-4">
+                        <span class="text-muted">Popular:</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-1" onclick="app.quickSearch('llama')">Llama</button>
+                        <button class="btn btn-sm btn-outline-secondary ms-1" onclick="app.quickSearch('qwen')">Qwen</button>
+                        <button class="btn btn-sm btn-outline-secondary ms-1" onclick="app.quickSearch('mistral')">Mistral</button>
+                        <button class="btn btn-sm btn-outline-secondary ms-1" onclick="app.quickSearch('phi')">Phi</button>
+                        <button class="btn btn-sm btn-outline-secondary ms-1" onclick="app.quickSearch('deepseek')">DeepSeek</button>
+                    </div>
+                </div>
+            </div>
+            <div id="model-results" class="row justify-content-center">
+                <div class="col-md-8 text-center"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Loading available models...</p></div>
+            </div>
+        </div>
+    </section>
+    <section class="py-5 bg-light">
+        <div class="container">
+            <h2 class="text-center mb-5">How It Works</h2>
+            <div class="row g-4">
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">1</div><h5>Install</h5><p class="text-muted">pip install llamanet</p></div></div>
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">2</div><h5>Run a Model</h5><p class="text-muted">llamanet run hf.co/user/Model:Q4_K_M</p></div></div>
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">3</div><h5>Get API Key</h5><p class="text-muted">Sign in with Google at llamanet.app</p></div></div>
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">4</div><h5>Use the API</h5><p class="text-muted">OpenAI-compatible, auto-routed</p></div></div>
+            </div>
+        </div>
+    </section>
+    <section class="py-5">
+        <div class="container">
+            <h2 class="text-center mb-4">Quick Start</h2>
+            <div class="row justify-content-center">
+                <div class="col-md-8">
+                    <div class="code-block mb-3">
+                        <div class="code-header"><span>Python</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                        <pre><code>import openai
+
+client = openai.OpenAI(
+    base_url="https://llamanet.app/v1",
+    api_key="your-api-key"
+)
+
+response = client.chat.completions.create(
+    model="Qwen2.5-7B-Instruct",
+    messages=[{"role": "user", "content": "Hello!"}],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")</code></pre>
+                    </div>
+                    <div class="code-block mb-3">
+                        <div class="code-header"><span>curl</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                        <pre><code>curl https://llamanet.app/v1/chat/completions \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "Qwen2.5-7B-Instruct", "messages": [{"role": "user", "content": "Hello!"}]}'</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <section class="py-5 bg-light">
+        <div class="container">
+            <h2 class="text-center mb-5">Features</h2>
+            <div class="row g-4">
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-exchange-alt fa-2x text-primary mb-3"></i><h5>OpenAI Compatible</h5><p class="text-muted small">Drop-in replacement for any OpenAI client</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-globe fa-2x text-primary mb-3"></i><h5>Free Public URLs</h5><p class="text-muted small">Automatic Cloudflare tunnels, zero config</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-search fa-2x text-primary mb-3"></i><h5>Model Discovery</h5><p class="text-muted small">Search and connect to models across the network</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-sync fa-2x text-primary mb-3"></i><h5>Hot Reload</h5><p class="text-muted small">Switch models without restarting your node</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-brain fa-2x text-primary mb-3"></i><h5>Reasoning Support</h5><p class="text-muted small">DeepSeek-R1, Qwen reasoning models</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-project-diagram fa-2x text-primary mb-3"></i><h5>DHT Discovery</h5><p class="text-muted small">Kademlia-based peer discovery, no central server</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-balance-scale fa-2x text-primary mb-3"></i><h5>Load Balancing</h5><p class="text-muted small">Auto-route to the best available node</p></div></div>
+                <div class="col-md-3"><div class="feature-card text-center"><i class="fas fa-microchip fa-2x text-primary mb-3"></i><h5>GPU Auto-detect</h5><p class="text-muted small">NVIDIA, Apple Silicon, CPU fallback</p></div></div>
+            </div>
+        </div>
+    </section>
+    <footer class="py-4 bg-dark text-white">
+        <div class="container text-center">
+            <p class="mb-2">Made with ❤️ using <a href="https://machai.live" class="text-info">MACH-AI</a></p>
+            <div>
+                <a href="https://github.com/machaao/llama-net" class="text-white-50 me-3"><i class="fab fa-github"></i> GitHub</a>
+                <a href="#" class="text-white-50 me-3"><i class="fas fa-book"></i> Docs</a>
+                <a href="#" class="text-white-50"><i class="fab fa-discord"></i> Discord</a>
+            </div>
+        </div>
+    </footer>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/landing.js"></script>
+</body>
+</html>

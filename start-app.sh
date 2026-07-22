@@ -17,6 +17,27 @@ else
     exit 1
 fi
 
+# ── Landing/Gateway Mode Detection ──
+if [ "$LLAMANET_MODE" = "landing" ]; then
+    echo "🌐 Starting llamanet.app gateway..."
+
+    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+        echo "❌ SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for gateway mode"
+        exit 1
+    fi
+
+    if ! $PYTHON_CMD -c "import supabase" 2>/dev/null; then
+        echo "📦 Installing Supabase client..."
+        $PYTHON_CMD -m pip install supabase python-jose[cryptography]
+    fi
+
+    if ! $PYTHON_CMD -c "import landing" 2>/dev/null; then
+        $PYTHON_CMD -m pip install -e .
+    fi
+
+    exec $PYTHON_CMD -m landing.server
+fi
+
 echo "🐍 Using Python: $PYTHON_CMD ($($PYTHON_CMD --version 2>&1))"
 
 echo "🚀 Starting LlamaNet OpenAI-Compatible Inference Node..."
