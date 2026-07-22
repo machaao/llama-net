@@ -194,13 +194,17 @@ async def _connect_bootstrap_peers(peers_str: str):
                 timeout=_aiohttp_lib.ClientTimeout(total=10)
             ) as session:
                 async with session.post(
-                    f"{url}/peers/register",
+                    f"{url}/api/nodes/publish",
                     json={
                         "node_id": config.node_id,
                         "url": own_url,
+                        "tunnel_url": os.environ.get("LLAMANET_TUNNEL_URL", ""),
                         "model": own_model,
+                        "ip": get_host_ip(),
+                        "port": config.port,
                         "load": own_metrics.get("load", 0),
-                        "tps": own_metrics.get("tps", 0)
+                        "tps": own_metrics.get("tps", 0),
+                        "metrics": own_metrics
                     }
                 ) as response:
                     if response.status == 200:
@@ -268,13 +272,15 @@ async def _gossip_loop():
                         timeout=_aiohttp_lib.ClientTimeout(total=8)
                     ) as session:
                         async with session.post(
-                            f"{peer['url']}/peers/register",
+                            f"{peer['url']}/api/nodes/publish",
                             json={
                                 "node_id": config.node_id,
                                 "url": own_url,
+                                "tunnel_url": os.environ.get("LLAMANET_TUNNEL_URL", ""),
                                 "model": own_model,
-                                "load": own_metrics.get("load", 0),
-                                "tps": own_metrics.get("tps", 0)
+                                "ip": get_host_ip(),
+                                "port": config.port,
+                                "metrics": own_metrics
                             }
                         ) as response:
                             if response.status == 200:

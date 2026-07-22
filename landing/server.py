@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import hashlib
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +11,7 @@ from contextlib import asynccontextmanager
 from common.utils import get_logger
 from landing.supabase_client import SupabaseManager
 from landing.auth import AuthManager
-from landing.node_registry import NodeRegistry, CloudflareClient
+from landing.node_registry import NodeRegistry, CloudflareClient, model_name_to_slug
 from landing.router import ModelRouter
 
 logger = get_logger(__name__)
@@ -190,6 +191,33 @@ async def deregister_node(node_hash: str, request: Request):
     if not user:
         return JSONResponse(status_code=401, content={"error": "Authentication required"})
     return {"success": await registry.deregister(node_hash)}
+
+
+@app.post("/api/nodes/publish")
+async def publish_node(request: Request):
+    """Public endpoint for inference nodes to self-register (no user auth required)"""
+    try:
+        body = await request.json()
+        node_id = body.get("node_id")
+        if not node_id:
+            return JSONResponse(status_code=400, content={"error": "node_id required"})
+
+        node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
+        model_name = body.get("model", "unknown")
+        model_slug = model_name_to_slug(model_name)
+        tunnel_url = body.get("tunnel_url", "")
+
+        result = registry.db.register_node(
+            user_id="public", node_hash=node_hash, model_name=model_name,
+            model_slug=model_slug, url=tunnel_url or body.get("url", ""),
+            ip=body.get("ip", ""), port=body.get("port", 8000),
+            gpu_info=body.get("gpu", ""), metrics=body.get("metrics", {}),
+        )
+        logger.info(f"Published node {node_hash} model={model_name}")
+        return {"success": True, "node_hash": node_hash}
+    except Exception as e:
+        logger.error(f"Error in publish_node: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/api/nodes/mine")
