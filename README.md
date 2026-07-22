@@ -6,20 +6,31 @@ Run any open-source LLM on your hardware. Get a public API in 60 seconds.
 
 ## Quick Start
 
-### GPU Owner — Run a Model
+### GPU Owner — Run a Node
 
 ```bash
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
 
-# Run a model and join the network
+# Start the node (no model needed — download via Web UI)
+./start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+```
+
+1. Open **http://localhost:8000** — the Model Manager opens automatically
+2. Search for a GGUF model (e.g. `qwen`, `llama`, `mistral`)
+3. Click **Download** — progress streams in real time
+4. Click **Use** — the model hot-loads and your node joins the network
+
+You can also pre-load a model at startup:
+
+```bash
 ./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
   --tunnel \
   --bootstrap-peers https://llamanet.app
 ```
 
-Your node is now live with a public URL and discoverable by anyone.
+Models can be switched at any time via the Web UI without restarting the node.
 
 ### API Consumer — Use the Network
 
@@ -71,12 +82,13 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 
 ## Features
 
+- **No-Model Mode** — Start your node instantly, download models later via the Web UI
+- **Hot Reload** — Switch models without restarting your node — download, select, done
 - **OpenAI-Compatible API** — Drop-in replacement for any OpenAI client
 - **Free Public URLs** — Automatic Cloudflare tunnels, zero config
 - **Web UI** — Built-in model manager, chat interface, and network dashboard at `localhost:8000`
 - **Model Manager** — Search Hugging Face, download GGUF models with real-time progress, switch models without restarting
 - **Model Discovery** — Search and connect to models across the network
-- **Hot Reload** — Switch models without restarting your node
 - **Reasoning Support** — DeepSeek-R1, Qwen reasoning models with streaming reasoning content
 - **Gateway Routing** — Central gateway with automatic node discovery and load balancing
 - **Real-time Network** — SSE-powered live updates for node status, model availability, and metrics
@@ -96,20 +108,26 @@ All peer discovery and communication goes through the gateway. There is no peer-
 
 Every inference node serves a built-in web UI at `http://localhost:8000`:
 
+- **Model Manager** — Search Hugging Face for GGUF models, download with real-time progress, switch models without restarting. Opens automatically when no model is loaded.
 - **Chat Interface** — Talk to your model with streaming responses and markdown rendering
-- **Model Manager** — Search Hugging Face for GGUF models, download with progress tracking, switch models on the fly
 - **Network Dashboard** — See all connected nodes, models, and real-time metrics via SSE
 - **System Prompt** — Configure custom system prompts with presets
 
-On first launch with no model, the Model Manager opens automatically.
+The typical workflow is: start your node → open the Web UI → download a model → chat. Switching models is instant — no restart required.
+
+**No-Model Mode:** When started without a model, the node launches in router-only mode. It can still forward requests to other nodes on the network. Use the Model Manager to download and hot-load a model when ready.
 
 ## URL Formats
+
+These formats work with `./start-app.sh run` and the Web UI Model Manager:
 
 ```bash
 hf.co/user/model                 # Latest
 hf.co/user/model:Q4_K_M         # With quantization
 user/model:Q4_K_M               # Short format
 ```
+
+The Model Manager also accepts plain search queries — just type a model name and browse results.
 
 ## Cloudflare Tunnels
 
