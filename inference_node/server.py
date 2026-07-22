@@ -42,6 +42,7 @@ sse_manager = None
 request_queue_manager = None
 download_manager = None
 gateway_client: Optional[GatewayClient] = None
+_active_sse_tasks: set = set()
 
 def _get_own_url() -> str:
     """Get this node's public tunnel URL. Returns empty string if no tunnel."""
@@ -127,6 +128,16 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("🛑 Shutting down...")
+
+    # Cancel all active SSE tasks first to prevent blocking during shutdown
+    global _active_sse_tasks
+    if _active_sse_tasks:
+        logger.info(f"Cancelling {len(_active_sse_tasks)} active SSE connections...")
+        for task in _active_sse_tasks:
+            task.cancel()
+        await asyncio.gather(*_active_sse_tasks, return_exceptions=True)
+        _active_sse_tasks.clear()
+
     if gateway_client:
         try:
             await asyncio.wait_for(gateway_client.unregister(), timeout=5.0)
@@ -1211,7 +1222,11 @@ async def network_events():
         raise HTTPException(status_code=503, detail="SSE not initialized")
 
     async def event_generator():
+        global _active_sse_tasks
         connection_id = f"sse_{uuid.uuid4().hex[:8]}"
+        task = asyncio.current_task()
+        _active_sse_tasks.add(task)
+
         event_queue = await sse_manager.add_connection(connection_id)
         try:
             yield f"data: {json.dumps({'type': 'connected', 'connection_id': connection_id})}\n\n"
@@ -1223,9 +1238,10 @@ async def network_events():
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
+            _active_sse_tasks.discard(task)
             await sse_manager.remove_connection(connection_id)
 
     return StreamingResponse(
@@ -1579,7 +1595,7 @@ def start_server():
     uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host, port=config.port, log_level=log_level,
-        timeout_keep_alive=2, timeout_graceful_shutdown=5,
+        timeout_keep_alive=2, timeout_graceful_shutdown=2,
         access_log=False, loop="asyncio", http="httptools",
         lifespan="on", proxy_headers=True, forwarded_allow_ips="*",
     )
