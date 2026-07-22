@@ -9,6 +9,12 @@ class LandingApp {
         this.init();
     }
     async init() {
+        // Handle Supabase OAuth callback (may land on root URL with hash fragment)
+        if (window.location.hash && window.location.hash.includes('access_token')) {
+            this._handleAuthCallback();
+            return;
+        }
+
         await this.checkAuth();
         this.connectSSE();
         // Fallback: if SSE initial_state doesn't arrive within 3s, use API
@@ -104,6 +110,22 @@ class LandingApp {
         if (tokens >= 1000) return (tokens / 1000).toFixed(1) + 'K';
         return tokens.toString();
     }
+    _handleAuthCallback() {
+        const hash = window.location.hash;
+        if (hash) {
+            const params = new URLSearchParams(hash.substring(1));
+            const accessToken = params.get('access_token');
+            if (accessToken) {
+                document.cookie = 'llamanet_session=' + accessToken + '; path=/; max-age=604800; SameSite=Lax';
+                localStorage.setItem('supabase_access_token', accessToken);
+                const refreshToken = params.get('refresh_token');
+                if (refreshToken) localStorage.setItem('supabase_refresh_token', refreshToken);
+            }
+        }
+        // Clear hash and redirect to dashboard
+        window.location.href = '/dashboard';
+    }
+
     async checkAuth() {
         try {
             const resp = await fetch(`${this.baseUrl}/auth/me`, { credentials: 'include' });

@@ -10,7 +10,7 @@
                 var params = new URLSearchParams(hash.substring(1));
                 var accessToken = params.get('access_token');
                 if (accessToken) {
-                    document.cookie = 'llamanet_session=' + accessToken + '; path=/; max-age=604800; Secure; SameSite=Strict';
+                    document.cookie = 'llamanet_session=' + accessToken + '; path=/; max-age=604800; SameSite=Lax';
                     localStorage.setItem('supabase_access_token', accessToken);
                     var refreshToken = params.get('refresh_token');
                     if (refreshToken) localStorage.setItem('supabase_refresh_token', refreshToken);

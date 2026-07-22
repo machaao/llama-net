@@ -236,9 +236,11 @@ async def dashboard_page():
 
 @app.get("/auth/google")
 async def auth_google(request: Request):
+    from urllib.parse import quote
     supabase_url = os.environ.get("SUPABASE_URL", "")
     redirect_to = os.environ.get("LLAMANET_APP_URL") or str(request.base_url).rstrip("/")
-    return JSONResponse({"url": f"{supabase_url}/auth/v1/authorize?provider=google&redirect_to={redirect_to}/auth/callback"})
+    callback_url = f"{redirect_to}/auth/callback"
+    return JSONResponse({"url": f"{supabase_url}/auth/v1/authorize?provider=google&redirect_to={quote(callback_url, safe='')}"})
 
 
 @app.get("/auth/callback")
