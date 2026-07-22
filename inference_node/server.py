@@ -31,6 +31,8 @@ from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
 from inference_node.event_publisher import GatewayEventPublisher
 from common.utils import get_logger, get_host_ip
+from common.rate_limiter import RateLimiter
+from common.request_validator import RequestValidator, ValidationError
 
 logger = get_logger(__name__)
 
@@ -43,6 +45,7 @@ sse_manager = None
 request_queue_manager = None
 download_manager = None
 gateway_client: Optional[GatewayClient] = None
+rate_limiter = None
 _active_sse_tasks: set = set()
 
 def _get_own_url() -> str:
@@ -93,7 +96,7 @@ def _sync_tunnel_url_to_gateway(url: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global config, llm, system_info, heartbeat_manager, sse_manager, request_queue_manager, download_manager, gateway_client
+    global config, llm, system_info, heartbeat_manager, sse_manager, request_queue_manager, download_manager, gateway_client, rate_limiter
 
     try:
         config = InferenceConfig()
@@ -102,6 +105,13 @@ async def lifespan(app: FastAPI):
         download_manager = DownloadManager()
         request_queue_manager = RequestQueueManager(max_queue_size=50)
         await request_queue_manager.start()
+
+        rate_limiter = RateLimiter(
+            key_rpm=60, key_rph=500, key_concurrent=3,
+            ip_rpm=20, ip_rph=200,
+            global_rpm=200, global_concurrent=30,
+            burst_rps=5, sse_per_ip=3, sse_global=100,
+        )
 
         if config.no_model_mode:
             logger.warning("⚠️  Starting in NO-MODEL MODE")
@@ -239,6 +249,35 @@ async def _wait_for_tunnel_and_register():
         logger.error(f"Failed to register with gateway: {e}")
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
+
+
+@app.exception_handler(ValidationError)
+async def validation_error_handler(request: Request, exc: ValidationError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"message": exc.message, "type": "validation_error"}},
+    )
+
+
+async def _enforce_node_rate_limit(request: Request):
+    """Enforce rate limits on inference node endpoints."""
+    if not rate_limiter:
+        return None
+    allowed, details = await rate_limiter.check_rate_limit(request, "inference")
+    if not allowed:
+        retry_after = details.get("retry_after", 60)
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "message": details.get("message", "Rate limit exceeded."),
+                    "type": "rate_limit_error",
+                }
+            },
+            headers={"Retry-After": str(int(retry_after) + 1)}
+        )
+    return None
+
 
 # CORS — allow MACHAAO cloud domains and local development
 app.add_middleware(
@@ -516,8 +555,16 @@ async def get_models_statistics():
     return statistics
 
 @app.post("/v1/completions")
-async def create_completion(request: OpenAICompletionRequest):
+async def create_completion(request: Request, body: OpenAICompletionRequest):
     """Text completion — handle locally or route to best peer."""
+    limit_resp = await _enforce_node_rate_limit(request)
+    if limit_resp:
+        return limit_resp
+    try:
+        RequestValidator.validate_completion_request(body.dict())
+    except ValidationError:
+        raise
+    request = body
     if config and config.no_model_mode and not llm:
         if not gateway_client:
             raise HTTPException(status_code=503, detail="No model loaded, no peers available")
@@ -837,8 +884,16 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
         return await _handle_completion_locally(request)
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(request: OpenAIChatCompletionRequest):
+async def create_chat_completion(request: Request, body: OpenAIChatCompletionRequest):
     """Chat completion — handle locally or route to best peer."""
+    limit_resp = await _enforce_node_rate_limit(request)
+    if limit_resp:
+        return limit_resp
+    try:
+        RequestValidator.validate_chat_request(body.dict())
+    except ValidationError:
+        raise
+    request = body
     if config and config.no_model_mode and not llm:
         if not gateway_client:
             raise HTTPException(status_code=503, detail="No model loaded, no peers available")
@@ -1315,9 +1370,14 @@ async def tunnel_status():
 
 
 @app.get("/events/network")
-async def network_events():
+async def network_events(request: Request):
     if not sse_manager:
         raise HTTPException(status_code=503, detail="SSE not initialized")
+    if rate_limiter:
+        allowed, details = await rate_limiter.check_sse_connection(request)
+        if not allowed:
+            return JSONResponse(status_code=429, content={"error": details})
+        await rate_limiter.track_sse_open(request)
 
     async def event_generator():
         global _active_sse_tasks
@@ -1339,6 +1399,8 @@ async def network_events():
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
+            if rate_limiter:
+                await rate_limiter.track_sse_close(request)
             _active_sse_tasks.discard(task)
             await sse_manager.remove_connection(connection_id)
 

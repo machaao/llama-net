@@ -1,9 +1,14 @@
 import json
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any, Union, AsyncGenerator
 import time
 import uuid
+
+# Validation constants
+_MAX_MESSAGE_COUNT = 50
+_MAX_MESSAGE_CHARS = 100_000
+_MAX_MAX_TOKENS = 16384
 
 class NodeInfo(BaseModel):
     """Information about an inference node"""
@@ -24,17 +29,30 @@ class NodeInfo(BaseModel):
 # OpenAI-compatible models with reasoning support
 class OpenAIMessage(BaseModel):
     """OpenAI chat message format with reasoning support"""
-    role: str  # "system", "user", "assistant"
+    role: str
     content: str
-    reasoning_content: Optional[str] = None  # Add reasoning_content field for reasoning models
+    reasoning_content: Optional[str] = None
+
+    @validator('role')
+    def validate_role(cls, v):
+        allowed = {"system", "user", "assistant", "function", "tool"}
+        if v not in allowed:
+            raise ValueError(f"Invalid role '{v}'. Must be one of: {', '.join(allowed)}")
+        return v
+
+    @validator('content')
+    def validate_content_length(cls, v):
+        if v is not None and len(v) > _MAX_MESSAGE_CHARS:
+            raise ValueError(f"Message content exceeds {_MAX_MESSAGE_CHARS:,} character limit.")
+        return v
 
 class OpenAICompletionRequest(BaseModel):
     """OpenAI-compatible completion request"""
     model: str = "llamanet"
     prompt: Union[str, List[str]]
-    max_tokens: Optional[int] = 100
-    temperature: Optional[float] = 0.7
-    top_p: Optional[float] = 0.9
+    max_tokens: Optional[int] = Field(default=100, ge=1, le=_MAX_MAX_TOKENS)
+    temperature: Optional[float] = Field(default=0.7, ge=0, le=2.0)
+    top_p: Optional[float] = Field(default=0.9, ge=0, le=1.0)
     n: Optional[int] = 1
     stream: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = None
@@ -51,10 +69,10 @@ class OpenAICompletionRequest(BaseModel):
 class OpenAIChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request with reasoning support"""
     model: str = "llamanet"
-    messages: List[OpenAIMessage]
-    max_tokens: Optional[int] = 100
-    temperature: Optional[float] = 0.7
-    top_p: Optional[float] = 0.9
+    messages: List[OpenAIMessage] = Field(..., min_items=1, max_items=_MAX_MESSAGE_COUNT)
+    max_tokens: Optional[int] = Field(default=100, ge=1, le=_MAX_MAX_TOKENS)
+    temperature: Optional[float] = Field(default=0.7, ge=0, le=2.0)
+    top_p: Optional[float] = Field(default=0.9, ge=0, le=1.0)
     n: Optional[int] = 1
     stream: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = None

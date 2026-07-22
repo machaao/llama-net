@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from common.utils import get_logger
+from common.rate_limiter import RateLimiter
+from common.request_validator import RequestValidator, ValidationError
 from landing.supabase_client import SupabaseManager
 from landing.auth import AuthManager
 from landing.node_registry import NodeRegistry, CloudflareClient, model_name_to_slug
@@ -55,6 +57,7 @@ auth_mgr = None
 router = None
 registry = None
 sse_mgr = None
+rate_limiter = None
 _heartbeat_last_seen_map = {}  # node_hash -> {last_seen, metrics}
 
 
@@ -122,7 +125,7 @@ async def _heartbeat_monitor_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sse_mgr, supabase_mgr, auth_mgr, router, registry
+    global sse_mgr, supabase_mgr, auth_mgr, router, registry, rate_limiter
     logger.info("Starting llamanet.app gateway...")
     try:
         supabase_mgr = SupabaseManager()
@@ -131,6 +134,13 @@ async def lifespan(app: FastAPI):
         registry = NodeRegistry(supabase_mgr, cf_client)
         router = ModelRouter(supabase_mgr)
         sse_mgr = GatewaySSEManager()
+        rate_limiter = RateLimiter(
+            key_rpm=60, key_rph=1000, key_concurrent=5,
+            ip_rpm=30, ip_rph=300,
+            global_rpm=500, global_concurrent=50,
+            burst_rps=10, node_publish_rph=30,
+            sse_per_ip=5, sse_global=200,
+        )
         if cf_client.is_configured:
             logger.info("Cloudflare tunnel provisioning enabled")
         else:
@@ -166,15 +176,50 @@ if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+async def _enforce_rate_limit(request: Request, endpoint_type: str = "api"):
+    """Helper to enforce rate limits. Returns None if allowed, JSONResponse if denied."""
+    if not rate_limiter:
+        return None
+    allowed, details = await rate_limiter.check_rate_limit(request, endpoint_type)
+    if not allowed:
+        retry_after = details.get("retry_after", 60)
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "message": details.get("message", "Rate limit exceeded."),
+                    "type": "rate_limit_error",
+                    "code": details.get("limit_type", "rate_limited"),
+                }
+            },
+            headers={"Retry-After": str(int(retry_after) + 1)}
+        )
+    return None
+
+
+@app.exception_handler(ValidationError)
+async def validation_error_handler(request: Request, exc: ValidationError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"message": exc.message, "type": "validation_error", "details": exc.details}},
+    )
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "llamanet-gateway", "timestamp": time.time()}
+    rate_status = rate_limiter.get_status() if rate_limiter else {}
+    return {"status": "ok", "service": "llamanet-gateway", "timestamp": time.time(), "rate_limiter": rate_status}
 
 
 @app.get("/events/network")
-async def network_events():
+async def network_events(request: Request):
     if not sse_mgr:
         raise HTTPException(status_code=503, detail="SSE not initialized")
+    if rate_limiter:
+        allowed, details = await rate_limiter.check_sse_connection(request)
+        if not allowed:
+            return JSONResponse(status_code=429, content={"error": details})
+        await rate_limiter.track_sse_open(request)
     conn_id, queue = await sse_mgr.add_connection()
 
     async def event_generator():
@@ -204,6 +249,8 @@ async def network_events():
         except asyncio.CancelledError:
             pass
         finally:
+            if rate_limiter:
+                await rate_limiter.track_sse_close(request)
             await sse_mgr.remove_connection(conn_id)
 
     return StreamingResponse(
@@ -268,6 +315,9 @@ async def auth_logout():
 
 @app.get("/auth/api-keys")
 async def list_api_keys(request: Request):
+    limit_resp = await _enforce_rate_limit(request, "auth")
+    if limit_resp:
+        return limit_resp
     user = await auth_mgr.get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
@@ -276,9 +326,18 @@ async def list_api_keys(request: Request):
 
 @app.post("/auth/api-keys")
 async def create_api_key(request: Request):
+    limit_resp = await _enforce_rate_limit(request, "auth")
+    if limit_resp:
+        return limit_resp
     user = await auth_mgr.get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    existing_keys = supabase_mgr.list_api_keys(user["id"])
+    active_keys = [k for k in existing_keys if k.get("is_active")]
+    if len(active_keys) >= 10:
+        return JSONResponse(status_code=429, content={
+            "error": {"message": "Maximum 10 active API keys per account. Revoke unused keys first."}
+        })
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     result = supabase_mgr.create_api_key(user["id"], body.get("name", "default"))
     return {"success": True, "key": result["key"], "key_prefix": result["key_prefix"]}
@@ -302,6 +361,7 @@ async def register_node(request: Request):
     body = await request.json()
     if not body.get("node_id"):
         return JSONResponse(status_code=400, content={"error": "node_id is required"})
+    RequestValidator.validate_node_registration(body)
     result = await registry.register_node(
         user_id=user["id"], node_id=body["node_id"], model=body.get("model", "unknown"),
         url=body.get("url", ""), ip=body.get("ip", ""), port=body.get("port", 8000),
@@ -313,13 +373,22 @@ async def register_node(request: Request):
 
 @app.post("/api/nodes/heartbeat")
 async def node_heartbeat(request: Request):
+    limit_resp = await _enforce_rate_limit(request, "heartbeat")
+    if limit_resp:
+        return limit_resp
     body = await request.json()
     node_hash = body.get("node_hash") or body.get("node_id", "")
     if len(node_hash) > 12:
-        import hashlib
         node_hash = hashlib.sha256(node_hash.encode()).hexdigest()[:12]
     metrics = body.get("metrics", {})
     node_url = body.get("url", "")
+
+    # Validate URL before processing
+    if node_url:
+        is_safe, reason = RequestValidator.validate_node_url(node_url)
+        if not is_safe:
+            logger.warning(f"Rejected heartbeat URL from {node_hash}: {reason}")
+            return JSONResponse(status_code=400, content={"error": f"Invalid URL: {reason}"})
 
     # Update URL in DB if it changed (tunnel URL rotation)
     if node_url:
@@ -384,11 +453,24 @@ async def deregister_node(node_hash: str, request: Request):
 @app.post("/api/nodes/publish")
 async def publish_node(request: Request):
     """Public endpoint for inference nodes to self-register (no user auth required)"""
+    if rate_limiter:
+        allowed, details = await rate_limiter.check_node_publish(request)
+        if not allowed:
+            retry_after = details.get("retry_after", 60)
+            return JSONResponse(
+                status_code=429,
+                content={"error": {"message": details["message"], "type": "rate_limit_error"}},
+                headers={"Retry-After": str(int(retry_after) + 1)}
+            )
+    content_length = request.headers.get("content-length")
+    if content_length:
+        RequestValidator.validate_request_body_size(int(content_length))
     try:
         body = await request.json()
         node_id = body.get("node_id")
         if not node_id:
             return JSONResponse(status_code=400, content={"error": "node_id required"})
+        RequestValidator.validate_node_registration(body)
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
         model_name = body.get("model", "unknown")
@@ -448,6 +530,9 @@ async def publish_node(request: Request):
 @app.post("/api/nodes/unpublish")
 async def unpublish_node(request: Request):
     """Public endpoint for inference nodes to signal departure (no user auth required)"""
+    limit_resp = await _enforce_rate_limit(request, "node_event")
+    if limit_resp:
+        return limit_resp
     try:
         body = await request.json()
         node_id = body.get("node_id")
@@ -478,6 +563,9 @@ async def unpublish_node(request: Request):
 @app.post("/api/nodes/event")
 async def publish_node_event(request: Request):
     """Endpoint for inference nodes to publish state-change events (join/leave/update/peer_discovered)"""
+    limit_resp = await _enforce_rate_limit(request, "node_event")
+    if limit_resp:
+        return limit_resp
     try:
         body = await request.json()
         event_type = body.get("event_type", "")
@@ -485,6 +573,13 @@ async def publish_node_event(request: Request):
 
         if not node_id or not event_type:
             return JSONResponse(status_code=400, content={"error": "node_id and event_type required"})
+        if len(node_id) > 200:
+            return JSONResponse(status_code=400, content={"error": "node_id too long"})
+        url = body.get("url", "")
+        if url:
+            is_safe, reason = RequestValidator.validate_node_url(url)
+            if not is_safe:
+                return JSONResponse(status_code=400, content={"error": f"Invalid URL: {reason}"})
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
         model_name = body.get("model", "unknown")
@@ -595,14 +690,24 @@ async def publish_node_event(request: Request):
 @app.post("/api/nodes/notify")
 async def handle_peer_notification(request: Request):
     """Endpoint for inference nodes to notify gateway about other peers they've discovered"""
+    limit_resp = await _enforce_rate_limit(request, "node_event")
+    if limit_resp:
+        return limit_resp
     try:
         body = await request.json()
         peers = body.get("peers", [])
         notifier_node_id = body.get("notifier_node_id", "")
+        if len(peers) > 50:
+            return JSONResponse(status_code=400, content={"error": "Maximum 50 peers per notification"})
 
         new_peers_count = 0
         for peer in peers:
             peer_url = peer.get("url", "")
+            if peer_url:
+                is_safe, reason = RequestValidator.validate_node_url(peer_url)
+                if not is_safe:
+                    logger.warning(f"Rejected peer notification URL: {reason}")
+                    continue
             peer_node_id = peer.get("node_id", "")
             peer_model = peer.get("model", "unknown")
 
@@ -686,6 +791,9 @@ async def network_stats():
 
 @app.get("/v1/models")
 async def openai_list_models(request: Request):
+    limit_resp = await _enforce_rate_limit(request, "api")
+    if limit_resp:
+        return limit_resp
     user = await auth_mgr.get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": {"message": "API key required. Get one at https://llamanet.app"}})
@@ -694,17 +802,43 @@ async def openai_list_models(request: Request):
 
 @app.post("/v1/chat/completions")
 async def openai_chat_completions(request: Request):
+    limit_resp = await _enforce_rate_limit(request, "api")
+    if limit_resp:
+        return limit_resp
+    content_length = request.headers.get("content-length")
+    if content_length:
+        RequestValidator.validate_request_body_size(int(content_length))
     user = await auth_mgr.get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": {"message": "API key required. Get one at https://llamanet.app"}})
+    try:
+        body = await request.json()
+        RequestValidator.validate_chat_request(body)
+    except ValidationError:
+        raise
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON body"}})
     return await router.route_chat_completion(request, user["id"])
 
 
 @app.post("/v1/completions")
 async def openai_completions(request: Request):
+    limit_resp = await _enforce_rate_limit(request, "api")
+    if limit_resp:
+        return limit_resp
+    content_length = request.headers.get("content-length")
+    if content_length:
+        RequestValidator.validate_request_body_size(int(content_length))
     user = await auth_mgr.get_current_user(request)
     if not user:
         return JSONResponse(status_code=401, content={"error": {"message": "API key required. Get one at https://llamanet.app"}})
+    try:
+        body = await request.json()
+        RequestValidator.validate_completion_request(body)
+    except ValidationError:
+        raise
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON body"}})
     return await router.route_completion(request, user["id"])
 
 
