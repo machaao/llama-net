@@ -1174,6 +1174,28 @@ async def health():
     return {"status": "ok", "llm_loaded": llm is not None, "model": config.model_name, "timestamp": time.time(), **metrics}
 
 
+@app.get("/tunnel/status")
+async def tunnel_status():
+    """Return tunnel status for the node."""
+    tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
+    if not tunnel_url:
+        tunnel_file = "/tmp/llamanet_tunnel_url"
+        try:
+            if os.path.exists(tunnel_file):
+                with open(tunnel_file) as f:
+                    tunnel_url = f.read().strip()
+        except Exception:
+            pass
+    if not tunnel_url and gateway_client:
+        tunnel_url = gateway_client.tunnel_url
+    active = bool(tunnel_url and tunnel_url.startswith("http"))
+    return {
+        "active": active,
+        "url": tunnel_url or "",
+        "type": "cloudflare" if active else "none",
+        "peers_count": 0,
+    }
+
 
 @app.get("/events/network")
 async def network_events():
