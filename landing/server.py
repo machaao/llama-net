@@ -291,6 +291,20 @@ async def publish_node(request: Request):
         model_name = body.get("model", "unknown")
         model_slug = model_name_to_slug(model_name)
         tunnel_url = body.get("tunnel_url", "")
+        system_user_id = "00000000-0000-0000-0000-000000000000"
+
+        # Ensure system user exists (foreign key requirement)
+        try:
+            existing_user = supabase_mgr.get_user(system_user_id)
+            if not existing_user:
+                supabase_mgr.client.table("users").upsert({
+                    "id": system_user_id,
+                    "email": "system@llamanet.app",
+                    "full_name": "LlamaNet System",
+                }, on_conflict="id").execute()
+                logger.info("Created system user for public node registration")
+        except Exception as e:
+            logger.warning(f"Could not ensure system user exists: {e}")
 
         # Check if node already exists to determine event type
         existing = supabase_mgr.client.table("nodes").select("node_hash").eq(
@@ -299,7 +313,7 @@ async def publish_node(request: Request):
         is_new = len(existing.data) == 0
 
         result = supabase_mgr.register_node(
-            user_id="00000000-0000-0000-0000-000000000000", node_hash=node_hash, model_name=model_name,
+            user_id=system_user_id, node_hash=node_hash, model_name=model_name,
             model_slug=model_slug, url=tunnel_url or body.get("url", ""),
             ip=body.get("ip", ""), port=body.get("port", 8000),
             gpu_info=body.get("gpu", ""), metrics=body.get("metrics", {}),
