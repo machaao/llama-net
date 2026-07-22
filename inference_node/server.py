@@ -66,6 +66,14 @@ download_manager = None  # Model download manager
 _peer_registry: Dict[str, Dict[str, Any]] = {}
 gossip_task = None
 
+
+def _get_own_url() -> str:
+    """Get this node's public URL, preferring tunnel URL over IP-based URL"""
+    tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
+    if tunnel_url:
+        return tunnel_url.rstrip("/")
+    return f"http://{get_host_ip()}:{config.port}"
+
 class DiscoverySSEBridge(NodeEventListener):
     """Bridge discovery events to SSE broadcasting"""
     
@@ -177,15 +185,21 @@ async def _connect_bootstrap_peers(peers_str: str):
     """Connect to bootstrap peers via HTTP (for tunnel-connected nodes)"""
     peer_urls = [url.strip() for url in peers_str.split(",") if url.strip()]
 
-    # Wait a moment for services to be ready
-    await asyncio.sleep(2)
+    # Wait for tunnel URL to be available (up to 45 seconds)
+    tunnel_wait_attempts = 0
+    while tunnel_wait_attempts < 45:
+        if os.environ.get("LLAMANET_TUNNEL_URL"):
+            logger.info(f"✅ Tunnel URL available: {os.environ.get('LLAMANET_TUNNEL_URL')}")
+            break
+        await asyncio.sleep(1)
+        tunnel_wait_attempts += 1
+
+    if not os.environ.get("LLAMANET_TUNNEL_URL"):
+        logger.warning("⚠️ No tunnel URL after 45s — will publish IP-based URL (remote peers may not reach this node)")
 
     for url in peer_urls:
         try:
-            own_url = os.environ.get(
-                "LLAMANET_TUNNEL_URL",
-                f"http://{get_host_ip()}:{config.port}"
-            )
+            own_url = _get_own_url()
 
             own_model = config.model_name if not config.no_model_mode else "router"
             own_metrics = llm.get_metrics() if llm else {}
@@ -200,6 +214,8 @@ async def _connect_bootstrap_peers(peers_str: str):
                 "last_seen": time.time(),
                 "registered_from": "bootstrap"
             }
+
+            logger.info(f"📡 Publishing own URL to gateway: {own_url}")
 
             async with _aiohttp_lib.ClientSession(
                 timeout=_aiohttp_lib.ClientTimeout(total=10)
@@ -263,10 +279,7 @@ async def _gossip_loop():
             if not _peer_registry:
                 continue
 
-            own_url = os.environ.get(
-                "LLAMANET_TUNNEL_URL",
-                f"http://{get_host_ip()}:{config.port}"
-            )
+            own_url = _get_own_url()
 
             own_model = config.model_name if not config.no_model_mode else "router"
             own_metrics = llm.get_metrics() if llm else {}
@@ -569,6 +582,7 @@ async def _broadcast_current_node_metrics():
                 "node_id": config.node_id,
                 "ip": get_host_ip(),
                 "port": config.port,
+                "url": _get_own_url(),
                 "model": config.model_name,
                 "load": metrics.get("load", 0.0),
                 "tps": metrics.get("tps", 0.0),
