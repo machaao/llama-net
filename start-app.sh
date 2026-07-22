@@ -65,21 +65,16 @@ TUNNEL_URL=""
 
 REMAINING_ARGS=""
 BOOTSTRAP_PEERS_VALUE=""
-SKIP_NEXT=false
-for arg in "$@"; do
-    if [ "$SKIP_NEXT" = "true" ]; then
-        SKIP_NEXT=false
-        continue
-    fi
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --tunnel) ENABLE_TUNNEL=true ;;
         --bootstrap-peers)
-            # Capture the next argument as the value
-            BOOTSTRAP_PEERS_VALUE="$2"
-            SKIP_NEXT=true
+            shift
+            BOOTSTRAP_PEERS_VALUE="$1"
             ;;
-        *) REMAINING_ARGS="$REMAINING_ARGS $arg" ;;
+        *) REMAINING_ARGS="$REMAINING_ARGS $1" ;;
     esac
+    shift
 done
 [ -n "$BOOTSTRAP_PEERS_VALUE" ] && export BOOTSTRAP_PEERS="$BOOTSTRAP_PEERS_VALUE"
 [ "$ENABLE_CLOUDFLARE_TUNNEL" = "true" ] && ENABLE_TUNNEL=true
