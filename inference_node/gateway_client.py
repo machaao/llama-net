@@ -40,7 +40,7 @@ class GatewayClient:
         self.port = port
         self.metrics_callback = metrics_callback
         self.tunnel_url = tunnel_url or self._detect_tunnel_url()
-        self.public_ip = public_ip or get_host_ip()
+        self.public_ip = public_ip  # Only use explicitly provided IP; no auto-detection needed (tunnel-only)
         self.own_url = self.tunnel_url  # Tunnel-only — no IP:port fallback
 
         self.running = False
