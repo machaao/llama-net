@@ -90,36 +90,6 @@ class SSEHandler:
             "connection_ids": list(self.active_connections.keys())
         }
 
-class SSENetworkMonitor:
-    """Monitor network changes and broadcast via SSE"""
-    
-    def __init__(self, base_url: str):
-        self.base_url = base_url
-        self.running = False
-        self.monitor_task = None
-        self.sse_handler = None
-        
-    async def start(self):
-        """Start the network monitor"""
-        self.running = True
-        # Monitor task can be added here if needed for periodic checks
-        logger.info("SSE Network Monitor started")
-    
-    async def stop(self):
-        """Stop the network monitor"""
-        self.running = False
-        if self.monitor_task:
-            self.monitor_task.cancel()
-            try:
-                await self.monitor_task
-            except asyncio.CancelledError:
-                pass
-        logger.info("SSE Network Monitor stopped")
-    
-    def set_sse_handler(self, sse_handler: SSEHandler):
-        """Set the SSE handler for broadcasting events"""
-        self.sse_handler = sse_handler
-
 class SSEParser:
     """Parse Server-Sent Events from a stream"""
     

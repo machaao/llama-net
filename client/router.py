@@ -1,16 +1,43 @@
 import random
 from typing import List, Optional, Dict, Any, Callable
 from common.models import NodeInfo
-from client.dht_discovery import DHTDiscovery
 from common.utils import get_logger
 
 logger = get_logger(__name__)
 
+
+class SimpleNodeDiscovery:
+    """Lightweight in-memory node registry (replaces DHT discovery)."""
+
+    def __init__(self):
+        self._nodes: Dict[str, NodeInfo] = {}
+
+    def add_node(self, node: NodeInfo):
+        self._nodes[node.node_id] = node
+
+    def remove_node(self, node_id: str):
+        self._nodes.pop(node_id, None)
+
+    async def get_nodes(self, model: Optional[str] = None) -> List[NodeInfo]:
+        nodes = list(self._nodes.values())
+        if model:
+            model_lower = model.lower()
+            nodes = [n for n in nodes if model_lower in n.model.lower()]
+        return nodes
+
+    def clear(self):
+        self._nodes.clear()
+
+    @property
+    def count(self) -> int:
+        return len(self._nodes)
+
+
 class NodeSelector:
     """Select the best node for inference"""
     
-    def __init__(self, dht_discovery: DHTDiscovery):
-        self.dht_discovery = dht_discovery
+    def __init__(self, node_discovery: SimpleNodeDiscovery):
+        self.node_discovery = node_discovery
         self.round_robin_index = 0  # Track round robin position
         
     async def select_node(self, 
@@ -25,8 +52,8 @@ class NodeSelector:
         # Use target_model if specified, otherwise fall back to model parameter
         model_filter = target_model or model
         
-        # Get nodes from event-based discovery (real-time, no polling)
-        nodes = await self.dht_discovery.get_nodes(model=model_filter)
+        # Get nodes from simple discovery (in-memory registry)
+        nodes = await self.node_discovery.get_nodes(model=model_filter)
         
         if not nodes:
             logger.warning(f"No nodes available for model {model_filter}")

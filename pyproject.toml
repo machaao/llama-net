@@ -28,12 +28,10 @@ dependencies = [
     "supabase>=2.0.0",
     "python-jose[cryptography]>=3.3.0",
     # Inference-only (install separately via requirements-inference.txt):
+    # Inference-only (install separately via requirements-inference.txt):
     # "llama-cpp-python>=0.2.20",
     # "psutil>=5.8.0,<6.0.0",
     # "pynvml>=11.4.1",
-    # "kademlia>=2.2.2,<3.0.0",
-    # "p2pd",
-    # "ipaddress>=1.0.23",
     # "tqdm>=4.64.0",
     # "huggingface_hub>=0.0.1",
 ]

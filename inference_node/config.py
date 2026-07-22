@@ -50,13 +50,8 @@ class InferenceConfig:
                               help='Host to bind the inference service')
             parser.add_argument('--port', type=int, default=8000,
                               help='Port for the inference HTTP API')
-            parser.add_argument('--dht-port', type=int, default=8001,
-                              help='Port for Kademlia DHT protocol')
             parser.add_argument('--node-id', 
                               help='Unique identifier for this node')
-            parser.add_argument('--bootstrap-nodes', default='',
-                              help='Comma-separated list of bootstrap nodes (ip:port)')
-
             parser.add_argument('--bootstrap-peers', default='',
                               help='Comma-separated HTTP URLs of bootstrap peers '
                                    '(e.g. https://bootstrap.llamanet.app)')
@@ -64,7 +59,7 @@ class InferenceConfig:
             parser.add_argument('--public-ip',
                               help='Public IP address for internet-accessible nodes')
 
-            parser.add_argument('--ctx-size', default=4096, type=int,
+            parser.add_argument('--ctx-size', default=4096, type=int, 
                                 help='Llama Server Context Size (in tokens)')
 
             parser.add_argument('--batch-size', default=4096, type=int,
@@ -91,13 +86,8 @@ class InferenceConfig:
             preferred_http_port = args.port if args.port != 8000 else int(load_env_var("PORT", 8000))
             self.port = PortManager.get_port_with_fallback(preferred_http_port, 'tcp')
 
-            # Handle DHT port using consolidated utilities  
-            preferred_dht_port = args.dht_port if args.dht_port != 8001 else int(load_env_var("DHT_PORT", 8001))
-            self.dht_port = PortManager.get_port_with_fallback(preferred_dht_port, 'udp')
-                
-            # Generate hardware-based node_id after port is determined
+            # Generate node_id after port is determined
             self.node_id = self._load_or_generate_node_id(args.node_id, self.port)
-            self.bootstrap_nodes = args.bootstrap_nodes or load_env_var("BOOTSTRAP_NODES", "")
             self.bootstrap_peers = args.bootstrap_peers or load_env_var("BOOTSTRAP_PEERS", "")
 
             # Public IP support for internet-accessible nodes
@@ -113,13 +103,8 @@ class InferenceConfig:
             preferred_http_port = int(load_env_var("PORT", 8000))
             self.port = PortManager.get_port_with_fallback(preferred_http_port, 'tcp')
 
-            # Handle DHT port using consolidated utilities
-            preferred_dht_port = int(load_env_var("DHT_PORT", 8001))
-            self.dht_port = PortManager.get_port_with_fallback(preferred_dht_port, 'udp')
-                
-            # Generate hardware-based node_id after port is determined
+            # Generate node_id after port is determined
             self.node_id = self._load_or_generate_node_id(None, self.port)
-            self.bootstrap_nodes = load_env_var("BOOTSTRAP_NODES", "")
             self.bootstrap_peers = load_env_var("BOOTSTRAP_PEERS", "")
 
             # Public IP support for internet-accessible nodes
@@ -153,11 +138,6 @@ class InferenceConfig:
             self.no_model_mode = True
             self.model_path = ""
 
-        # DHT configuration
-        self.heartbeat_interval = int(load_env_var("HEARTBEAT_INTERVAL", 10))
-        
-
-        
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path) if self.model_path else "No Model Loaded"
         
@@ -191,23 +171,6 @@ class InferenceConfig:
         except Exception as e:
             logger.warning(f"Could not configure networking: {e}")
     
-    def _generate_hardware_based_node_id(self, port: int) -> str:
-        """Generate a hardware-based node ID"""
-        try:
-            from common.hardware_fingerprint import HardwareFingerprint
-            fingerprint = HardwareFingerprint()
-            node_id = fingerprint.generate_node_id(port)
-            
-            # Log hardware fingerprint summary for debugging
-            summary = fingerprint.get_fingerprint_summary()
-            logger.info(f"Hardware fingerprint summary: {summary}")
-            
-            return node_id
-        except Exception as e:
-            logger.warning(f"Failed to generate hardware-based node ID: {e}")
-            # Fallback to legacy method
-            return self._generate_legacy_node_id(port)
-    
     def _generate_legacy_node_id(self, port: int) -> str:
         """Generate a legacy node ID as fallback"""
         from common.utils import get_host_ip
@@ -225,51 +188,33 @@ class InferenceConfig:
         return node_hash
     
     def _load_or_generate_node_id(self, specified_node_id: Optional[str], port: int) -> str:
-        """Load existing node ID or generate a new hardware-based one"""
+        """Load existing node ID or generate a new one"""
         # If explicitly specified, use it
         if specified_node_id:
             logger.info(f"Using specified node ID: {specified_node_id[:16]}...")
+            self._node_id_source = 'specified'
             return specified_node_id
         
         # Check environment variable
         env_node_id = load_env_var("NODE_ID", None)
         if env_node_id:
             logger.info(f"Using environment node ID: {env_node_id[:16]}...")
+            self._node_id_source = 'environment'
             return env_node_id
         
-        # Generate hardware-based node ID
-        try:
-            from common.hardware_fingerprint import HardwareFingerprint
-            fingerprint = HardwareFingerprint()
-            node_id = fingerprint.generate_node_id(port)
-            
-            # Set source for debugging
-            self._node_id_source = 'hardware_based'
-            
-            # Validate consistency if we have a stored ID
-            stored_node_id = self._get_stored_node_id()
-            if stored_node_id:
-                if fingerprint.validate_consistency(stored_node_id, port):
-                    logger.info(f"Using consistent stored node ID: {stored_node_id[:16]}...")
-                    self._node_id_source = 'stored_hardware_based'
-                    return stored_node_id
-                else:
-                    logger.warning("Hardware fingerprint changed, generating new node ID")
-                    # Store the new node ID
-                    self._store_node_id(node_id)
-                    self._node_id_source = 'hardware_based_updated'
-            else:
-                # First time, store the generated ID
-                self._store_node_id(node_id)
-                self._node_id_source = 'hardware_based_new'
-            
-            return node_id
-            
-        except Exception as e:
-            logger.error(f"Failed to generate hardware-based node ID: {e}")
-            # Fallback to legacy method
-            self._node_id_source = 'legacy_fallback'
-            return self._generate_legacy_node_id(port)
+        # Check stored node ID
+        stored_node_id = self._get_stored_node_id()
+        if stored_node_id:
+            logger.info(f"Using stored node ID: {stored_node_id[:16]}...")
+            self._node_id_source = 'stored'
+            return stored_node_id
+        
+        # Generate new node ID
+        node_id = self._generate_legacy_node_id(port)
+        self._store_node_id(node_id)
+        self._node_id_source = 'generated'
+        logger.info(f"Generated new node ID: {node_id[:16]}...")
+        return node_id
     
     def _get_stored_node_id(self) -> Optional[str]:
         """Get stored node ID from persistent storage"""
@@ -293,16 +238,6 @@ class InferenceConfig:
             logger.debug(f"Stored node ID to {node_id_file}")
         except Exception as e:
             logger.warning(f"Could not store node ID: {e}")
-    
-    def get_hardware_info(self) -> Dict:
-        """Get hardware fingerprint information for debugging"""
-        try:
-            from common.hardware_fingerprint import HardwareFingerprint
-            fingerprint = HardwareFingerprint()
-            return fingerprint.get_fingerprint_summary()
-        except Exception as e:
-            logger.warning(f"Could not get hardware info: {e}")
-            return {"error": str(e)}
     
     def _validate_node_id_format(self, node_id: str) -> bool:
         """Validate that node_id is a valid hex string of correct length"""
@@ -334,23 +269,19 @@ class InferenceConfig:
             "model_path": self.model_path,
             "host": self.host,
             "port": self.port,
-            "dht_port": self.dht_port,
             "public_ip": self.public_ip or "auto-detected",
-            "bootstrap_nodes": self.bootstrap_nodes,
-            "heartbeat_interval": self.heartbeat_interval,
+            "bootstrap_peers": self.bootstrap_peers,
             "n_ctx": self.n_ctx,
             "n_batch": self.n_batch,
             "n_gpu_layers": self.n_gpu_layers,
             "verbose": self.verbose,
-            "hardware_based": True
         }
         
     def __str__(self) -> str:
         return (
             f"InferenceConfig(model_path={self.model_path}, "
             f"host={self.host}, port={self.port}, node_id={self.node_id}, "
-            f"dht_port={self.dht_port}, verbose={self.verbose}, "
-            f"no_model_mode={self.no_model_mode})"
+            f"verbose={self.verbose}, no_model_mode={self.no_model_mode})"
         )
 
     def _load_active_model(self) -> Optional[str]:

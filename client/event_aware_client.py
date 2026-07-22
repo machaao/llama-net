@@ -1,120 +1,117 @@
 import asyncio
+import aiohttp
 from typing import List, Optional, Dict, Any, Callable
-from client.event_discovery import EventBasedDHTDiscovery, NodeEventListener, NodeEvent, NodeEventType
-from client.router import NodeSelector
+from client.router import NodeSelector, SimpleNodeDiscovery
 from common.models import NodeInfo, OpenAIChatCompletionRequest, OpenAICompletionRequest, OpenAIChatCompletionResponse, OpenAICompletionResponse, OpenAIMessage
 from common.utils import get_logger
 import requests
 
 logger = get_logger(__name__)
 
-class ClientEventListener(NodeEventListener):
-    """Client-side event listener for node changes"""
-    
-    def __init__(self, callback: Optional[Callable] = None):
-        self.callback = callback
-        self.node_count = 0
-    
-    async def on_node_event(self, event: NodeEvent):
-        """Handle node events"""
-        if event.event_type == NodeEventType.NODE_JOINED:
-            self.node_count += 1
-            logger.info(f"🎉 Client detected new node: {event.node_info.node_id[:12]}... (total: {self.node_count})")
-            
-        elif event.event_type == NodeEventType.NODE_LEFT:
-            self.node_count = max(0, self.node_count - 1)
-            logger.info(f"👋 Client detected node departure: {event.node_info.node_id[:12]}... (total: {self.node_count})")
-            
-        elif event.event_type == NodeEventType.NODE_UPDATED:
-            logger.debug(f"🔄 Client detected node update: {event.node_info.node_id[:12]}...")
-        
-        # Call custom callback if provided
-        if self.callback:
-            try:
-                await self.callback(event)
-            except Exception as e:
-                logger.error(f"Error in client event callback: {e}")
 
 class EventAwareOpenAIClient:
-    """Event-aware OpenAI-compatible client with real-time node discovery"""
+    """OpenAI-compatible client with gateway-based node discovery"""
     
     def __init__(self, 
+                gateway_url: str = "",
                 bootstrap_nodes: str = "",
                 model: Optional[str] = None,
                 min_tps: float = 0.0,
                 max_load: float = 1.0,
-                dht_port: int = None,
-                enable_subnet_filtering: bool = True,
-                connectivity_test: bool = True,
-                allowed_subnets: List[str] = None,
-                blocked_subnets: List[str] = None,
                 event_callback: Optional[Callable] = None):
         
-        if dht_port is None:
-            dht_port = self._find_available_port(8001)
-            logger.info(f"Client using available DHT port: {dht_port}")
+        self.gateway_url = gateway_url.rstrip("/") if gateway_url else ""
         
-        # Initialize event-based discovery
-        self.dht_discovery = EventBasedDHTDiscovery(
-            bootstrap_nodes=bootstrap_nodes,
-            dht_port=dht_port,
-            enable_subnet_filtering=enable_subnet_filtering,
-            connectivity_test=connectivity_test,
-            allowed_subnets=allowed_subnets,
-            blocked_subnets=blocked_subnets
-        )
+        # Initialize simple in-memory node discovery
+        self.node_discovery = SimpleNodeDiscovery()
         
-        self.node_selector = NodeSelector(self.dht_discovery)
+        self.node_selector = NodeSelector(self.node_discovery)
         self.model = model or "llamanet"
         self.min_tps = min_tps
         self.max_load = max_load
-        
-        # Event handling
-        self.event_listener = ClientEventListener(event_callback)
-        self.dht_discovery.add_event_listener(self.event_listener)
+        self.event_callback = event_callback
         
         # Real-time state
         self.is_started = False
+        self._refresh_task: Optional[asyncio.Task] = None
         
         logger.info("Event-aware OpenAI Client initialized")
     
-    def _find_available_port(self, start_port: int = 8001) -> int:
-        """Find an available port starting from start_port"""
-        import socket
-        port = start_port
-        while port < start_port + 100:
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.bind(('', port))
-                    return port
-            except OSError:
-                port += 1
-        raise RuntimeError(f"No available ports found starting from {start_port}")
-    
     async def start(self):
-        """Start the event-aware client"""
+        """Start the client and begin refreshing peers from gateway"""
         if self.is_started:
             return
         
-        await self.dht_discovery.start()
         self.is_started = True
+        
+        # Initial peer fetch
+        if self.gateway_url:
+            await self._refresh_peers_from_gateway()
+            self._refresh_task = asyncio.create_task(self._peer_refresh_loop())
+        
         logger.info("Event-aware client started")
     
     async def stop(self):
-        """Stop the event-aware client"""
+        """Stop the client"""
         if not self.is_started:
             return
         
-        await self.dht_discovery.stop()
         self.is_started = False
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
+        
         logger.info("Event-aware client stopped")
     
     async def get_available_nodes(self, model: Optional[str] = None) -> List[NodeInfo]:
-        """Get available nodes (real-time, no polling)"""
+        """Get available nodes"""
         if not self.is_started:
             await self.start()
         
-        return await self.dht_discovery.get_nodes(model=model)
+        return await self.node_discovery.get_nodes(model=model)
+    
+    async def _peer_refresh_loop(self):
+        """Periodically refresh peer list from gateway"""
+        while self.is_started:
+            try:
+                await self._refresh_peers_from_gateway()
+            except Exception as e:
+                logger.debug(f"Peer refresh error: {e}")
+            await asyncio.sleep(30)
+    
+    async def _refresh_peers_from_gateway(self):
+        """Fetch peers from gateway and update discovery"""
+        if not self.gateway_url:
+            return
+        
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(f"{self.gateway_url}/api/models") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self.node_discovery.clear()
+                        for model_info in data.get("models", []):
+                            model_name = model_info.get("model_name", "unknown")
+                            for node in model_info.get("nodes", []):
+                                node_info = NodeInfo(
+                                    node_id=node.get("node_hash", ""),
+                                    ip=node.get("ip", ""),
+                                    port=node.get("port", 8000),
+                                    model=model_name,
+                                    load=node.get("load", 0),
+                                    tps=node.get("tps", 0),
+                                    url=node.get("url", ""),
+                                    gpu_info=node.get("gpu_info", ""),
+                                    total_tokens=node.get("total_tokens", 0),
+                                )
+                                self.node_discovery.add_node(node_info)
+                        logger.debug(f"Refreshed {self.node_discovery.count} peers from gateway")
+        except Exception as e:
+            logger.debug(f"Gateway peer refresh failed: {e}")
     
     async def wait_for_nodes(self, min_nodes: int = 1, timeout: float = 30.0) -> bool:
         """Wait for a minimum number of nodes to be available"""
@@ -319,5 +316,6 @@ class EventAwareOpenAIClient:
         """Close the client"""
         await self.stop()
 
-# Backward compatibility alias
+# Backward compatibility aliases
 EventAwareClient = EventAwareOpenAIClient
+OpenAIClient = EventAwareOpenAIClient

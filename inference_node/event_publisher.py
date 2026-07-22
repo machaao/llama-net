@@ -1,259 +1,118 @@
 import asyncio
 import time
-import hashlib
-import uuid
-from typing import Dict, Any, List, Tuple, Optional
-from common.utils import get_logger, get_host_ip
-from inference_node.config import InferenceConfig
+from typing import Dict, Any, Optional
+from common.utils import get_logger
 
 logger = get_logger(__name__)
 
-class EventBasedDHTPublisher:
-    """Event-driven DHT publisher that responds to changes"""
-    
-    def __init__(self, config: InferenceConfig, metrics_callback):
-        self.config = config
+
+class GatewayEventPublisher:
+    """Lightweight event publisher that delegates to GatewayClient for all communication."""
+
+    def __init__(self, gateway_client, metrics_callback):
+        self.gateway_client = gateway_client
         self.metrics_callback = metrics_callback
-        self.kademlia_node = None
         self.running = False
-        
-        # Pure event-driven state - NO PERIODIC UPDATES
-        self.last_published_metrics = {}
-        self.metrics_change_threshold = 0.15  # 15% change triggers update (increased threshold)
-        self.significant_change_only = True  # Only update on significant changes
-        self.last_significant_change = 0
-        
+
+        # Metrics-change tracking (event-driven, no periodic updates)
+        self.last_published_metrics: Dict[str, Any] = {}
+        self.metrics_change_threshold = 0.15
+        self.last_significant_change: float = 0
+
         # Monitoring task
-        self.monitor_task = None
-        
-        # Parse bootstrap nodes
-        self.bootstrap_nodes = self._parse_bootstrap_nodes(config.bootstrap_nodes)
-        
-        # Initialize hardware fingerprint for consistency validation
-        try:
-            from common.hardware_fingerprint import HardwareFingerprint
-            self.hardware_fingerprint = HardwareFingerprint()
-            logger.info(f"Hardware fingerprint initialized: {self.hardware_fingerprint.get_fingerprint_summary()}")
-        except Exception as e:
-            logger.warning(f"Could not initialize hardware fingerprint: {e}")
-            self.hardware_fingerprint = None
-    
-    def _parse_bootstrap_nodes(self, bootstrap_str: str) -> List[Tuple[str, int]]:
-        """Parse bootstrap nodes from comma-separated string"""
-        if not bootstrap_str:
-            return []
-        
-        nodes = []
-        for node_str in bootstrap_str.split(','):
-            try:
-                ip, port = node_str.strip().split(':')
-                nodes.append((ip, int(port)))
-            except ValueError:
-                logger.warning(f"Invalid bootstrap node format: {node_str}")
-        
-        return nodes
-    
-    def _validate_node_id_consistency(self) -> bool:
-        """Validate that the current node ID is consistent with hardware"""
-        if not self.hardware_fingerprint:
-            logger.debug("Hardware fingerprint not available, skipping validation")
-            return True
-        
-        try:
-            expected_node_id = self.hardware_fingerprint.generate_node_id(self.config.port)
-            is_consistent = self.config.node_id == expected_node_id
-            
-            if not is_consistent:
-                logger.warning(f"Node ID inconsistency detected:")
-                logger.warning(f"  Current: {self.config.node_id[:16]}...")
-                logger.warning(f"  Expected: {expected_node_id[:16]}...")
-                logger.warning("This may indicate hardware changes or configuration issues")
-                
-                # Check if we should update the stored node ID
-                stored_node_id = self.config._get_stored_node_id() if hasattr(self.config, '_get_stored_node_id') else None
-                if stored_node_id and stored_node_id != expected_node_id:
-                    logger.info("Hardware appears to have changed, updating stored node ID")
-                    if hasattr(self.config, '_store_node_id'):
-                        self.config._store_node_id(expected_node_id)
-                        logger.info(f"Updated stored node ID to: {expected_node_id[:16]}...")
-            else:
-                logger.debug("Node ID is consistent with current hardware")
-            
-            return is_consistent
-        except Exception as e:
-            logger.warning(f"Could not validate node ID consistency: {e}")
-            return True  # Assume consistent if validation fails
-    
+        self.monitor_task: Optional[asyncio.Task] = None
+
     async def start(self):
-        """Start the event-based publisher with delayed join event"""
+        """Start the event publisher."""
         if self.running:
             return
 
-        # Validate node ID consistency before starting
-        consistency_check = self._validate_node_id_consistency()
-
-        # If hardware changed, regenerate node ID
-        if not consistency_check and self.hardware_fingerprint:
-            try:
-                new_node_id = self.hardware_fingerprint.generate_node_id(self.config.port)
-                logger.warning(f"Hardware changed detected, updating node ID from {self.config.node_id[:16]}... to {new_node_id[:16]}...")
-
-                # Update configuration
-                old_node_id = self.config.node_id
-                self.config.node_id = new_node_id
-
-                # Store the new node ID
-                if hasattr(self.config, '_store_node_id'):
-                    self.config._store_node_id(new_node_id)
-
-                logger.info(f"Node ID updated due to hardware changes: {old_node_id[:8]}... → {new_node_id[:8]}...")
-
-            except Exception as e:
-                logger.error(f"Failed to update node ID after hardware change: {e}")
-                # Continue with existing node ID
-
         self.running = True
-
-        # Initialize known nodes tracking for periodic detection
-        self._known_node_ids = set()
-        self._has_published_before = False
-        self._join_event_sent = False  # NEW: Track if join event was sent
-        
-        # Use shared DHT service
-        from common.dht_service import SharedDHTService
-        dht_service = SharedDHTService()
-        
-        try:
-            self.kademlia_node = await dht_service.initialize(
-                node_id=self.config.node_id,
-                port=self.config.dht_port,
-                bootstrap_nodes=self.bootstrap_nodes
-            )
-            
-            # Validate that the DHT node is using the correct node ID
-            if self.kademlia_node.node_id != self.config.node_id:
-                logger.warning(f"DHT node ID mismatch: config={self.config.node_id[:16]}..., dht={self.kademlia_node.node_id[:16]}...")
-                # Update DHT node to use config node ID
-                self.kademlia_node.node_id = self.config.node_id
-                logger.info("Updated DHT node to use hardware-based node ID")
-                
-        except Exception as e:
-            logger.error(f"Failed to start DHT node: {e}")
-            self.running = False
-            raise
-        
-        # Start monitoring for changes
         self.monitor_task = asyncio.create_task(self._monitor_changes())
-        
-        # Publish initial state WITHOUT join event
-        await self._publish_node_info_without_join()
+        logger.info("Gateway event publisher started")
 
-        # Note: Join event will be sent post-uvicorn initialization
-        # No longer registering callback here to avoid premature join event
-
-        logger.info(f"Event-based DHT publisher started (join event delayed): {self.config.node_id[:16]}...")
-        
-        # Log hardware fingerprint details for debugging
-        if self.hardware_fingerprint:
-            summary = self.hardware_fingerprint.get_fingerprint_summary()
-            logger.info(f"Hardware fingerprint: {summary}")
-    
     async def stop(self):
-        """Stop the event-based publisher with enhanced departure broadcasting and waiting"""
-        logger.info("Stopping event-based DHT publisher...")
-        
-        # Prepare comprehensive departure info
-        departure_info = {
-            'node_id': self.config.node_id,
-            'ip': get_host_ip(),
-            'port': self.config.port,
-            'model': self.config.model_name,
-            'reason': 'graceful_shutdown',
-            'last_seen': int(time.time()),
-            'departure_timestamp': time.time(),
-            'graceful': True,
-            'final_metrics': self.metrics_callback() if self.metrics_callback else {}
-        }
-        
-        # Set running to False immediately to stop monitoring
+        """Stop the publisher and send departure event."""
+        logger.info("Stopping gateway event publisher...")
         self.running = False
-        
-        # Send departure events via multiple channels with retries
-        departure_success = False
-        max_attempts = 3
-        
-        for attempt in range(max_attempts):
+
+        # Cancel monitoring
+        if self.monitor_task and not self.monitor_task.done():
+            self.monitor_task.cancel()
             try:
-                logger.info(f"📤 Sending departure notifications (attempt {attempt + 1}/{max_attempts})...")
-                
-                # Send via SSE (existing)
-                sse_task = asyncio.create_task(
-                    self._broadcast_node_event("node_left", departure_info)
-                )
-                
-                # Send via DHT (enhanced)
-                dht_task = asyncio.create_task(
-                    self._publish_node_left_to_dht(departure_info)
-                )
-                
-                # Send direct notifications to known contacts
-                contacts_task = asyncio.create_task(
-                    self._send_departure_to_contacts(departure_info)
-                )
-                
-                # Wait for all departure notifications with timeout
+                await self.monitor_task
+            except asyncio.CancelledError:
+                pass
+
+        # Send departure event via gateway
+        if self.gateway_client and self.gateway_client.registered:
+            try:
                 await asyncio.wait_for(
-                    asyncio.gather(sse_task, dht_task, contacts_task, return_exceptions=True),
+                    self.gateway_client.send_event("node_left"),
                     timeout=3.0
                 )
-                
-                departure_success = True
-                logger.info("✅ Departure notifications sent successfully")
-                break
-                
-            except asyncio.TimeoutError:
-                logger.warning(f"⏰ Departure notification attempt {attempt + 1} timed out")
-                if attempt < max_attempts - 1:
-                    await asyncio.sleep(1.0)  # Brief wait before retry
+                logger.info("✅ Departure event sent to gateway")
             except Exception as e:
-                logger.warning(f"❌ Departure notification attempt {attempt + 1} failed: {e}")
-                if attempt < max_attempts - 1:
-                    await asyncio.sleep(1.0)
-        
-        if not departure_success:
-            logger.error("❌ Failed to send departure notifications after all attempts")
-        
-        # Wait additional time for event propagation
-        logger.info("⏳ Waiting for event propagation...")
-        await asyncio.sleep(2.0)
-        
-        # Cancel monitoring tasks quickly
-        tasks_to_cancel = [self.monitor_task]
-        for task in tasks_to_cancel:
-            if task and not task.done():
-                task.cancel()
-        
-        # Wait briefly for task cancellation
-        if tasks_to_cancel:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*[t for t in tasks_to_cancel if t], return_exceptions=True),
-                    timeout=1.0
-                )
-            except asyncio.TimeoutError:
-                logger.warning("⏰ Task cancellation timed out")
-        
-        # Quick unpublish attempt
+                logger.debug(f"Departure event failed: {e}")
+
+        logger.info("Gateway event publisher stopped")
+
+    async def send_post_uvicorn_join_event(self):
+        """Send join event after uvicorn is fully ready."""
+        if not self.gateway_client:
+            logger.warning("Cannot send join event - no gateway client")
+            return
+
         try:
-            await asyncio.wait_for(self._unpublish_node_info(), timeout=1.0)
-            logger.debug("✅ Node info unpublished")
-        except asyncio.TimeoutError:
-            logger.warning("⏰ Unpublish timed out during shutdown")
+            await self.gateway_client.send_event("node_joined")
+            logger.info("✅ Join event sent to gateway (post-uvicorn)")
         except Exception as e:
-            logger.debug(f"Unpublish failed during shutdown: {e}")
-        
-        self.kademlia_node = None
-        logger.info("Event-based DHT publisher stopped")
+            logger.error(f"Failed to send join event: {e}")
+
+    async def _monitor_changes(self):
+        """Monitor metrics for significant changes and publish updates."""
+        while self.running:
+            try:
+                await asyncio.sleep(30)
+
+                if not self.gateway_client:
+                    continue
+
+                current_metrics = self.metrics_callback() if self.metrics_callback else {}
+
+                if self._should_update_metrics(current_metrics):
+                    await self.gateway_client.send_event("node_updated")
+                    self.last_published_metrics = current_metrics.copy()
+                    self.last_significant_change = time.time()
+                    logger.debug("Published update due to significant metric change")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in metrics monitor: {e}")
+                await asyncio.sleep(60)
+
+    def _should_update_metrics(self, current_metrics: Dict[str, Any]) -> bool:
+        """Check if metrics changed enough to warrant an update."""
+        if not self.last_published_metrics:
+            return True
+
+        for key in ['load', 'tps', 'ttft', 'latency']:
+            if key in current_metrics and key in self.last_published_metrics:
+                old_value = self.last_published_metrics[key]
+                new_value = current_metrics[key]
+
+                if old_value == 0 and new_value == 0:
+                    continue
+
+                if old_value == 0:
+                    return True
+
+                change_ratio = abs(new_value - old_value) / old_value
+                if change_ratio > self.metrics_change_threshold:
+                    return True
+
+        return False
     
     async def _monitor_changes(self):
         """Enhanced monitoring with periodic new node detection"""

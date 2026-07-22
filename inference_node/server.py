@@ -28,6 +28,7 @@ from inference_node.heartbeat import HeartbeatManager
 from inference_node.request_queue import RequestQueueManager
 from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
+from inference_node.event_publisher import GatewayEventPublisher
 from common.utils import get_logger, get_host_ip
 
 logger = get_logger(__name__)
