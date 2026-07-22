@@ -46,35 +46,43 @@ gateway_client: Optional[GatewayClient] = None
 _active_sse_tasks: set = set()
 
 def _get_own_url() -> str:
-    """Get this node's public tunnel URL. Returns empty string if no tunnel."""
-    # Try gateway client first (only if it has a URL)
+    """Get this node's public tunnel URL. Always checks fresh sources."""
+    # Always check fresh sources first (file/env may have updated URL)
+    tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
+    if not tunnel_url:
+        tunnel_file = "/tmp/llamanet_tunnel_url"
+        try:
+            if os.path.exists(tunnel_file):
+                with open(tunnel_file) as f:
+                    url = f.read().strip()
+                    if url.startswith("http"):
+                        tunnel_url = url
+        except Exception:
+            pass
+
+    if tunnel_url:
+        url = tunnel_url.rstrip("/")
+        # Update gateway client if URL changed
+        if gateway_client and gateway_client.own_url != url:
+            old_url = gateway_client.own_url
+            gateway_client.own_url = url
+            gateway_client.tunnel_url = url
+            if old_url:
+                logger.info(f"🔄 Tunnel URL changed: {old_url} → {url}")
+            else:
+                logger.info(f"🔄 Tunnel URL detected: {url}")
+        return url
+
+    # Fallback to gateway client
     if gateway_client and gateway_client.own_url:
         return gateway_client.own_url
 
-    # Try environment variable
-    tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
-    if tunnel_url:
-        url = tunnel_url.rstrip("/")
-        _sync_tunnel_url_to_gateway(url)
-        return url
-
-    # Try file
-    tunnel_file = "/tmp/llamanet_tunnel_url"
-    try:
-        if os.path.exists(tunnel_file):
-            with open(tunnel_file) as f:
-                url = f.read().strip()
-                if url.startswith("http"):
-                    _sync_tunnel_url_to_gateway(url.rstrip("/"))
-                    return url.rstrip("/")
-    except Exception:
-        pass
     return ""
 
 
 def _sync_tunnel_url_to_gateway(url: str):
-    """Sync discovered tunnel URL back to gateway client and trigger registration."""
-    if gateway_client and not gateway_client.own_url and url:
+    """Sync discovered tunnel URL back to gateway client."""
+    if gateway_client and url and gateway_client.own_url != url:
         gateway_client.own_url = url
         gateway_client.tunnel_url = url
         logger.info(f"🔄 Synced tunnel URL to gateway client: {url}")
