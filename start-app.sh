@@ -10,6 +10,7 @@ set -e
 # because inference nodes need GPU and run on user machines
 if [ -n "$MACHAAO_APP_ID" ]; then
     export LLAMANET_MODE="landing"
+    ENABLE_TUNNEL=true
     echo "🌐 MACHAAO cloud detected — starting gateway mode"
 fi
 

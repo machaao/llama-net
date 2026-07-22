@@ -40,7 +40,7 @@ class NodeValidator:
     @staticmethod
     def validate_node_info(node_info: Dict[str, Any]) -> bool:
         """Validate node info structure"""
-        required_fields = ['node_id', 'ip', 'port', 'model']
+        required_fields = ['node_id', 'model']
         
         for field in required_fields:
             if field not in node_info:
@@ -49,14 +49,7 @@ class NodeValidator:
         if not NodeValidator.validate_node_id(node_info['node_id']):
             return False
         
-        try:
-            ipaddress.IPv4Address(node_info['ip'])
-            port = int(node_info['port'])
-            if not (1024 <= port <= 65535):
-                return False
-        except (ValueError, ipaddress.AddressValueError):
-            return False
-        
+        # url is preferred but not strictly required for local nodes
         return True
 
 class NetworkValidator:

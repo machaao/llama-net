@@ -138,7 +138,7 @@ class EventAwareOpenAIClient:
         if not self.is_started:
             return {"error": "Client not started"}
         
-        nodes = list(self.dht_discovery.active_nodes.values())
+        nodes = await self.node_discovery.get_nodes()
         
         if not nodes:
             return {
@@ -216,7 +216,11 @@ class EventAwareOpenAIClient:
             
             # Send request to node
             try:
-                url = f"{node.url.rstrip('/')}/v1/chat/completions" if node.url else f"http://{node.ip}:{node.port}/v1/chat/completions"
+                if not node.url:
+                    logger.warning(f"Node {node.node_id} has no tunnel URL, skipping")
+                    retries += 1
+                    continue
+                url = f"{node.url.rstrip('/')}/v1/chat/completions"
                 
                 if stream:
                     return await self._handle_streaming_request(url, request.dict())
@@ -281,7 +285,11 @@ class EventAwareOpenAIClient:
             
             # Send request to node
             try:
-                url = f"{node.url.rstrip('/')}/v1/completions" if node.url else f"http://{node.ip}:{node.port}/v1/completions"
+                if not node.url:
+                    logger.warning(f"Node {node.node_id} has no tunnel URL, skipping")
+                    retries += 1
+                    continue
+                url = f"{node.url.rstrip('/')}/v1/completions"
                 
                 if stream:
                     return await self._handle_streaming_request(url, request.dict())
