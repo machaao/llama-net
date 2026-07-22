@@ -8,59 +8,18 @@ import uuid
 class NodeInfo(BaseModel):
     """Information about an inference node"""
     node_id: str
-    ip: str  # Primary IP for backward compatibility
+    ip: str
     port: int
     model: str
     load: float = 0.0
     tps: float = 0.0
     uptime: int = 0
     last_seen: int = Field(default_factory=lambda: int(time.time()))
-    
-    # Event-driven metadata
-    event_driven: bool = True  # Mark as event-driven update
-    last_significant_change: Optional[int] = None  # When metrics last changed significantly
-    change_reason: Optional[str] = None  # Why this update was triggered
-    
-    # Multi-IP support for auto IP selection
-    available_ips: Optional[List[str]] = None  # All available IP addresses
-    ip_types: Optional[Dict[str, str]] = None  # IP classification (public/private/loopback)
-    preferred_ip: Optional[str] = None  # Client's preferred IP after testing
-    
-    # Performance metrics (rolling averages)
-    ttft: Optional[float] = None      # Average time-to-first-token in seconds
-    latency: Optional[float] = None   # Average end-to-end latency in seconds
-    
-    # Additional metadata
-    cpu_info: Optional[str] = None
-    ram_total: Optional[int] = None
+    url: Optional[str] = None  # Public URL (tunnel or IP-based)
+    ttft: Optional[float] = None
+    latency: Optional[float] = None
     gpu_info: Optional[str] = None
-    context_size: Optional[int] = None
-    
-    def get_all_ips(self) -> List[str]:
-        """Get all available IP addresses for this node"""
-        if self.available_ips:
-            return self.available_ips
-        return [self.ip]  # Fallback to primary IP
-    
-    def get_best_ip_for_client(self, client_ip: str = None) -> str:
-        """Get the best IP address for a client to connect to"""
-        if self.preferred_ip:
-            return self.preferred_ip
-        
-        # If we have multiple IPs, try to select the best one
-        if self.available_ips and len(self.available_ips) > 1:
-            # Prefer public IPs, then private, then others
-            public_ips = [ip for ip in self.available_ips 
-                         if self.ip_types and self.ip_types.get(ip) == "public"]
-            private_ips = [ip for ip in self.available_ips 
-                          if self.ip_types and self.ip_types.get(ip) == "private"]
-            
-            if public_ips:
-                return public_ips[0]
-            elif private_ips:
-                return private_ips[0]
-        
-        return self.ip  # Fallback to primary IP
+    total_tokens: Optional[int] = None
 
 # OpenAI-compatible models with reasoning support
 class OpenAIMessage(BaseModel):

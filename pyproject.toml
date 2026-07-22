@@ -43,9 +43,7 @@ Homepage = "https://github.com/yourusername/llamanet"
 Repository = "https://github.com/yourusername/llamanet"
 
 [project.scripts]
-llamanet-inference = "inference_node.server:start_server"
-llamanet-registry = "registry.server:start_server"
-llamanet-help = "inference_node.server:show_help"
+llamanet = "inference_node.server:start_server"
 
 [tool.setuptools.packages.find]
-include = ["client*", "common*", "dht*", "inference_node*", "registry*", "landing*"]
+include = ["client*", "common*", "inference_node*", "landing*"]

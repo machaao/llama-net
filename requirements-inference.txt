@@ -1,11 +1,7 @@
 # LlamaNet - Full inference node dependencies
-# Includes native compilation (llama-cpp-python), GPU libs, DHT, P2P
 -r requirements.txt
 llama-cpp-python==0.3.34
 psutil>=5.8.0,<6.0.0
 pynvml>=11.4.1
-kademlia>=2.2.2,<3.0.0
-p2pd
-ipaddress>=1.0.23
 tqdm>=4.64.0
 huggingface_hub>=0.0.1

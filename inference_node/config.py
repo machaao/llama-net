@@ -1,5 +1,4 @@
 import os
-import uuid
 import argparse
 import sys
 import socket
@@ -7,7 +6,6 @@ import hashlib
 import time
 from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
-from common.port_utils import PortManager
 from inference_node.model_manager import ModelManager
 
 logger = get_logger(__name__)
