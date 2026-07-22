@@ -138,7 +138,40 @@ class LandingApp {
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
             if (data.url) {
-                window.location.href = data.url;
+                // Use popup flow to avoid Supabase Site URL redirect issues
+                const popup = window.open(data.url, 'llamanet-auth', 'width=500,height=700');
+                
+                // Listen for the auth token from the popup
+                const tokenPromise = new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        window.removeEventListener('message', handler);
+                        reject(new Error('Auth timed out'));
+                    }, 120000);
+                    
+                    const handler = (event) => {
+                        if (event.data && event.data.type === 'llamanet-auth-callback') {
+                            clearTimeout(timeout);
+                            window.removeEventListener('message', handler);
+                            resolve(event.data);
+                        }
+                    };
+                    window.addEventListener('message', handler);
+                });
+                
+                try {
+                    const authData = await tokenPromise;
+                    if (authData.access_token) {
+                        document.cookie = 'llamanet_session=' + authData.access_token + '; path=/; max-age=604800; SameSite=Lax';
+                        localStorage.setItem('supabase_access_token', authData.access_token);
+                        if (authData.refresh_token) localStorage.setItem('supabase_refresh_token', authData.refresh_token);
+                        // Refresh to pick up the session cookie
+                        window.location.href = '/dashboard';
+                    }
+                } catch (e) {
+                    console.warn('Popup auth failed, falling back to redirect:', e);
+                    // Fallback to direct redirect
+                    window.location.href = data.url;
+                }
             } else {
                 this.showToast('error', 'Failed to get Google sign-in URL');
             }

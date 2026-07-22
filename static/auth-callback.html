@@ -9,13 +9,31 @@
             if (hash) {
                 var params = new URLSearchParams(hash.substring(1));
                 var accessToken = params.get('access_token');
+                var refreshToken = params.get('refresh_token');
+                
                 if (accessToken) {
+                    // Set cookie for server-side auth
                     document.cookie = 'llamanet_session=' + accessToken + '; path=/; max-age=604800; SameSite=Lax';
                     localStorage.setItem('supabase_access_token', accessToken);
-                    var refreshToken = params.get('refresh_token');
                     if (refreshToken) localStorage.setItem('supabase_refresh_token', refreshToken);
+                    
+                    // If opened in a popup, send token to parent window and close
+                    if (window.opener && !window.opener.closed) {
+                        try {
+                            window.opener.postMessage({
+                                type: 'llamanet-auth-callback',
+                                access_token: accessToken,
+                                refresh_token: refreshToken || ''
+                            }, window.location.origin);
+                            window.close();
+                            return;
+                        } catch (e) {
+                            console.warn('Could not postMessage to opener:', e);
+                        }
+                    }
                 }
             }
+            // Fallback: redirect to dashboard (direct navigation flow)
             window.location.href = '/dashboard';
         })();
     </script>
