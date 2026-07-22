@@ -386,6 +386,9 @@ async def _gossip_loop():
                                             **new_peer,
                                             "last_seen": time.time()
                                         }
+                                        asyncio.create_task(
+                                            _notify_peers_of_discovered_peer(pid, new_peer.get("url", ""), new_peer.get("model", "unknown"))
+                                        )
                 except Exception:
                     pass
 
