@@ -141,6 +141,15 @@ class GatewayClient:
 
                 # Send heartbeat only if registered
                 if self.registered:
+                    # Re-check tunnel URL in case it changed (quick tunnels)
+                    fresh_url = self._detect_tunnel_url()
+                    if fresh_url and fresh_url != self.own_url:
+                        logger.info(f"🔄 Tunnel URL changed: {self.own_url} → {fresh_url}")
+                        self.own_url = fresh_url
+                        self.tunnel_url = fresh_url
+                        # Re-register with new URL
+                        await self.send_event("node_updated")
+
                     metrics = self._get_metrics()
                     async with aiohttp.ClientSession(
                         timeout=aiohttp.ClientTimeout(total=8)
@@ -149,6 +158,7 @@ class GatewayClient:
                             f"{self.gateway_url}/api/nodes/heartbeat",
                             json={
                                 "node_hash": self.node_hash,
+                                "url": self.own_url,
                                 "metrics": metrics,
                             },
                         ) as resp:

@@ -213,6 +213,9 @@ start_cloudflare_tunnel() {
     local tunnel_log="/tmp/llamanet_tunnel_$$.log"
     local config_file="$HOME/.cloudflared/config.yml"
 
+    # Remove stale tunnel URL from previous runs
+    rm -f /tmp/llamanet_tunnel_url
+
     echo ""
 
     # ── Named tunnel with existing config.yml ──

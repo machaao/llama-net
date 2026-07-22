@@ -319,6 +319,21 @@ async def node_heartbeat(request: Request):
         import hashlib
         node_hash = hashlib.sha256(node_hash.encode()).hexdigest()[:12]
     metrics = body.get("metrics", {})
+    node_url = body.get("url", "")
+
+    # Update URL in DB if it changed (tunnel URL rotation)
+    if node_url:
+        try:
+            existing = supabase_mgr.client.table("nodes").select("url").eq(
+                "node_hash", node_hash
+            ).eq("status", "active").execute()
+            if existing.data and existing.data[0].get("url") != node_url:
+                supabase_mgr.client.table("nodes").update(
+                    {"url": node_url}
+                ).eq("node_hash", node_hash).eq("status", "active").execute()
+                logger.info(f"🔄 Updated URL for node {node_hash}: {node_url}")
+        except Exception:
+            pass
 
     # Track heartbeat timestamps and detect significant metric changes
     prev = _heartbeat_last_seen_map.get(node_hash, {})
@@ -517,6 +532,21 @@ async def publish_node_event(request: Request):
             logger.info(f"📡 Node left via event: {node_hash} model={model_name}")
 
         elif event_type == "node_updated":
+            # Update URL if it changed (tunnel rotation)
+            event_url = body.get("url", "")
+            if event_url:
+                try:
+                    existing_url = supabase_mgr.client.table("nodes").select("url").eq(
+                        "node_hash", node_hash
+                    ).eq("status", "active").execute()
+                    if existing_url.data and existing_url.data[0].get("url") != event_url:
+                        supabase_mgr.client.table("nodes").update(
+                            {"url": event_url}
+                        ).eq("node_hash", node_hash).eq("status", "active").execute()
+                        logger.info(f"🔄 Updated URL for node {node_hash}: {event_url}")
+                except Exception:
+                    pass
+
             # Update model name if it changed (hot-reload)
             new_model = body.get("model", "")
             if new_model and new_model != "unknown":
