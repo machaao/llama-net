@@ -1461,6 +1461,11 @@ async def select_model(request: Request):
             config.no_model_mode = False
             config.save_active_model(model_path, config.model_name)
 
+            # If gateway_client already exists from no-model mode, sync it
+            if gateway_client:
+                gateway_client.model_name = config.model_name
+                logger.info(f"Gateway client synced to initial model: {config.model_name}")
+
             logger.info(f"Initializing LLM with selected model: {model_path}")
             llm = LlamaWrapper(config)
 
@@ -1534,6 +1539,12 @@ async def select_model(request: Request):
             logger.info(f"Hot-reloading model: {config.model_path} -> {model_path}")
             llm.reload_model(model_path)
 
+            # Sync gateway client with new model name
+            if gateway_client:
+                gateway_client.model_name = config.model_name
+                gateway_client.own_url = gateway_client.tunnel_url  # Re-affirm tunnel URL
+                logger.info(f"Gateway client synced to new model: {config.model_name}")
+
             config.save_active_model(model_path, config.model_name)
 
             # Notify gateway of model change
@@ -1547,8 +1558,7 @@ async def select_model(request: Request):
                     await sse_manager.broadcast_event("node_updated", {
                         "node_info": {
                             "node_id": config.node_id,
-                            "ip": get_host_ip(),
-                            "port": config.port,
+                            "url": _get_own_url(),
                             "model": config.model_name,
                             "load": 0.0,
                             "tps": 0.0,

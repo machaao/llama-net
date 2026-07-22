@@ -515,6 +515,22 @@ async def publish_node_event(request: Request):
             logger.info(f"📡 Node left via event: {node_hash} model={model_name}")
 
         elif event_type == "node_updated":
+            # Update model name if it changed (hot-reload)
+            new_model = body.get("model", "")
+            if new_model and new_model != "unknown":
+                existing_node = supabase_mgr.client.table("nodes").select("model_name").eq(
+                    "node_hash", node_hash
+                ).eq("status", "active").execute()
+                if existing_node.data and existing_node.data[0].get("model_name") != new_model:
+                    new_slug = model_name_to_slug(new_model)
+                    supabase_mgr.client.table("nodes").update({
+                        "model_name": new_model,
+                        "model_slug": new_slug,
+                    }).eq("node_hash", node_hash).eq("status", "active").execute()
+                    model_name = new_model
+                    model_slug = new_slug
+                    logger.info(f"📡 Node {node_hash} model changed → {new_model}")
+
             supabase_mgr.update_node_metrics(node_hash, body.get("metrics", {}))
 
             _heartbeat_last_seen_map[node_hash] = {
