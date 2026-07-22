@@ -310,29 +310,16 @@ class LlamaNetUI {
     }
     
     async loadInitialNetworkStatus() {
-        // Show loading state immediately
         this.showNetworkLoading();
-        
-        // Load initial network status using consolidated endpoints
+
         try {
-            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/dht/status`),
-                fetch(`${this.baseUrl}/v1/models/network`),
-                fetch(`${this.baseUrl}/models/statistics`)
-            ]);
-            
-            if (dhtResponse.ok && modelsResponse.ok && statsResponse.ok) {
-                const dhtStatus = await dhtResponse.json();
+            const modelsResponse = await fetch(`${this.baseUrl}/v1/models/network`);
+
+            if (modelsResponse.ok) {
                 const modelsData = await modelsResponse.json();
-                const statsData = await statsResponse.json();
-                
-                // Update activeNodes from API data
                 this.updateActiveNodesFromAPI(modelsData);
-                
-                // Force update the display with initial data
                 this.updateNetworkDisplayRealTime();
-                
-                console.log('✅ Initial network status loaded successfully');
+                console.log('✅ Initial network status loaded');
             } else {
                 this.showNetworkError('Unable to connect to LlamaNet node');
             }
@@ -552,7 +539,7 @@ class LlamaNetUI {
                 tps: parseFloat(nodeData.tps) || 0,
                 uptime: parseInt(nodeData.uptime) || 0,
                 last_seen: parseInt(nodeData.last_seen) || Math.floor(Date.now() / 1000),
-                dht_port: parseInt(nodeData.dht_port) || null,
+                dht_port: null,
                 
                 // Event-driven metadata from NodeInfo model
                 event_driven: nodeData.event_driven !== undefined ? nodeData.event_driven : true,
@@ -938,123 +925,18 @@ class LlamaNetUI {
     
     async refreshNetworkDataOnTopologyChange() {
         try {
-            // When network topology changes, we need to refresh our node data
-            // since individual node events might not capture all changes
-            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/dht/status`).catch(() => null),
-                fetch(`${this.baseUrl}/v1/models/network`).catch(() => null),
-                fetch(`${this.baseUrl}/models/statistics`).catch(() => null)
-            ]);
-            
-            // Fetch current node info FIRST (before clearing activeNodes)
-            // so fresh model name survives the DHT rebuild
-            let freshLocalNode = null;
-            try {
-                const infoResponse = await fetch(`${this.baseUrl}/info`);
-                if (infoResponse.ok) {
-                    const infoData = await infoResponse.json();
-                    const currentModel = infoData.model || this.selectedModel || 'unknown';
-                    const currentNodeId = infoData.node_id;
-                    if (currentNodeId) {
-                        const existingNode = this.activeNodes.get(currentNodeId);
-                        freshLocalNode = this.normalizeNodeDataWithValidation({
-                            node_id: currentNodeId,
-                            ip: infoData.system?.network?.local_ip || window.location.hostname,
-                            port: infoData.port || window.location.port,
-                            model: currentModel,
-                            load: existingNode?.load || 0,
-                            tps: existingNode?.tps || 0,
-                            uptime: existingNode?.uptime || 0,
-                            last_seen: Math.floor(Date.now() / 1000),
-                            dht_port: infoData.dht_port
-                        });
-                    }
-                }
-            } catch (infoErr) {
-                console.debug('Could not pre-fetch current node info:', infoErr);
-            }
+            const modelsResponse = await fetch(`${this.baseUrl}/v1/models/network`).catch(() => null);
 
-            if (dhtResponse && dhtResponse.ok && modelsResponse && modelsResponse.ok) {
-                const dhtData = await dhtResponse.json();
+            if (modelsResponse && modelsResponse.ok) {
                 const modelsData = await modelsResponse.json();
-                let statsData = null;
-                
-                if (statsResponse && statsResponse.ok) {
-                    statsData = await statsResponse.json();
-                }
-                
-                // Debug log to check the structure
-                console.log('🔍 Models data structure:', modelsData);
-                
-                // Preserve SSE-updated metrics before clearing activeNodes
-                const sseMetrics = new Map();
-                this.activeNodes.forEach((node, nodeId) => {
-                    sseMetrics.set(nodeId, {
-                        ttft: node.ttft,
-                        latency: node.latency,
-                        tps: node.tps,
-                        load: node.load,
-                        uptime: node.uptime,
-                        last_seen: node.last_seen,
-                        total_tokens: node.total_tokens
-                    });
-                });
-                
-                // Update activeNodes from fresh API data
                 this.updateActiveNodesFromAPI(modelsData);
-                
-                // Merge SSE-updated metrics back into API nodes (SSE is fresher for current node)
-                this.activeNodes.forEach((node, nodeId) => {
-                    const sseData = sseMetrics.get(nodeId);
-                    if (sseData) {
-                        // For the current node, always prefer SSE metrics (they're from live generation)
-                        // For remote nodes, use whichever is more recent
-                        if (nodeId === freshLocalNode?.node_id) {
-                            // Current node: SSE metrics are always freshest
-                            node.ttft = sseData.ttft ?? node.ttft;
-                            node.latency = sseData.latency ?? node.latency;
-                            node.tps = sseData.tps ?? node.tps;
-                            node.load = sseData.load ?? node.load;
-                        } else if (sseData.last_seen && node.last_seen && sseData.last_seen >= node.last_seen) {
-                            // Remote node: use SSE data if it's more recent
-                            node.ttft = sseData.ttft ?? node.ttft;
-                            node.latency = sseData.latency ?? node.latency;
-                            node.tps = sseData.tps ?? node.tps;
-                            node.load = sseData.load ?? node.load;
-                        }
-                    }
-                });
-                
-                // Override local node with fresh model info (DHT may still have stale data)
-                if (freshLocalNode) {
-                    const existingNode = this.activeNodes.get(freshLocalNode.node_id);
-                    freshLocalNode.ttft = existingNode?.ttft ?? freshLocalNode.ttft;
-                    freshLocalNode.latency = existingNode?.latency ?? freshLocalNode.latency;
-                    freshLocalNode.tps = existingNode?.tps ?? freshLocalNode.tps;
-                    freshLocalNode.load = existingNode?.load ?? freshLocalNode.load;
-                    this.activeNodes.set(freshLocalNode.node_id, freshLocalNode);
-                    this.nodeStatuses.set(freshLocalNode.node_id, 'online');
-                    this.nodeLastEvent.set(freshLocalNode.node_id, Date.now());
-                    console.log(`🔄 Overrode local node model: ${freshLocalNode.model}`);
-                }
-                
-                // Update network stats from server statistics if available
-                if (statsData) {
-                    this.updateNetworkStatsFromAPI(statsData);
-                }
-                
-                // Update the display with fresh data
                 this.updateNetworkDisplayRealTime();
-                
-                console.log('🔄 Network data refreshed due to topology change');
+                console.log('🔄 Network data refreshed');
             } else {
-                console.warn('⚠️ Could not refresh network data after topology change');
-                // Still try to update display with current data
                 this.updateNetworkDisplayRealTime();
             }
         } catch (error) {
-            console.error('Error refreshing network data on topology change:', error);
-            // Fallback to current display update
+            console.error('Error refreshing network data:', error);
             this.updateNetworkDisplayRealTime();
         }
     }
@@ -1114,8 +996,7 @@ class LlamaNetUI {
             this.showUpdateIndicator(true);
             
             // Get fresh data from API for validation and potential updates
-            const [dhtResponse, modelsResponse, statsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/dht/status`).catch(() => null),
+            const [modelsResponse, statsResponse] = await Promise.all([
                 fetch(`${this.baseUrl}/v1/models/network`).catch(() => null),
                 fetch(`${this.baseUrl}/models/statistics`).catch(() => null)
             ]);
@@ -1127,8 +1008,7 @@ class LlamaNetUI {
             }
             
             // If we got fresh API data, use it to update/validate our display
-            if (dhtResponse && dhtResponse.ok && modelsResponse && modelsResponse.ok) {
-                const dhtData = await dhtResponse.json();
+            if (modelsResponse && modelsResponse.ok) {
                 const modelsData = await modelsResponse.json();
                 let statsData = null;
                 
@@ -1141,9 +1021,6 @@ class LlamaNetUI {
                 
                 // Force update the display with fresh data
                 this.updateNetworkDisplayRealTime();
-                
-                // Validate SSE data against API data
-                this.validateNetworkStats(dhtData, modelsData);
                 
                 // Update network stats if we have them
                 if (statsData) {
@@ -1182,9 +1059,8 @@ class LlamaNetUI {
     }
     
     async updateNetworkDisplay(dhtStatus, modelsData, statsData) {
-        // Store previous stats for change detection
         this.previousModelStats = this.currentModelStats || {};
-        this.currentModelStats = statsData.models || {};
+        this.currentModelStats = (statsData && statsData.models) || {};
         
         this.previousNodeStates = this.currentNodeStates || {};
         this.currentNodeStates = {};
@@ -1209,16 +1085,6 @@ class LlamaNetUI {
     
     async updateNetworkDisplaySmooth(dhtStatus, modelsData, statsData) {
         const container = document.getElementById('network-status');
-        
-        if (!dhtStatus.running) {
-            container.innerHTML = `
-                <div class="text-center text-warning">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <p>DHT not running</p>
-                </div>
-            `;
-            return;
-        }
         
         try {
             // Get current node info
@@ -1260,13 +1126,6 @@ class LlamaNetUI {
                     ${this.renderAvailableModelsWithAnimation(modelsData.data, statsData.models)}
                 </div>
                 
-                <div class="mb-3">
-                    <h6><i class="fas fa-network-wired"></i> DHT Network</h6>
-                    <div class="small">
-                        <div>DHT Contacts: <span class="metric-value">${dhtStatus.contacts_count}</span></div>
-                        <div>DHT Port: ${dhtStatus.dht_port}</div>
-                    </div>
-                </div>
             `;
             
             // Smooth update with fade transition
@@ -1768,7 +1627,6 @@ class LlamaNetUI {
                         <strong>Node ID:</strong> ${nodeData.node_id}<br>
                         <strong>Address:</strong> ${nodeData.ip}:${nodeData.port}<br>
                         <strong>Model:</strong> ${nodeData.model}<br>
-                        <strong>DHT Port:</strong> ${nodeData.dht_port || 'Unknown'}<br>
                         <strong>Last Seen:</strong> ${lastSeenText}
                     </div>
                     
@@ -1848,7 +1706,6 @@ class LlamaNetUI {
                         <strong>Node ID:</strong> ${nodeInfo.node_id}<br>
                         <strong>Status:</strong> ${statusBadge} ${isCurrentNode ? '<span class="badge bg-primary ms-1">Current Node</span>' : ''}<br>
                         <strong>Address:</strong> ${nodeInfo.ip}:${nodeInfo.port}<br>
-                        <strong>DHT Port:</strong> ${nodeInfo.dht_port || 'Unknown'}<br>
                         <strong>Model:</strong> ${nodeInfo.model}<br>
                         ${nodeInfo.model_path ? `<strong>Model Path:</strong> ${nodeInfo.model_path}<br>` : ''}
                         <strong>Last Seen:</strong> ${lastSeenText}
@@ -2364,20 +2221,17 @@ class LlamaNetUI {
     async showNetworkModal() {
         const modal = new bootstrap.Modal(document.getElementById('networkModal'));
         modal.show();
-        
-        // Load detailed network information
+
         try {
-            const [infoResponse, dhtResponse, statusResponse] = await Promise.all([
+            const [infoResponse, statusResponse] = await Promise.all([
                 fetch(`${this.baseUrl}/info`),
-                fetch(`${this.baseUrl}/dht/status`),
                 fetch(`${this.baseUrl}/status`)
             ]);
-            
+
             const info = await infoResponse.json();
-            const dht = await dhtResponse.json();
             const status = await statusResponse.json();
-            
-            document.getElementById('network-details').innerHTML = this.renderNetworkDetails(info, dht, status);
+
+            document.getElementById('network-details').innerHTML = this.renderNetworkDetails(info, {}, status);
         } catch (error) {
             document.getElementById('network-details').innerHTML = `
                 <div class="alert alert-danger">
@@ -2389,10 +2243,9 @@ class LlamaNetUI {
     }
     
     renderNetworkDetails(info, dht, status) {
-        const cleanupStats = dht.cleanup_stats || {};
-        const lastCleanup = cleanupStats.last_cleanup ? 
-            new Date(cleanupStats.last_cleanup * 1000).toLocaleTimeString() : 'Never';
-        
+        const system = info.system || {};
+        const ram = system.ram || {};
+
         return `
             <div class="row">
                 <div class="col-md-6">
@@ -2400,84 +2253,38 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${info.node_id}<br>
                         <strong>Model:</strong> ${info.model}<br>
-                        <strong>Model Path:</strong> ${info.model_path}<br>
-                        <strong>DHT Port:</strong> ${info.dht_port}<br>
+                        ${info.model_path ? `<strong>Model Path:</strong> ${info.model_path}<br>` : ''}
                     </div>
-                    
+
                     <h6 class="mt-3"><i class="fas fa-chart-line"></i> Performance</h6>
                     <div class="network-detail-item">
-                        <strong>Load:</strong> ${status.load}<br>
-                        <strong>TPS:</strong> ${status.tps}<br>
+                        <strong>Load:</strong> ${status.load || 0}<br>
+                        <strong>TPS:</strong> ${status.tps || 0}<br>
                         <strong>TTFT:</strong> ${this.formatMetricTime(status.ttft)}<br>
                         <strong>Latency:</strong> ${this.formatMetricTime(status.latency)}<br>
-                        <strong>Uptime:</strong> ${status.uptime}s<br>
-                        <strong>Total Tokens:</strong> ${status.total_tokens}
+                        <strong>Uptime:</strong> ${status.uptime || 0}s<br>
+                        <strong>Total Tokens:</strong> ${status.total_tokens || 0}
                     </div>
                 </div>
-                
+
                 <div class="col-md-6">
-                    <h6><i class="fas fa-network-wired"></i> DHT Status</h6>
+                    <h6><i class="fas fa-cogs"></i> System Info</h6>
                     <div class="network-detail-item">
-                        <strong>Running:</strong> ${dht.running ? '✅ Yes' : '❌ No'}<br>
-                        <strong>Contacts:</strong> ${dht.contacts_count}<br>
-                        <strong>Storage Keys:</strong> ${dht.storage_keys.length}<br>
-                        <strong>Bootstrap Nodes:</strong> ${dht.bootstrap_nodes.length}
-                    </div>
-                    
-                    <h6 class="mt-3"><i class="fas fa-broom"></i> Cleanup Status</h6>
-                    <div class="network-detail-item">
-                        <strong>Last Cleanup:</strong> ${lastCleanup}<br>
-                        <strong>Cleanup Interval:</strong> ${cleanupStats.cleanup_interval || 30}s<br>
-                        <strong>Active Contacts:</strong> ${cleanupStats.routing_table_stats?.active_contacts || 0}<br>
-                        <strong>Stale Contacts:</strong> ${cleanupStats.routing_table_stats?.stale_contacts || 0}
-                    </div>
-                    
-                    <h6 class="mt-3"><i class="fas fa-cogs"></i> System Info</h6>
-                    <div class="network-detail-item">
-                        <strong>CPU:</strong> ${info.system.cpu}<br>
-                        <strong>RAM:</strong> ${Math.round(info.system.ram.total / 1024 / 1024 / 1024)} GB<br>
-                        <strong>GPU:</strong> ${info.system.gpu || 'None'}<br>
-                        <strong>Platform:</strong> ${info.system.platform}
+                        <strong>CPU:</strong> ${system.cpu || 'Unknown'}<br>
+                        <strong>RAM:</strong> ${ram.total_gb ? ram.total_gb + ' GB' : 'Unknown'}<br>
+                        <strong>GPU:</strong> ${system.gpu || 'None'}<br>
+                        <strong>Platform:</strong> ${system.platform || 'Unknown'}
                     </div>
                 </div>
             </div>
-            
-            <div class="mt-3">
-                <h6><i class="fas fa-list"></i> Contact Details</h6>
-                <div class="table-responsive">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Node ID</th>
-                                <th>Address</th>
-                                <th>Last Seen</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${dht.contacts.map(contact => `
-                                <tr>
-                                    <td><code>${contact.node_id.substring(0, 12)}...</code></td>
-                                    <td>${contact.ip}:${contact.port}</td>
-                                    <td>${contact.seconds_ago}s ago</td>
-                                    <td><span class="badge bg-${contact.status === 'active' ? 'success' : 'warning'}">${contact.status}</span></td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
+
+            ${info.endpoints ? `
             <div class="mt-3">
                 <h6><i class="fas fa-list"></i> Available Endpoints</h6>
-                <div class="row">
-                    <div class="col-12">
-                        <ul class="list-unstyled small">
-                            ${info.endpoints.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
-                        </ul>
-                    </div>
-                </div>
-            </div>
+                <ul class="list-unstyled small">
+                    ${info.endpoints.map(ep => `<li><span class="api-endpoint">${ep}</span></li>`).join('')}
+                </ul>
+            </div>` : ''}
         `;
     }
     
@@ -2689,32 +2496,13 @@ class LlamaNetUI {
     
     // Update cleanup method to only handle SSE (no polling cleanup)
     validateNetworkStats(dhtData, modelsData) {
-        // Validate current SSE data against fresh API data without disrupting UX
         const sseNodeCount = this.activeNodes.size;
         const apiNodeCount = modelsData.total_nodes || 0;
-        
-        // Log validation results
+
         console.log(`📊 Network validation: SSE nodes: ${sseNodeCount}, API nodes: ${apiNodeCount}`);
-        
-        // If there's a significant discrepancy, log it but don't disrupt UX
+
         if (Math.abs(sseNodeCount - apiNodeCount) > 2) {
-            console.warn(`⚠️ Node count discrepancy detected: SSE=${sseNodeCount}, API=${apiNodeCount}`);
-            
-            // Optionally show a subtle warning without disrupting the display
-            if (sseNodeCount === 0 && apiNodeCount > 0) {
-                this.showToast('warning', 'SSE may be missing some nodes - data will sync automatically');
-            }
-        }
-        
-        // Update network health indicator based on fresh data
-        if (dhtData.running !== undefined) {
-            const healthStatus = this.calculateNetworkHealth(
-                modelsData.total_nodes > 0 ? 0.5 : 1.0, // Rough estimate
-                modelsData.total_nodes || 0
-            );
-            
-            // Update only the health badge without touching node list
-            this.updateHealthBadgeOnly(healthStatus);
+            console.warn(`⚠️ Node count discrepancy: SSE=${sseNodeCount}, API=${apiNodeCount}`);
         }
     }
     
