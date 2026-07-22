@@ -95,6 +95,14 @@ class LandingApp {
         this.animateCounter('stat-tps', stats.total_tps || 0, true);
         const loadEl = document.getElementById('stat-load');
         if (loadEl) loadEl.textContent = (stats.avg_load || 0).toFixed(2);
+        const tokensEl = document.getElementById('stat-tokens');
+        if (tokensEl) tokensEl.textContent = this.formatTokens(stats.total_tokens || 0);
+    }
+    formatTokens(tokens) {
+        if (tokens >= 1000000000) return (tokens / 1000000000).toFixed(1) + 'B';
+        if (tokens >= 1000000) return (tokens / 1000000).toFixed(1) + 'M';
+        if (tokens >= 1000) return (tokens / 1000).toFixed(1) + 'K';
+        return tokens.toString();
     }
     async checkAuth() {
         try {
