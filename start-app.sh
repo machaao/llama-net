@@ -191,9 +191,8 @@ export PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tra
 export PYTHONDONTWRITEBYTECODE=1
 
 # Validate model file exists (or enter no-model mode)
-if [ ! -f "$DEFAULT_MODEL_PATH" ]; then
-    echo "⚠️  No model file found at $DEFAULT_MODEL_PATH"
-    echo "🌐 Starting in no-model mode - use the Web UI to download a model"
+if [ -z "$DEFAULT_MODEL_PATH" ] || [ ! -f "$DEFAULT_MODEL_PATH" ]; then
+    echo "🌐 Starting in no-model mode — download a model via Web UI"
     DEFAULT_MODEL_PATH=""
 else
     echo "✅ Model file found: $DEFAULT_MODEL_PATH"
