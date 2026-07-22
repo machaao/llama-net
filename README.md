@@ -86,6 +86,141 @@ python -m inference_node.server \
   --bootstrap-nodes localhost:8001
 ```
 
+## GPU Provider: Run a Node & Join LlamaNet
+
+If you have a GPU and want to contribute compute to the LlamaNet network, follow these steps.
+
+### 1. Install Dependencies
+
+```bash
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+```
+
+Verify your GPU is detected:
+
+```bash
+nvidia-smi
+```
+
+### 2. Run a Model
+
+Pick any GGUF model from Hugging Face. LlamaNet handles downloading automatically:
+
+```bash
+./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+```
+
+Or with a specific quantization:
+
+```bash
+./start-app.sh run hf.co/TheBloke/Llama-2-7B-Chat-GGUF:Q4_K_M
+```
+
+This starts the node on `http://localhost:8000` with the Web UI and OpenAI-compatible API.
+
+### 3. Connect to the LlamaNet Network
+
+To make your node discoverable by others, connect to the public network using `--bootstrap-peers`:
+
+```bash
+./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+  --tunnel \
+  --bootstrap-peers https://llamanet.app
+```
+
+**What this does:**
+- Downloads and runs the model on your GPU
+- Starts a Cloudflare tunnel so your node is reachable from the internet
+- Registers with the LlamaNet bootstrap peer at `llamanet.app`
+- Other nodes discover you via DHT gossip
+
+Your node will get a public URL like `https://abc-123.trycloudflare.com`.
+
+### 4. Verify Your Node
+
+Once running, check that everything is working:
+
+```bash
+# Local health check
+curl http://localhost:8000/health
+
+# Check your public tunnel URL
+curl http://localhost:8000/tunnel/status
+
+# View your node in the network
+curl http://localhost:8000/nodes
+
+# List peers that have discovered you
+curl http://localhost:8000/peers
+```
+
+You can also open `http://localhost:8000` in your browser to use the Web UI, manage models, and chat.
+
+### 5. GPU Configuration
+
+LlamaNet auto-detects your GPU and uses all available layers by default. To tune:
+
+| Env Variable | Default | Description |
+|---|---|---|
+| `N_GPU_LAYERS` | `-1` (all) | Layers to offload to GPU. Set lower if VRAM is limited. |
+| `N_CTX` | `4096` | Context window in tokens. Increase for longer conversations. |
+| `N_BATCH` | `4096` | Batch size. Higher values may improve throughput. |
+
+Example with custom GPU settings:
+
+```bash
+N_GPU_LAYERS=32 N_CTX=8192 ./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+  --tunnel \
+  --bootstrap-peers https://llamanet.app
+```
+
+### 6. Keep Your Node Running
+
+For a persistent node, use `tmux` or `screen`:
+
+```bash
+tmux new -s llamanet
+./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+  --tunnel \
+  --bootstrap-peers https://llamanet.app
+# Detach: Ctrl+B, then D
+# Reattach: tmux attach -t llamanet
+```
+
+### 7. Multiple Models (Multiple Nodes)
+
+Run multiple models on different ports to contribute more capacity:
+
+```bash
+# Terminal 1: Llama 3.2 on port 8000
+./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+  --port 8000 --dht-port 8001 --tunnel --bootstrap-peers https://llamanet.app
+
+# Terminal 2: Qwen on port 8002
+./start-app.sh run hf.co/bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M \
+  --port 8002 --dht-port 8003 --tunnel --bootstrap-peers https://llamanet.app
+```
+
+Each node gets its own tunnel URL and is independently discoverable on the network.
+
+### Troubleshooting GPU Nodes
+
+```bash
+# Verify GPU is accessible
+nvidia-smi
+
+# Check llama-cpp-python sees the GPU
+python3 -c "from llama_cpp import Llama; print('OK')"
+
+# Force CPU mode if GPU has issues
+HARDWARE_MODE=cpu ./start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+
+# Check logs for GPU layer offloading
+# Look for "Loading model with N_GPU_LAYERS" in output
+```
+
 ## Cloudflare Tunnel (Internet-Accessible)
 
 LlamaNet supports public URLs via Cloudflare tunnels — no port forwarding required.
