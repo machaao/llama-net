@@ -18,8 +18,12 @@ def _detect_and_fix_metal_compatibility():
     Intel Macs have limited Metal support that fails with newer llama-cpp-python
     shader code (uint64_t buffer types, function pointer patterns).
     This runs once at module import time before any Llama() calls.
+
+    NOTE: platform.machine() returns 'x86_64' when Python runs under Rosetta 2
+    on Apple Silicon. We must check sysctl to distinguish real Intel from Rosetta.
     """
     import platform
+    import subprocess
 
     system = platform.system()
     machine = platform.machine()
@@ -36,15 +40,28 @@ def _detect_and_fix_metal_compatibility():
     if os.environ.get("N_GPU_LAYERS", "-1") == "0":
         return
 
-    # Intel Mac (x86_64) = Metal shader incompatibility with newer llama-cpp-python
     if machine == "x86_64":
+        # Could be real Intel OR Rosetta 2 on Apple Silicon — check hardware
+        try:
+            result = subprocess.run(
+                ["/usr/sbin/sysctl", "-n", "sysctl.proc_translated"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip() == "1":
+                # Running under Rosetta 2 — this IS Apple Silicon
+                logger.info("✅ Apple Silicon detected (running under Rosetta 2) — Metal GPU enabled")
+                return
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            pass
+
+        # Real Intel Mac — Metal shader incompatibility
         os.environ["LLAMA_NO_METAL"] = "1"
         logger.warning("⚠️  Intel Mac detected — Metal GPU disabled automatically")
         logger.warning("   Reason: Metal shader compilation fails on Intel Macs with llama-cpp-python 0.3.x")
         logger.warning("   Model will run on CPU. To override, set LLAMA_NO_METAL=0")
         return
 
-    # Apple Silicon — Metal should work fine
+    # Apple Silicon (native arm64) — Metal should work fine
     if machine == "arm64":
         logger.info("Apple Silicon detected — Metal GPU enabled")
         return

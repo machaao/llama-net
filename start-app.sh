@@ -164,8 +164,21 @@ DEFAULT_PUBLIC_IP="${PUBLIC_IP:-}"
 
 # ── Intel Mac Metal Compatibility ──
 # Auto-detect Intel Macs and disable Metal to prevent shader compilation errors
-if [ "$(uname)" = "Darwin" ] && [ "$(uname -m)" = "x86_64" ]; then
-    if [ -z "$LLAMA_NO_METAL" ]; then
+# NOTE: uname -m returns x86_64 under Rosetta 2 on Apple Silicon, so we must
+# distinguish real Intel hardware from Rosetta-translated processes.
+if [ "$(uname)" = "Darwin" ]; then
+    IS_INTEL_MAC=false
+    if [ "$(uname -m)" = "x86_64" ]; then
+        # Could be real Intel OR Rosetta 2 on Apple Silicon — check hardware
+        ROSETTA_TRANSLATED=$(/usr/sbin/sysctl -n sysctl.proc_translated 2>/dev/null || echo "0")
+        if [ "$ROSETTA_TRANSLATED" = "1" ]; then
+            echo "✅ Apple Silicon detected (running under Rosetta 2) — Metal GPU enabled"
+        else
+            IS_INTEL_MAC=true
+        fi
+    fi
+
+    if [ "$IS_INTEL_MAC" = "true" ] && [ -z "$LLAMA_NO_METAL" ]; then
         export LLAMA_NO_METAL=1
         echo "⚠️  Intel Mac detected — setting LLAMA_NO_METAL=1 (CPU-only mode)"
         echo "   Metal shaders in llama-cpp-python 0.3.x are incompatible with Intel Macs"
