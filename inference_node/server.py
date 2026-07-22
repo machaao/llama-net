@@ -386,7 +386,7 @@ async def get_models_statistics():
         models_dict[config.model_name] = {
             "nodes": [
                 {
-                    "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+                    "node_id": config.node_id, "url": _get_own_url(),
                     "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                     "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
                     "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
