@@ -69,7 +69,7 @@ class NodeSelector:
         # Log available nodes for debugging
         logger.debug(f"Available nodes for selection (model: {model_filter}):")
         for node in nodes:
-            logger.debug(f"  - {node.node_id[:8]}... at {node.ip}:{node.port} (model: {node.model}, load: {node.load})")
+            logger.debug(f"  - {node.node_id[:8]}... at {node.url or f'{node.ip}:{node.port}'} (model: {node.model}, load: {node.load})")
             
         # Filter by criteria (be more lenient for DHT contacts with unknown metrics)
         eligible_nodes = []
@@ -98,7 +98,7 @@ class NodeSelector:
             selected = self._round_robin_select(eligible_nodes)
         
         if selected:
-            logger.info(f"🎯 Selected node {selected.node_id[:8]}... at {selected.ip}:{selected.port} (model: {selected.model}) via {strategy} strategy")
+            logger.info(f"🎯 Selected node {selected.node_id[:8]}... at {selected.url or f'{selected.ip}:{selected.port}'} (model: {selected.model}) via {strategy} strategy")
         
         return selected
     

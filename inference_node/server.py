@@ -169,6 +169,7 @@ async def _broadcast_current_node_metrics():
         await sse_manager.broadcast_event("node_updated", {
             "node_info": {
                 "node_id": config.node_id,
+                "url": _get_own_url(),
                 "ip": get_host_ip(),
                 "port": config.port,
                 "model": config.model_name,
@@ -248,8 +249,23 @@ async def list_network_models():
     if not gateway_client:
         if config.no_model_mode:
             return {"object": "list", "data": [], "total_models": 0, "total_nodes": 0}
-        local_model = OpenAIModel(id=config.model_name, created=int(time.time()), owned_by="llamanet")
-        return {"object": "list", "data": [local_model.dict()], "total_models": 1, "total_nodes": 1}
+        metrics = llm.get_metrics() if llm else {}
+        local_model_data = {
+            "id": config.model_name, "object": "model",
+            "created": int(time.time()), "owned_by": "llamanet",
+            "node_count": 1,
+            "nodes": [{
+                "node_id": config.node_id,
+                "url": _get_own_url(),
+                "model": config.model_name,
+                "load": metrics.get("load", 0),
+                "tps": metrics.get("tps", 0),
+                "uptime": metrics.get("uptime", 0),
+                "last_seen": int(time.time()),
+                "total_tokens": metrics.get("total_tokens", 0),
+            }]
+        }
+        return {"object": "list", "data": [local_model_data], "total_models": 1, "total_nodes": 1}
 
     peers = await gateway_client.get_peers()
     models_dict: Dict[str, Any] = {}
@@ -1170,7 +1186,7 @@ async def network_events():
         try:
             yield f"data: {json.dumps({'type': 'connected', 'connection_id': connection_id})}\n\n"
             if llm and config:
-                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name}})}\n\n"
+                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name, 'url': _get_own_url(), 'ip': get_host_ip(), 'port': config.port}})}\n\n"
             while True:
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=25)

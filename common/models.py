@@ -8,14 +8,14 @@ import uuid
 class NodeInfo(BaseModel):
     """Information about an inference node"""
     node_id: str
-    ip: str
-    port: int
     model: str
+    url: Optional[str] = None  # Tunnel URL (primary address)
+    ip: str = ""  # Optional — for identification only
+    port: int = 0  # Optional — for identification only
     load: float = 0.0
     tps: float = 0.0
     uptime: int = 0
     last_seen: int = Field(default_factory=lambda: int(time.time()))
-    url: Optional[str] = None  # Public URL (tunnel or IP-based)
     ttft: Optional[float] = None
     latency: Optional[float] = None
     gpu_info: Optional[str] = None

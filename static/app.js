@@ -286,7 +286,8 @@ class LlamaNetUI {
 
     async loadTunnelStatus() {
         try {
-            const resp = await fetch(`${this.baseUrl}/tunnel/status`);
+            const resp = await fetch(`${this.baseUrl}/tunnel/status`).catch(() => null);
+            if (!resp || !resp.ok) return;
             if (resp.ok) {
                 const data = await resp.json();
                 const badge = document.getElementById('tunnel-status');
@@ -499,35 +500,17 @@ class LlamaNetUI {
                 return null;
             }
             
-            // Ensure required fields exist
-            const requiredFields = ['node_id', 'ip', 'port'];
-            for (const field of requiredFields) {
-                if (!nodeData[field]) {
-                    console.warn(`Missing required field ${field} in node data:`, nodeData);
-                    return null;
-                }
-            }
-            
-            // Validate node ID format (should be 40-character hex)
-            const nodeId = nodeData.node_id;
-            if (typeof nodeId !== 'string' || nodeId.length !== 40) {
-                console.warn('Invalid node ID format:', nodeId);
+            // Only require node_id — url (tunnel) is the primary address
+            if (!nodeData.node_id) {
+                console.warn('Missing node_id in node data:', nodeData);
                 return null;
             }
             
-            // Validate IP format
-            const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-            if (!ipRegex.test(nodeData.ip)) {
-                console.warn('Invalid IP format:', nodeData.ip);
-                return null;
-            }
+            // Normalize IP if present (handle localhost)
+            if (nodeData.ip === 'localhost') nodeData.ip = '127.0.0.1';
             
-            // Validate port range
-            const port = parseInt(nodeData.port);
-            if (isNaN(port) || port < 1024 || port > 65535) {
-                console.warn('Invalid port range:', nodeData.port);
-                return null;
-            }
+            // Ensure port is a number
+            const port = parseInt(nodeData.port) || 0;
             
             // Return normalized and validated data with all NodeInfo fields
             return {
@@ -750,7 +733,7 @@ class LlamaNetUI {
                                 ${lastEventType === 'node_joined' ? '<i class="fas fa-plus-circle text-success ms-1" title="Recently joined"></i>' : ''}
                             </div>
                             <div class="text-muted small">
-                                <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
+                                <div><i class="fas fa-globe"></i> ${this.getNodeAddress(node)}</div>
                                 <div><i class="fas fa-clock"></i> Up: ${uptimeText} | ${lastSeenText}</div>
                                 ${this.renderNodeMetricsBadge(node)}
                                 ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
@@ -1004,7 +987,7 @@ class LlamaNetUI {
             // Check if SSE is still connected
             if (!this.isConnected) {
                 console.log('🔄 SSE disconnected during refresh, reconnecting...');
-                this.startSSENetworkMonitoring();
+                this.startUnifiedSSENetworkMonitoring();
             }
             
             // If we got fresh API data, use it to update/validate our display
@@ -1271,7 +1254,7 @@ class LlamaNetUI {
                         <span class="node-status ${statusClass}" title="Last seen: ${lastSeenText}"></span>
                         <div class="flex-grow-1">
                             <div class="fw-bold">${node.node_id.substring(0, 8)}... <i class="fas fa-info-circle text-primary ms-1" title="Click for details"></i></div>
-                            <div class="text-muted">${node.ip}:${node.port}</div>
+                            <div class="text-muted"><i class="fas fa-globe"></i> ${this.getNodeAddress(node)}</div>
                             <div class="text-muted small">${lastSeenText}</div>
                         </div>
                     </div>
@@ -1335,7 +1318,7 @@ class LlamaNetUI {
                                 ${lastEventType === 'node_joined' ? '<i class="fas fa-plus-circle text-success ms-1" title="Recently joined"></i>' : ''}
                             </div>
                             <div class="text-muted small">
-                                <div><i class="fas fa-network-wired"></i> ${node.ip}:${node.port}</div>
+                                <div><i class="fas fa-globe"></i> ${this.getNodeAddress(node)}</div>
                                 <div><i class="fas fa-clock"></i> Up: ${node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown'} | ${lastSeenText}</div>
                                 ${this.renderNodeMetricsBadge(node)}
                                 ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
@@ -1499,7 +1482,7 @@ class LlamaNetUI {
                     <h6 class="mt-3"><i class="fas fa-star"></i> Best Performing Node</h6>
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${modelStats.best_node.node_id.substring(0, 12)}...<br>
-                        <strong>Address:</strong> ${modelStats.best_node.ip}:${modelStats.best_node.port}<br>
+                        <strong>Address:</strong> ${this.getNodeAddress(modelStats.best_node)}<br>
                         <strong>Load:</strong> ${modelStats.best_node.load.toFixed(3)}<br>
                         <strong>TPS:</strong> ${modelStats.best_node.tps.toFixed(1)}<br>
                         <strong>TTFT:</strong> ${this.formatMetricTime(modelStats.best_node.ttft)}<br>
@@ -1524,7 +1507,7 @@ class LlamaNetUI {
                             <div class="d-flex justify-content-between align-items-center mb-1 p-1 border-bottom">
                                 <div>
                                     <small class="fw-bold">${node.node_id.substring(0, 8)}...</small><br>
-                                    <small class="text-muted">${node.ip}:${node.port}</small>
+                                    <small class="text-muted"><i class="fas fa-globe"></i> ${this.getNodeAddress(node)}</small>
                                 </div>
                             </div>
                         `).join('')}
@@ -1625,7 +1608,7 @@ class LlamaNetUI {
                     <h6><i class="fas fa-server"></i> Node Information (Real-time)</h6>
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${nodeData.node_id}<br>
-                        <strong>Address:</strong> ${nodeData.ip}:${nodeData.port}<br>
+                        <strong>Address:</strong> ${this.getNodeAddress(nodeData)}${nodeData.url ? '<br><code class="small">' + this.escapeHtml(nodeData.url) + '</code>' : ''}<br>
                         <strong>Model:</strong> ${nodeData.model}<br>
                         <strong>Last Seen:</strong> ${lastSeenText}
                     </div>
@@ -1705,7 +1688,7 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${nodeInfo.node_id}<br>
                         <strong>Status:</strong> ${statusBadge} ${isCurrentNode ? '<span class="badge bg-primary ms-1">Current Node</span>' : ''}<br>
-                        <strong>Address:</strong> ${nodeInfo.ip}:${nodeInfo.port}<br>
+                        <strong>Address:</strong> ${this.getNodeAddress(nodeInfo)}${nodeInfo.url ? '<br><code class="small">' + this.escapeHtml(nodeInfo.url) + '</code>' : ''}<br>
                         <strong>Model:</strong> ${nodeInfo.model}<br>
                         ${nodeInfo.model_path ? `<strong>Model Path:</strong> ${nodeInfo.model_path}<br>` : ''}
                         <strong>Last Seen:</strong> ${lastSeenText}
@@ -2364,6 +2347,14 @@ class LlamaNetUI {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+    
+    getNodeAddress(node) {
+        if (node.url) {
+            try { return new URL(node.url).hostname; } catch (e) { return node.url; }
+        }
+        if (node.ip) return `${node.ip}:${node.port || '?'}`;
+        return 'local';
     }
     
     // SSE-only real-time updates (no polling)
