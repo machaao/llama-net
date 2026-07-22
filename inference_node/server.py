@@ -1454,7 +1454,7 @@ async def select_model(request: Request):
         
         # In no-model mode, do full initialization
         if config.no_model_mode:
-            global heartbeat_manager
+            global heartbeat_manager, gateway_client
 
             config.model_path = model_path
             config.model_name = os.path.basename(model_path)
@@ -1493,7 +1493,6 @@ async def select_model(request: Request):
                     await gateway_client_local.register()
                     asyncio.create_task(gateway_client_local.heartbeat_loop())
                     asyncio.create_task(gateway_client_local.peer_refresh_loop())
-                    global gateway_client
                     gateway_client = gateway_client_local
                     logger.info("✅ Registered with gateway after model load")
                 except Exception as e:
