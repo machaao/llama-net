@@ -312,16 +312,36 @@ async def _connect_bootstrap_peers(peers_str: str):
 
 
 async def _gossip_loop():
-    """Periodically share peer lists with known peers"""
+    """Periodically share peer lists with known peers. Detects hibernate/resume and re-publishes."""
+    GOSSIP_INTERVAL = 30
+    HIBERNATE_THRESHOLD = 90  # If elapsed > 90s, laptop likely resumed from sleep
+
+    last_iteration_time = time.time()
+
     while True:
         try:
-            await asyncio.sleep(30)
+            await asyncio.sleep(GOSSIP_INTERVAL)
+            now = time.time()
+            elapsed = now - last_iteration_time
+            last_iteration_time = now
+
+            # ── Hibernate detection ──
+            if elapsed > HIBERNATE_THRESHOLD:
+                logger.warning(f"⚠️ Time gap detected: {elapsed:.0f}s (expected ~{GOSSIP_INTERVAL}s) — likely resumed from hibernate/sleep")
+                logger.info("🔄 Re-publishing to bootstrap peers after wake...")
+
+                # Invalidate tunnel URL cache so _get_own_url re-reads the file
+                global _tunnel_url_cache
+                _tunnel_url_cache = None
+
+                # Force re-publish to ALL registered peers (bootstrap + discovered)
+                await _force_republish_after_wake()
+                continue  # Skip normal gossip this iteration
 
             if not _peer_registry:
                 continue
 
             own_url = _get_own_url()
-
             own_model = config.model_name if not config.no_model_mode else "router"
             own_metrics = llm.get_metrics() if llm else {}
 
@@ -379,6 +399,44 @@ async def _gossip_loop():
             break
         except Exception as e:
             logger.error(f"Gossip loop error: {e}")
+
+
+async def _force_republish_after_wake():
+    """Re-publish to all bootstrap peers after detecting hibernate/resume"""
+    own_url = _get_own_url()
+    own_model = config.model_name if not config.no_model_mode else "router"
+    own_metrics = llm.get_metrics() if llm else {}
+    tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
+
+    republished = 0
+
+    for peer in list(_peer_registry.values()):
+        try:
+            async with _aiohttp_lib.ClientSession(
+                timeout=_aiohttp_lib.ClientTimeout(total=10)
+            ) as session:
+                async with session.post(
+                    f"{peer['url']}/api/nodes/publish",
+                    json={
+                        "node_id": config.node_id,
+                        "url": own_url,
+                        "tunnel_url": tunnel_url,
+                        "model": own_model,
+                        "ip": get_host_ip(),
+                        "port": config.port,
+                        "metrics": own_metrics
+                    }
+                ) as response:
+                    if response.status == 200:
+                        republished += 1
+                        peer["last_seen"] = time.time()
+                        logger.info(f"✅ Re-published to {peer['url']} after wake")
+                    else:
+                        logger.warning(f"Re-publish to {peer['url']} returned {response.status}")
+        except Exception as e:
+            logger.warning(f"Could not re-publish to {peer['url']}: {e}")
+
+    logger.info(f"🔄 Wake re-publish complete: {republished}/{len(_peer_registry)} peers updated")
 
 
 async def _unpublish_from_bootstrap_peers(reason: str = "graceful_shutdown"):
