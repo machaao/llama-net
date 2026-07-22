@@ -282,153 +282,113 @@ async def list_network_models():
 
 @app.get("/models/statistics")
 async def get_models_statistics():
-    """Get detailed statistics about models available on the network"""
+    """Get detailed statistics about models available on the network via gateway."""
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
-    
-    # In no-model mode with no DHT discovery, return empty stats gracefully
-    if config.no_model_mode and not dht_discovery:
+
+    if not gateway_client:
+        if config.no_model_mode:
+            return {
+                "network_summary": {
+                    "total_models": 0, "total_nodes": 0,
+                    "avg_network_load": 0, "total_network_tps": 0,
+                    "timestamp": time.time(),
+                },
+                "models": {},
+            }
+        # Single local node
+        metrics = llm.get_metrics() if llm else {}
         return {
             "network_summary": {
-                "total_models": 0,
-                "total_nodes": 0,
-                "avg_network_load": 0,
-                "total_network_tps": 0,
-                "timestamp": time.time()
+                "total_models": 1, "total_nodes": 1,
+                "avg_network_load": metrics.get("load", 0),
+                "total_network_tps": metrics.get("tps", 0),
+                "timestamp": time.time(),
             },
-            "models": {}
-        }
-    
-    if not dht_discovery:
-        raise HTTPException(status_code=503, detail="DHT discovery not initialized")
-    
-    try:
-        # Get all nodes from the network
-        all_nodes = await dht_discovery.get_nodes(force_refresh=True)
-        
-        # Calculate statistics
-        models_dict = {}
-        total_load = 0
-        total_tps = 0
-        
-        # Include current node with fresh model info (DHT may have stale data)
-        current_node_included = False
-        metrics = {}
-        if not config.no_model_mode and llm:
-            metrics = llm.get_metrics()
-            current_node_data = {
-                "node_id": config.node_id,
-                "ip": get_host_ip(),
-                "port": config.port,
-                "model": config.model_name,
-                "load": metrics.get("load", 0.0),
-                "tps": metrics.get("tps", 0.0),
-                "uptime": metrics.get("uptime", 0),
-                "last_seen": int(time.time()),
-                "ttft": metrics.get("ttft", 0),
-                "latency": metrics.get("latency", 0),
-                "total_tokens": metrics.get("total_tokens", 0)
-            }
-            current_node_included = True
-        
-        for node in all_nodes:
-            # If this node is the current node, override with fresh local data
-            if current_node_included and node.node_id == config.node_id:
-                model_name = config.model_name
-                node_info = {
-                    **current_node_data,
-                    "ttft": metrics.get("ttft", 0),
-                    "latency": metrics.get("latency", 0)
+            "models": {
+                config.model_name: {
+                    "node_count": 1,
+                    "avg_load": metrics.get("load", 0),
+                    "total_tps": metrics.get("tps", 0),
+                    "best_node": {
+                        "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+                        "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
+                        "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
+                    },
+                    "availability": "low",
+                    "nodes": [
+                        {
+                            "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+                            "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
+                            "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
+                            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
+                            "total_tokens": metrics.get("total_tokens", 0),
+                        }
+                    ],
                 }
-            else:
-                model_name = node.model
-                node_info = node
-            
-            if model_name not in models_dict:
-                models_dict[model_name] = {
-                    "nodes": [],
-                    "total_load": 0,
-                    "total_tps": 0
-                }
-            
-            models_dict[model_name]["nodes"].append(node_info)
-            if isinstance(node_info, dict):
-                models_dict[model_name]["total_load"] += node_info.get("load", 0)
-                models_dict[model_name]["total_tps"] += node_info.get("tps", 0)
-                total_load += node_info.get("load", 0)
-                total_tps += node_info.get("tps", 0)
-            else:
-                models_dict[model_name]["total_load"] += node_info.load
-                models_dict[model_name]["total_tps"] += node_info.tps
-                total_load += node_info.load
-                total_tps += node_info.tps
-        
-        # Add current node if it wasn't found in DHT results
-        if current_node_included and config.model_name not in models_dict:
-            models_dict[config.model_name] = {
-                "nodes": [current_node_data],
-                "total_load": current_node_data["load"],
-                "total_tps": current_node_data["tps"]
-            }
-        
-        total_node_count = len(all_nodes) + (1 if current_node_included and not any(n.node_id == config.node_id for n in all_nodes) else 0)
-        
-        # Format response
-        statistics = {
-            "network_summary": {
-                "total_models": len(models_dict),
-                "total_nodes": total_node_count,
-                "avg_network_load": total_load / total_node_count if total_node_count > 0 else 0,
-                "total_network_tps": total_tps,
-                "timestamp": time.time()
             },
-            "models": {}
         }
-        
-        for model_name, model_data in models_dict.items():
-            nodes = model_data["nodes"]
-            node_count = len(nodes)
-            
-            # Calculate stats handling both dict and object nodes
-            load_values = [n.get("load", 0) if isinstance(n, dict) else n.load for n in nodes]
-            tps_values = [n.get("tps", 0) if isinstance(n, dict) else n.tps for n in nodes]
-            
-            best_node = None
-            if nodes:
-                best_idx = load_values.index(min(load_values))
-                best_n = nodes[best_idx]
-                if isinstance(best_n, dict):
-                    best_node = best_n
-                else:
-                    best_node = best_n.__dict__
-            
-            statistics["models"][model_name] = {
-                "node_count": node_count,
-                "avg_load": sum(load_values) / node_count if node_count > 0 else 0,
-                "total_tps": sum(tps_values),
-                "best_node": best_node,
-                "availability": "high" if node_count > 2 else "medium" if node_count > 1 else "low",
-                "nodes": [
-                    {
-                        "node_id": n.get("node_id") if isinstance(n, dict) else n.node_id,
-                        "ip": n.get("ip") if isinstance(n, dict) else n.ip,
-                        "port": n.get("port") if isinstance(n, dict) else n.port,
-                        "load": n.get("load", 0) if isinstance(n, dict) else n.load,
-                        "tps": n.get("tps", 0) if isinstance(n, dict) else n.tps,
-                        "uptime": n.get("uptime", 0) if isinstance(n, dict) else n.uptime,
-                        "last_seen": n.get("last_seen") if isinstance(n, dict) else n.last_seen,
-                        "ttft": n.get("ttft") if isinstance(n, dict) else getattr(n, 'ttft', None),
-                        "latency": n.get("latency") if isinstance(n, dict) else getattr(n, 'latency', None),
-                        "total_tokens": n.get("total_tokens") if isinstance(n, dict) else getattr(n, 'total_tokens', None)
-                    } for n in nodes
-                ]
-            }
-        
-        return statistics
-        
-    except Exception as e:
-        logger.error(f"Error getting model statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+    # Build stats from gateway peer list
+    peers = await gateway_client.get_peers()
+    models_dict: Dict[str, Any] = {}
+    total_load = 0.0
+    total_tps = 0.0
+
+    # Include current node
+    if not config.no_model_mode and llm:
+        metrics = llm.get_metrics()
+        models_dict[config.model_name] = {
+            "nodes": [
+                {
+                    "node_id": config.node_id, "ip": get_host_ip(), "port": config.port,
+                    "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
+                    "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
+                    "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
+                    "total_tokens": metrics.get("total_tokens", 0),
+                }
+            ],
+            "total_load": metrics.get("load", 0), "total_tps": metrics.get("tps", 0),
+        }
+        total_load += metrics.get("load", 0)
+        total_tps += metrics.get("tps", 0)
+
+    for peer in peers:
+        model = peer.get("model", "unknown")
+        if model not in models_dict:
+            models_dict[model] = {"nodes": [], "total_load": 0, "total_tps": 0}
+        models_dict[model]["nodes"].append(peer)
+        models_dict[model]["total_load"] += peer.get("load", 0)
+        models_dict[model]["total_tps"] += peer.get("tps", 0)
+        total_load += peer.get("load", 0)
+        total_tps += peer.get("tps", 0)
+
+    total_nodes = len(peers) + (0 if config.no_model_mode else 1)
+    statistics: Dict[str, Any] = {
+        "network_summary": {
+            "total_models": len(models_dict), "total_nodes": total_nodes,
+            "avg_network_load": total_load / total_nodes if total_nodes else 0,
+            "total_network_tps": total_tps, "timestamp": time.time(),
+        },
+        "models": {},
+    }
+
+    for model_name, model_data in models_dict.items():
+        nodes = model_data["nodes"]
+        node_count = len(nodes)
+        load_values = [n.get("load", 0) for n in nodes]
+        tps_values = [n.get("tps", 0) for n in nodes]
+        best_node = min(nodes, key=lambda n: n.get("load", 1)) if nodes else None
+        statistics["models"][model_name] = {
+            "node_count": node_count,
+            "avg_load": sum(load_values) / node_count if node_count else 0,
+            "total_tps": sum(tps_values),
+            "best_node": best_node,
+            "availability": "high" if node_count > 2 else "medium" if node_count > 1 else "low",
+            "nodes": nodes,
+        }
+
+    return statistics
 
 @app.post("/v1/completions")
 async def create_completion(request: OpenAICompletionRequest):
@@ -723,76 +683,32 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_completion(request: OpenAICompletionRequest, target_node):
-    """Forward completion request to another node using robust SSE handling"""
+    """Forward completion request to another node."""
     try:
-        # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
         request_dict.pop('strategy', None)
-        
         url = f"http://{target_node.ip}:{target_node.port}/v1/completions"
-        
-        if request.stream:
-            # Use the new SSE forwarder for streaming
-            request_id = f"cmpl-{uuid.uuid4().hex[:8]}"
-            sse_forwarder = SSEForwarder(timeout=30)
-            
-            async def forwarded_stream_generator():
-                async for chunk in sse_forwarder.forward_completion_stream(url, request_dict):
-                    yield chunk
-            
-            # Create node info for forwarded streaming
-            node_info = {
-                "node_id": target_node.node_id,
-                "ip": target_node.ip,
-                "port": target_node.port,
-                "model": target_node.model,
-                "processing_node": "forwarded",
-                "forwarded_from": config.node_id
-            }
-            
-            return StreamingResponse(
-                create_streaming_completion_response(
-                    request_id=request_id,
-                    model=request.model,
-                    stream_generator=forwarded_stream_generator(),
-                    node_info=node_info
-                ),
-                media_type="text/plain",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
-                }
-            )
-        else:
-            # Non-streaming request
-            timeout = aiohttp.ClientTimeout(total=30, connect=5)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    url,
-                    json=request_dict,
-                    headers={"Content-Type": "application/json"}
-                ) as response:
-                    
-                    if response.status == 200:
-                        response_data = await response.json()
-                        # Add forwarding info to node_info if it exists
-                        if "node_info" in response_data and response_data["node_info"]:
-                            response_data["node_info"]["processing_node"] = "forwarded"
-                            response_data["node_info"]["forwarded_from"] = config.node_id
-                        return OpenAICompletionResponse(**response_data)
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Forwarded completion failed: {response.status} {error_text}")
-                        raise HTTPException(status_code=response.status, detail=error_text)
-                        
+
+        timeout = aiohttp.ClientTimeout(total=30, connect=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=request_dict, headers={"Content-Type": "application/json"}) as response:
+                if response.status == 200:
+                    if request.stream:
+                        return StreamingResponse(
+                            response.content.iter_any(),
+                            media_type="text/event-stream",
+                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                        )
+                    response_data = await response.json()
+                    return JSONResponse(content=response_data)
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=error_text)
     except asyncio.TimeoutError:
-        logger.error(f"Timeout forwarding request to {target_node.node_id[:8]}")
-        # Fall back to local processing
+        logger.error(f"Timeout forwarding to {target_node.node_id[:8]}")
         return await _handle_completion_locally(request)
     except Exception as e:
-        logger.error(f"Error forwarding request to {target_node.node_id[:8]}: {e}")
-        # Fall back to local processing
+        logger.error(f"Error forwarding to {target_node.node_id[:8]}: {e}")
         return await _handle_completion_locally(request)
 
 @app.post("/v1/chat/completions")
@@ -1145,76 +1061,32 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def _forward_chat_completion(request: OpenAIChatCompletionRequest, target_node):
-    """Forward chat completion request to another node using robust SSE handling"""
+    """Forward chat completion request to another node."""
     try:
-        # Remove strategy to prevent infinite forwarding
         request_dict = request.dict()
         request_dict.pop('strategy', None)
-        
         url = f"http://{target_node.ip}:{target_node.port}/v1/chat/completions"
-        
-        if request.stream:
-            # Use the new SSE forwarder for streaming
-            request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-            sse_forwarder = SSEForwarder(timeout=30)
-            
-            async def forwarded_stream_generator():
-                async for chunk in sse_forwarder.forward_chat_stream(url, request_dict):
-                    yield chunk
-            
-            # Create node info for forwarded streaming
-            node_info = {
-                "node_id": target_node.node_id,
-                "ip": target_node.ip,
-                "port": target_node.port,
-                "model": target_node.model,
-                "processing_node": "forwarded",
-                "forwarded_from": config.node_id
-            }
-            
-            return StreamingResponse(
-                create_streaming_chat_response(
-                    request_id=request_id,
-                    model=request.model,
-                    stream_generator=forwarded_stream_generator(),
-                    node_info=node_info
-                ),
-                media_type="text/plain",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
-                }
-            )
-        else:
-            # Non-streaming request
-            timeout = aiohttp.ClientTimeout(total=30, connect=5)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    url,
-                    json=request_dict,
-                    headers={"Content-Type": "application/json"}
-                ) as response:
-                    
-                    if response.status == 200:
-                        response_data = await response.json()
-                        # Add forwarding info to node_info if it exists
-                        if "node_info" in response_data and response_data["node_info"]:
-                            response_data["node_info"]["processing_node"] = "forwarded"
-                            response_data["node_info"]["forwarded_from"] = config.node_id
-                        return OpenAIChatCompletionResponse(**response_data)
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Forwarded chat completion failed: {response.status} {error_text}")
-                        raise HTTPException(status_code=response.status, detail=error_text)
-                        
+
+        timeout = aiohttp.ClientTimeout(total=30, connect=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=request_dict, headers={"Content-Type": "application/json"}) as response:
+                if response.status == 200:
+                    if request.stream:
+                        return StreamingResponse(
+                            response.content.iter_any(),
+                            media_type="text/event-stream",
+                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                        )
+                    response_data = await response.json()
+                    return JSONResponse(content=response_data)
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=error_text)
     except asyncio.TimeoutError:
-        logger.error(f"Timeout forwarding chat completion to {target_node.node_id[:8]}")
-        # Fall back to local processing
+        logger.error(f"Timeout forwarding to {target_node.node_id[:8]}")
         return await _handle_chat_completion_locally(request)
     except Exception as e:
-        logger.error(f"Error forwarding chat completion to {target_node.node_id[:8]}: {e}")
-        # Fall back to local processing
+        logger.error(f"Error forwarding to {target_node.node_id[:8]}: {e}")
         return await _handle_chat_completion_locally(request)
 
 async def _forward_request(request_body: dict, endpoint: str, target_peer: dict, stream: bool = False):
@@ -1519,58 +1391,56 @@ async def select_model(request: Request):
         
         # In no-model mode, do full initialization
         if config.no_model_mode:
-            global heartbeat_manager, dht_publisher
-            
+            global heartbeat_manager
+
             config.model_path = model_path
             config.model_name = os.path.basename(model_path)
             config.no_model_mode = False
             config.save_active_model(model_path, config.model_name)
-            
+
             logger.info(f"Initializing LLM with selected model: {model_path}")
             llm = LlamaWrapper(config)
-            
-            # Initialize heartbeat manager (needed for /health and metrics)
+
+            # Initialize heartbeat manager
             try:
                 logger.info("Starting heartbeat manager after model load...")
                 heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
                 await heartbeat_manager.start()
-                if shutdown_handler:
-                    shutdown_handler.register_component('heartbeat_manager', heartbeat_manager)
                 logger.info("✅ Heartbeat manager started")
             except Exception as e:
                 logger.warning(f"Failed to start heartbeat manager: {e}")
-            
-            # Initialize DHT publisher (advertise new model to network)
-            try:
-                logger.info("Starting DHT publisher after model load...")
-                dht_publisher = DHTPublisher(config, llm.get_metrics)
-                await dht_publisher.start()
-                if shutdown_handler:
-                    shutdown_handler.register_component('dht_publisher', dht_publisher)
-                
-                # Connect publisher to DHT service for bootstrap events
-                from common.dht_service import SharedDHTService
-                dht_svc = SharedDHTService()
-                if dht_svc.is_initialized():
-                    dht_svc.set_event_publisher(dht_publisher)
-                    logger.info("✅ Event publisher connected to DHT service")
-                
-                # Trigger DHT join event so workers see this node
-                asyncio.create_task(trigger_post_uvicorn_join())
-                logger.info("✅ DHT publisher started and join event scheduled")
-            except Exception as e:
-                logger.warning(f"Failed to start DHT publisher: {e}")
-            
+
+            # Register with gateway if configured
+            if config.bootstrap_peers:
+                try:
+                    peer_url = config.bootstrap_peers.split(",")[0].strip()
+                    gateway_client_local = GatewayClient(
+                        gateway_url=peer_url,
+                        node_id=config.node_id,
+                        model_name=config.model_name,
+                        port=config.port,
+                        metrics_callback=llm.get_metrics,
+                        public_ip=config.public_ip,
+                    )
+                    await gateway_client_local.register()
+                    asyncio.create_task(gateway_client_local.heartbeat_loop())
+                    asyncio.create_task(gateway_client_local.peer_refresh_loop())
+                    global gateway_client
+                    gateway_client = gateway_client_local
+                    logger.info("✅ Registered with gateway after model load")
+                except Exception as e:
+                    logger.warning(f"Failed to register with gateway: {e}")
+
             return {
                 "success": True,
                 "data": {
                     "model_path": model_path,
                     "model_name": config.model_name,
                     "mode": "initial_load",
-                    "reloaded": True
+                    "reloaded": True,
                 },
                 "message": f"Model loaded: {config.model_name}",
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
         
         # In normal mode, do hot-reload
@@ -1603,17 +1473,11 @@ async def select_model(request: Request):
 
             config.save_active_model(model_path, config.model_name)
 
-            # Notify bootstrap peers of model change
-            asyncio.create_task(_notify_bootstrap_peers_of_event("node_updated"))
-            
-            # Re-publish to DHT with updated model info
-            if dht_publisher and dht_publisher.running:
-                try:
-                    await dht_publisher.send_post_uvicorn_join_event()
-                    logger.info(f"DHT re-published with new model: {config.model_name}")
-                except Exception as e:
-                    logger.warning(f"Failed to update DHT after reload: {e}")
-            
+            # Notify gateway of model change
+            if gateway_client:
+                asyncio.create_task(gateway_client.send_event("node_updated"))
+                logger.info(f"Notified gateway of model change: {config.model_name}")
+
             # Broadcast node_updated event via SSE so connected UIs see the change
             if sse_manager:
                 try:
@@ -1627,24 +1491,13 @@ async def select_model(request: Request):
                             "tps": 0.0,
                             "uptime": 0,
                             "last_seen": int(time.time()),
-                            "dht_port": config.dht_port
                         },
                         "timestamp": time.time(),
                         "source": "model_reload",
-                        "event_driven": True
                     })
                     logger.info(f"SSE broadcast: node_updated with new model {config.model_name}")
                 except Exception as e:
                     logger.warning(f"Failed to broadcast model change via SSE: {e}")
-            
-            # Force DHT discovery to refresh its local node cache
-            if dht_discovery:
-                try:
-                    # Get fresh nodes to update discovery cache
-                    await dht_discovery.get_nodes(force_refresh=True)
-                    logger.info("DHT discovery cache refreshed after model reload")
-                except Exception as e:
-                    logger.debug(f"DHT discovery refresh not critical: {e}")
             
             return {
                 "success": True,
@@ -1672,6 +1525,7 @@ async def select_model(request: Request):
 
 
 def start_server():
+    global config
     if config is None:
         config = InferenceConfig()
     log_level = os.environ.get("LOG_LEVEL", "info")
