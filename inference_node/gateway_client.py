@@ -41,7 +41,7 @@ class GatewayClient:
         self.metrics_callback = metrics_callback
         self.tunnel_url = tunnel_url or self._detect_tunnel_url()
         self.public_ip = public_ip or get_host_ip()
-        self.own_url = self.tunnel_url or f"http://{self.public_ip}:{self.port}"
+        self.own_url = self.tunnel_url  # Tunnel-only — no IP:port fallback
 
         self.running = False
         self.registered = False
@@ -56,8 +56,12 @@ class GatewayClient:
     # ─── lifecycle ───────────────────────────────────────────────
 
     async def register(self) -> bool:
-        """Register this node with the gateway."""
+        """Register this node with the gateway. Requires a tunnel URL."""
         self.running = True
+        if not self.own_url:
+            logger.warning("⚠️ No tunnel URL detected — node will NOT register with gateway.")
+            logger.warning("   Start with --tunnel flag: ./start-app.sh run <model> --tunnel")
+            return False
         metrics = self._get_metrics()
 
         try:
@@ -229,12 +233,13 @@ class GatewayClient:
                         peers = []
                         for model_info in models:
                             for node in model_info.get("nodes", []):
+                                node_url = node.get("url", "")
+                                if not node_url:
+                                    continue  # Skip nodes without a tunnel URL
                                 peers.append({
                                     "node_id": node.get("node_hash", ""),
                                     "model": model_info.get("model_name", ""),
-                                    "url": node.get("url", ""),
-                                    "ip": node.get("ip", ""),
-                                    "port": node.get("port", 8000),
+                                    "url": node_url,
                                     "load": node.get("load", 0),
                                     "tps": node.get("tps", 0),
                                     "gpu_info": node.get("gpu_info", ""),
