@@ -173,9 +173,10 @@ class SupabaseManager:
                 "last_heartbeat": "now()", "status": "active",
             }
 
-            # Persist pool_models to metrics column for durability across restarts
+            # Persist pool_models to BOTH the top-level column AND metrics JSONB
             if "pool_models" in metrics:
                 update_data["pool_models"] = metrics["pool_models"]
+                update_data["metrics"] = {"pool_models": metrics["pool_models"]}
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
             return len(result.data) > 0
@@ -263,8 +264,8 @@ class SupabaseManager:
                     node_hash = node.get("node_hash", "")
                     node_metrics = node.get("metrics", {}) or {}
 
-                    # Read pool_models from persisted DB metrics column
-                    all_model_names = node_metrics.get("pool_models", [])
+                    # Read pool_models from metrics JSONB OR top-level column
+                    all_model_names = node_metrics.get("pool_models", []) or node.get("pool_models", [])
 
                     # For every model this node can serve (primary + pool),
                     # ensure an entry exists in `models` and add this node to it.
@@ -295,17 +296,28 @@ class SupabaseManager:
 
             # Calculate aggregated metrics for every model
             for slug, model in models.items():
-                if model.get("pool_discovered"):
-                    # Pool models already have their nodes assigned above
-                    nodes = model.get("nodes", [])
-                else:
-                    nodes = self.get_nodes_for_model(slug)
+                # Merge pool-discovered nodes with primary-model nodes
+                existing_nodes = model.get("nodes", [])
+                existing_hashes = {n.get("node_hash") for n in existing_nodes}
+
+                # Get nodes where this is the primary model
+                primary_nodes = self.get_nodes_for_model(slug)
+
+                # Merge: add primary nodes not already discovered via pool
+                for node in primary_nodes:
+                    nh = node.get("node_hash")
+                    if nh and nh not in existing_hashes:
+                        existing_nodes.append(node)
+                        existing_hashes.add(nh)
+
+                nodes = existing_nodes
+                model["nodes"] = nodes
+                model["node_count"] = len(nodes)
                 model["total_tps"] = sum(n.get("tps", 0) for n in nodes)
                 model["avg_load"] = sum(n.get("load", 0) for n in nodes) / len(nodes) if nodes else 0
                 model["avg_ttft"] = sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes) if nodes else 0
                 model["total_tokens"] = sum(n.get("total_tokens", 0) for n in nodes)
                 model["best_node"] = min(nodes, key=lambda n: n.get("load", 1)) if nodes else None
-                model["nodes"] = nodes
             # Remove stale model entries
             models = {slug: m for slug, m in models.items() if m["node_count"] > 0}
             return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
@@ -355,7 +367,8 @@ class SupabaseManager:
             # Also count pool models from persisted DB metrics column
             for n in nodes:
                 node_metrics = n.get("metrics", {}) or {}
-                for model_name in node_metrics.get("pool_models", []):
+                pool_list = node_metrics.get("pool_models", []) or n.get("pool_models", [])
+                for model_name in pool_list:
                     slug = model_name_to_slug(model_name)
                     models.add(slug)
 

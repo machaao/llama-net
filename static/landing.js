@@ -273,17 +273,12 @@ class LandingApp {
             const avgLoad = model.avg_load || 0;
             const loadClass = avgLoad < 0.3 ? 'load-low' : avgLoad < 0.7 ? 'load-med' : 'load-high';
             const nodesHtml = (model.nodes || []).map(node => {
-                const nodePoolModels = this._nodePoolModels?.[node.node_hash] || [];
-                const poolBadge = nodePoolModels.length > 1
-                    ? `<span class="badge bg-info ms-1" style="font-size:0.6rem" title="Pool: ${nodePoolModels.map(m => this.escapeHtml(m)).join(', ')}"><i class="fas fa-layer-group"></i> ${nodePoolModels.length} models</span>`
-                    : '';
                 return `
                 <div class="node-row">
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
                     <span class="node-metric ${loadClass} me-1">${(node.load || 0).toFixed(2)} load</span>
-                    ${poolBadge}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
                 </div>`;
             }).join('');
