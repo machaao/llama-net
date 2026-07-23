@@ -171,6 +171,11 @@ class SupabaseManager:
                 "total_tokens": new_tokens,
                 "last_heartbeat": "now()", "status": "active",
             }
+
+            # Persist pool_models if present (for multi-model pool discovery)
+            if metrics.get("pool_models"):
+                update_data["metrics"] = {"pool_models": metrics["pool_models"]}
+
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
             return len(result.data) > 0
         except Exception as e:
