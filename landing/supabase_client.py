@@ -256,15 +256,26 @@ class SupabaseManager:
 
             if all_nodes:
                 from landing.node_registry import model_name_to_slug
+                import landing.server as _gw
+                mem_pool = getattr(_gw, '_node_pool_models_map', {})
+
                 for node in all_nodes:
                     node_hash = node.get("node_hash", "")
                     node_metrics = node.get("metrics", {}) or {}
-                    pool_models = node_metrics.get("pool_models", [])
+
+                    # Always merge: DB pool_models + in-memory pool map
+                    db_pool = node_metrics.get("pool_models", [])
+                    mem_models = mem_pool.get(node_hash, [])
+                    # Union of both sources, preserving order (memory first — most current)
+                    all_model_names = list(mem_models)
+                    for m in db_pool:
+                        if m not in all_model_names:
+                            all_model_names.append(m)
 
                     # For every model this node can serve (primary + pool),
                     # ensure an entry exists in `models` and add this node to it.
                     seen_slugs = set()
-                    for pool_model_name in pool_models:
+                    for pool_model_name in all_model_names:
                         pool_slug = model_name_to_slug(pool_model_name)
                         if pool_slug in seen_slugs:
                             continue
@@ -285,15 +296,6 @@ class SupabaseManager:
                             models[pool_slug]["nodes"].append(node)
                             if pool_slug != node.get("model_slug"):
                                 models[pool_slug]["node_count"] += 1
-
-                    # Also check in-memory pool map (heartbeat-driven, not DB-persisted)
-                    if not pool_models:
-                        import landing.server as _gw
-                        mem_pool = getattr(_gw, '_node_pool_models_map', {})
-                        if node_hash in mem_pool:
-                            pool_models = mem_pool[node_hash]
-                            # Update DB metrics cache so future calls don't re-fetch
-                            node_metrics["pool_models"] = pool_models
 
             # Calculate aggregated metrics for every model
             for slug, model in models.items():
