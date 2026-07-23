@@ -286,6 +286,15 @@ class SupabaseManager:
                             if pool_slug != node.get("model_slug"):
                                 models[pool_slug]["node_count"] += 1
 
+                    # Also check in-memory pool map (heartbeat-driven, not DB-persisted)
+                    if not pool_models:
+                        import landing.server as _gw
+                        mem_pool = getattr(_gw, '_node_pool_models_map', {})
+                        if node_hash in mem_pool:
+                            pool_models = mem_pool[node_hash]
+                            # Update DB metrics cache so future calls don't re-fetch
+                            node_metrics["pool_models"] = pool_models
+
             # Calculate aggregated metrics for every model
             for slug, model in models.items():
                 if model.get("pool_discovered"):
