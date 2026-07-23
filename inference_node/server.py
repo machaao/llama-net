@@ -634,6 +634,14 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
         else:
             stop_tokens = None
     
+    # Check if target model differs from active and try forwarding
+    target_model_name = getattr(request, 'target_model', None) or request.model
+    if target_model_name and target_model_name != config.model_name and gateway_client:
+        peer = await gateway_client.select_node(model=target_model_name, strategy="load_balanced")
+        if peer:
+            logger.info(f"Forwarding completion for '{target_model_name}' to peer {peer.get('node_id', '')[:8]}...")
+            return await _forward_request(request.dict(), "completions", peer, stream=request.stream)
+
     try:
         # Handle streaming with robust error handling
         if request.stream:
@@ -991,8 +999,16 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
         if slot:
             active_llm = slot.llm
             logger.debug(f"Pool routing: using {target_model_name} for inference")
+        elif target_model_name != config.model_name and gateway_client:
+            # Model not in local pool — try forwarding to a peer
+            peer = await gateway_client.select_node(model=target_model_name, strategy="load_balanced")
+            if peer:
+                logger.info(f"Forwarding request for '{target_model_name}' to peer {peer.get('node_id', '')[:8]}...")
+                return await _forward_request(request.dict(), "chat/completions", peer, stream=request.stream)
+            else:
+                logger.debug(f"Pool routing: {target_model_name} not found locally or on network, using active model")
         else:
-            logger.debug(f"Pool routing: {target_model_name} not in pool, using active model")
+            logger.debug(f"Pool routing: using active model")
 
     try:
         if request.stream:
