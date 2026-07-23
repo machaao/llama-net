@@ -105,7 +105,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="Qwen2.5-7B-Instruct",
+    model="Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
     messages=[{"role": "user", "content": "Hello!"}],
     stream=True
 )
@@ -119,7 +119,7 @@ for chunk in response:
                         <pre><code>curl https://llamanet.app/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"model": "Qwen2.5-7B-Instruct", "messages": [{"role": "user", "content": "Hello!"}]}'</code></pre>
+  -d '{"model": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf", "messages": [{"role": "user", "content": "Hello!"}]}'</code></pre>
                     </div>
                 </div>
             </div>
@@ -246,7 +246,7 @@ for chunk in response:
                                         <pre><code>git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
-./start-app.sh --tunnel --bootstrap-peers https://llamanet.app</code></pre>
+sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app</code></pre>
                                     </div>
                                     <p class="small text-muted mb-0">
                                         <i class="fas fa-info-circle"></i>
@@ -271,7 +271,7 @@ pip install -r requirements-inference.txt
                                         <pre><code>git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
-./start-app.sh run hf.co/Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M \
+sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
   --tunnel --bootstrap-peers https://llamanet.app</code></pre>
                                     </div>
                                     <p class="small text-muted mb-0">
@@ -294,7 +294,7 @@ pip install -r requirements-inference.txt
                                     <p class="text-muted mb-3">No dedicated GPU? Smaller models (Tiny &amp; Fast tiers) run well on modern CPUs. Significantly slower than GPU inference, but works on any machine.</p>
                                     <div class="code-block mb-3">
                                         <div class="code-header"><span>Terminal</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
-                                        <pre><code>N_GPU_LAYERS=0 ./start-app.sh \
+                                        <pre><code>N_GPU_LAYERS=0 sh start-app.sh \
   --tunnel --bootstrap-peers https://llamanet.app</code></pre>
                                     </div>
                                     <p class="small text-muted mb-0">

@@ -112,47 +112,6 @@ if [ "$1" = "run" ]; then
     
     HF_URL="$2"
     shift 2  # Remove 'run' and URL from arguments
-    
-    echo "🔗 Downloading model from Hugging Face: $HF_URL"
-    
-    # Create models directory if it doesn't exist
-    MODELS_DIR="${HOME}/.llamanet/models"
-    mkdir -p "$MODELS_DIR"
-    
-    # Run the Python model downloader
-    $PYTHON_CMD -c "
-from inference_node.model_manager import ModelManager
-import sys
-
-manager = ModelManager()
-try:
-    model_path = manager.resolve_model_path('$HF_URL')
-    print(f'MODEL_PATH={model_path}')
-except Exception as e:
-    print(f'Error: {e}', file=sys.stderr)
-    sys.exit(1)
-" > /tmp/llamanet_model_path.txt 2>&1
-    
-    if [ $? -ne 0 ]; then
-        echo "❌ Failed to download model"
-        cat /tmp/llamanet_model_path.txt
-        rm -f /tmp/llamanet_model_path.txt
-        exit 1
-    fi
-    
-    MODEL_PATH=$(grep "MODEL_PATH=" /tmp/llamanet_model_path.txt | cut -d'=' -f2)
-    rm -f /tmp/llamanet_model_path.txt
-    
-    if [ -z "$MODEL_PATH" ] || [ ! -f "$MODEL_PATH" ]; then
-        echo "❌ Model file not found after download"
-        exit 1
-    fi
-    
-    echo "✅ Model downloaded to: $MODEL_PATH"
-    
-    # Set the model path for the inference node
-    export MODEL_PATH="$MODEL_PATH"
-    DEFAULT_MODEL_PATH="$MODEL_PATH"
 else
     # Set default values for non-run commands
     DEFAULT_MODEL_PATH="${MODEL_PATH:-./models/model.gguf}"
