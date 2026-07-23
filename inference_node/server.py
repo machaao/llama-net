@@ -442,6 +442,7 @@ async def list_network_models():
             "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
             "ttft": metrics.get("ttft", 0), "latency": metrics.get("latency", 0),
             "total_tokens": metrics.get("total_tokens", 0),
+            "gpu_info": system_info.get("gpu") if system_info else "",
         })
         models_dict[config.model_name]["node_count"] = 1
 
