@@ -46,6 +46,7 @@ request_queue_manager = None
 download_manager = None
 gateway_client: Optional[GatewayClient] = None
 rate_limiter = None
+model_pool = None
 _active_sse_tasks: set = set()
 
 def _get_own_url() -> str:
@@ -122,6 +123,17 @@ async def lifespan(app: FastAPI):
             llm = LlamaWrapper(config)
             system_info = SystemInfo.get_all_info()
 
+            # Initialize model pool
+            from inference_node.model_pool import ModelPool
+            model_pool = ModelPool(config)
+            model_pool.register(config.model_path, llm, config.model_name)
+            logger.info(f"Model pool initialized: {model_pool}")
+
+            # Load pool history
+            pool_history = config.load_pool_history()
+            if pool_history:
+                logger.info(f"Pool history: {len(pool_history)} models previously used")
+
             # Per-generation metrics broadcast
             _main_loop = asyncio.get_event_loop()
             llm.metrics_manager._event_loop = _main_loop
@@ -145,6 +157,7 @@ async def lifespan(app: FastAPI):
                     port=config.port,
                     metrics_callback=llm.get_metrics,
                     public_ip=config.public_ip,
+                    model_pool=model_pool,
                 )
                 await gateway_client.register()
                 asyncio.create_task(gateway_client.heartbeat_loop())
@@ -182,6 +195,12 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(gateway_client.unregister(), timeout=3.0)
         except Exception:
             pass
+    if model_pool:
+        try:
+            config.save_pool_history(model_pool.get_history())
+            logger.info("Pool state saved")
+        except Exception as e:
+            logger.debug(f"Pool save error: {e}")
     if heartbeat_manager:
         try:
             await asyncio.wait_for(heartbeat_manager.stop(), timeout=2.0)
@@ -303,19 +322,25 @@ async def _broadcast_current_node_metrics():
         return
     try:
         metrics = llm.get_metrics()
+        node_info = {
+            "node_id": config.node_id,
+            "url": _get_own_url(),
+            "model": config.model_name,
+            "load": metrics.get("load", 0.0),
+            "tps": metrics.get("tps", 0.0),
+            "uptime": metrics.get("uptime", 0),
+            "ttft": metrics.get("ttft", 0),
+            "latency": metrics.get("latency", 0),
+            "total_tokens": metrics.get("total_tokens", 0),
+            "last_seen": int(time.time()),
+        }
+
+        # Include pool info if available
+        if model_pool:
+            node_info["pool"] = model_pool.get_network_info()
+
         await sse_manager.broadcast_event("node_updated", {
-            "node_info": {
-                "node_id": config.node_id,
-                "url": _get_own_url(),
-                "model": config.model_name,
-                "load": metrics.get("load", 0.0),
-                "tps": metrics.get("tps", 0.0),
-                "uptime": metrics.get("uptime", 0),
-                "ttft": metrics.get("ttft", 0),
-                "latency": metrics.get("latency", 0),
-                "total_tokens": metrics.get("total_tokens", 0),
-                "last_seen": int(time.time()),
-            },
+            "node_info": node_info,
             "timestamp": time.time(),
             "source": "post_generation",
         })
@@ -958,6 +983,17 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             stop_tokens = [str(token).strip() for token in request.stop if str(token).strip()]
             stop_tokens = stop_tokens if stop_tokens else None
     
+    # Route to correct model in pool
+    active_llm = llm
+    target_model_name = getattr(request, 'target_model', None) or request.model
+    if model_pool and target_model_name:
+        slot = model_pool.get_for_inference(target_model_name)
+        if slot:
+            active_llm = slot.llm
+            logger.debug(f"Pool routing: using {target_model_name} for inference")
+        else:
+            logger.debug(f"Pool routing: {target_model_name} not in pool, using active model")
+
     try:
         if request.stream:
             request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -965,7 +1001,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             async def local_stream_generator():
                 try:
                     # Use the thread-safe streaming method
-                    async for chunk in llm.generate_chat_stream_safe(
+                    async for chunk in active_llm.generate_chat_stream_safe(
                         messages=messages,
                         max_tokens=request.max_tokens or 100,
                         temperature=request.temperature or 0.7,
@@ -1014,7 +1050,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             )
         
         # NON-STREAMING: Use thread-safe method
-        result = await llm.generate_chat_safe(
+        result = await active_llm.generate_chat_safe(
             messages,
             request.max_tokens or 100,
             request.temperature or 0.7,
@@ -1299,6 +1335,42 @@ async def _forward_request(request_body: dict, endpoint: str, target_peer: dict,
         raise HTTPException(status_code=504, detail="Peer request timed out")
 
 # Status and utility endpoints
+@app.get("/models/pool")
+async def get_pool_status():
+    """Return current pool state"""
+    if not model_pool:
+        return {"enabled": False, "message": "Pool not available"}
+    return model_pool.status()
+
+
+@app.post("/models/pool/evict")
+async def evict_model(request: Request):
+    """Manually evict a model from the pool"""
+    if not model_pool:
+        raise HTTPException(status_code=503, detail="Pool not available")
+    body = await request.json()
+    model_name = body.get("model_name")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model_name required")
+    success = model_pool.evict(model_name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Model {model_name} not in pool")
+    config.save_pool_history(model_pool.get_history())
+    return {"success": success, "pool": model_pool.status()}
+
+
+@app.get("/models/pool/capacity")
+async def get_pool_capacity():
+    """Return capacity info for UI"""
+    if not model_pool:
+        return {"enabled": False}
+    info = model_pool.get_network_info()
+    info["enabled"] = True
+    info["loaded_models"] = list(model_pool.slots.keys())
+    info["active_model"] = model_pool.active_model
+    return info
+
+
 @app.get("/status")
 async def status():
     if config and config.no_model_mode:
@@ -1596,49 +1668,202 @@ async def delete_local_model_endpoint(model_id: str):
 
 @app.post("/models/select")
 async def select_model(request: Request):
-    """Hot-reload to a different model"""
+    """Select a model — instant switch if in pool, otherwise load (may evict LRU)."""
     global llm
-    
+
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
-    
+
     try:
         body = await request.json()
         model_path = body.get("model_path")
-        
+        load_mode = body.get("load_mode", "pool")  # "pool" or "replace"
+
         if not model_path:
             raise HTTPException(status_code=400, detail="model_path is required")
-        
+
         if not os.path.exists(model_path):
             raise HTTPException(status_code=404, detail=f"Model file not found: {model_path}")
-        
-        # In no-model mode, do full initialization
-        if config.no_model_mode:
-            global heartbeat_manager, gateway_client
 
+        model_name = os.path.basename(model_path)
+
+        # ── Pool mode: instant switch or load with LRU eviction ──
+        if model_pool and load_mode == "pool":
+            existing = model_pool.get(model_name)
+            if existing:
+                # INSTANT SWITCH
+                model_pool.activate(model_name)
+                llm = existing.llm
+                config.model_name = model_name
+                config.model_path = model_path
+                config.save_active_model(model_path, model_name)
+
+                if gateway_client:
+                    gateway_client.model_name = model_name
+                    asyncio.create_task(gateway_client.send_event("node_updated"))
+
+                if sse_manager:
+                    metrics = llm.get_metrics()
+                    await sse_manager.broadcast_event("node_updated", {
+                        "node_info": {
+                            "node_id": config.node_id,
+                            "url": _get_own_url(),
+                            "model": model_name,
+                            "load": metrics.get("load", 0),
+                            "tps": metrics.get("tps", 0),
+                            "pool": model_pool.get_network_info(),
+                        },
+                        "timestamp": time.time(),
+                        "source": "instant_switch",
+                    })
+
+                return {
+                    "success": True,
+                    "data": {
+                        "model_path": model_path,
+                        "model_name": model_name,
+                        "mode": "instant_switch",
+                        "reloaded": False,
+                        "pool": model_pool.status(),
+                    },
+                    "message": f"Switched to {model_name} (instant)",
+                    "timestamp": time.time(),
+                }
+
+            # Not in pool — load it (may evict LRU)
+            evicted_name = model_pool.get_eviction_target()
+            eviction_warning = None
+            if len(model_pool.slots) >= model_pool.max_models and evicted_name:
+                eviction_warning = evicted_name
+
+            # In no-model mode, do full initialization
+            if config.no_model_mode:
+                config.model_path = model_path
+                config.model_name = model_name
+                config.no_model_mode = False
+                config.save_active_model(model_path, model_name)
+
+                new_slot = model_pool.load_model(model_path, model_name)
+                llm = new_slot.llm
+
+                if gateway_client:
+                    gateway_client.model_name = model_name
+
+                try:
+                    heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
+                    await heartbeat_manager.start()
+                except Exception as e:
+                    logger.warning(f"Failed to start heartbeat manager: {e}")
+
+                if config.bootstrap_peers:
+                    try:
+                        peer_url = config.bootstrap_peers.split(",")[0].strip()
+                        gateway_client_local = GatewayClient(
+                            gateway_url=peer_url,
+                            node_id=config.node_id,
+                            model_name=config.model_name,
+                            port=config.port,
+                            metrics_callback=llm.get_metrics,
+                            public_ip=config.public_ip,
+                            model_pool=model_pool,
+                        )
+                        await gateway_client_local.register()
+                        asyncio.create_task(gateway_client_local.heartbeat_loop())
+                        asyncio.create_task(gateway_client_local.peer_refresh_loop())
+                        gateway_client = gateway_client_local
+                    except Exception as e:
+                        logger.warning(f"Failed to register with gateway: {e}")
+
+                config.save_pool_history(model_pool.get_history())
+
+                return {
+                    "success": True,
+                    "data": {
+                        "model_path": model_path,
+                        "model_name": model_name,
+                        "mode": "initial_load",
+                        "reloaded": True,
+                        "evicted": eviction_warning,
+                        "pool": model_pool.status(),
+                    },
+                    "message": f"Model loaded: {model_name}",
+                    "timestamp": time.time(),
+                }
+
+            # Normal mode — load into pool
+            if not llm:
+                raise HTTPException(status_code=503, detail="LLM wrapper not initialized")
+
+            await request_queue_manager.set_reloading(True)
+            try:
+                drained = await request_queue_manager.drain_active_requests(timeout=30.0)
+                if not drained:
+                    logger.warning("Not all requests drained - proceeding anyway")
+
+                new_slot = model_pool.load_model(model_path, model_name)
+                llm = new_slot.llm
+                config.model_name = model_name
+                config.model_path = model_path
+
+                if gateway_client:
+                    gateway_client.model_name = model_name
+                    asyncio.create_task(gateway_client.send_event("node_updated"))
+
+                config.save_active_model(model_path, model_name)
+                config.save_pool_history(model_pool.get_history())
+
+                if sse_manager:
+                    try:
+                        metrics = llm.get_metrics()
+                        await sse_manager.broadcast_event("node_updated", {
+                            "node_info": {
+                                "node_id": config.node_id,
+                                "url": _get_own_url(),
+                                "model": model_name,
+                                "load": metrics.get("load", 0),
+                                "tps": metrics.get("tps", 0),
+                                "pool": model_pool.get_network_info(),
+                            },
+                            "timestamp": time.time(),
+                            "source": "pool_load",
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to broadcast model change: {e}")
+
+                return {
+                    "success": True,
+                    "data": {
+                        "model_path": model_path,
+                        "model_name": model_name,
+                        "mode": "pool_load",
+                        "reloaded": True,
+                        "evicted": eviction_warning,
+                        "drained": drained,
+                        "pool": model_pool.status(),
+                    },
+                    "message": f"Model loaded into pool: {model_name}" +
+                               (f" (evicted {eviction_warning})" if eviction_warning else ""),
+                    "timestamp": time.time(),
+                }
+            finally:
+                await request_queue_manager.set_reloading(False)
+
+        # ── Legacy replace mode (fallback) ──
+        if config.no_model_mode:
             config.model_path = model_path
-            config.model_name = os.path.basename(model_path)
+            config.model_name = model_name
             config.no_model_mode = False
             config.save_active_model(model_path, config.model_name)
-
-            # If gateway_client already exists from no-model mode, sync it
             if gateway_client:
                 gateway_client.model_name = config.model_name
-                logger.info(f"Gateway client synced to initial model: {config.model_name}")
 
-            logger.info(f"Initializing LLM with selected model: {model_path}")
             llm = LlamaWrapper(config)
-
-            # Initialize heartbeat manager
             try:
-                logger.info("Starting heartbeat manager after model load...")
                 heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
                 await heartbeat_manager.start()
-                logger.info("✅ Heartbeat manager started")
             except Exception as e:
                 logger.warning(f"Failed to start heartbeat manager: {e}")
 
-            # Register with gateway if configured
             if config.bootstrap_peers:
                 try:
                     peer_url = config.bootstrap_peers.split(",")[0].strip()
@@ -1649,69 +1874,47 @@ async def select_model(request: Request):
                         port=config.port,
                         metrics_callback=llm.get_metrics,
                         public_ip=config.public_ip,
+                        model_pool=model_pool,
                     )
                     await gateway_client_local.register()
                     asyncio.create_task(gateway_client_local.heartbeat_loop())
                     asyncio.create_task(gateway_client_local.peer_refresh_loop())
                     gateway_client = gateway_client_local
-                    logger.info("✅ Registered with gateway after model load")
                 except Exception as e:
                     logger.warning(f"Failed to register with gateway: {e}")
 
             return {
                 "success": True,
-                "data": {
-                    "model_path": model_path,
-                    "model_name": config.model_name,
-                    "mode": "initial_load",
-                    "reloaded": True,
-                },
+                "data": {"model_path": model_path, "model_name": config.model_name, "mode": "initial_load", "reloaded": True},
                 "message": f"Model loaded: {config.model_name}",
                 "timestamp": time.time(),
             }
-        
-        # In normal mode, do hot-reload
+
         if not llm:
             raise HTTPException(status_code=503, detail="LLM wrapper not initialized")
-        
+
         if model_path == config.model_path:
             return {
                 "success": True,
-                "data": {
-                    "model_path": model_path,
-                    "model_name": config.model_name,
-                    "mode": "already_loaded",
-                    "reloaded": False
-                },
+                "data": {"model_path": model_path, "model_name": config.model_name, "mode": "already_loaded", "reloaded": False},
                 "message": f"Model already loaded: {config.model_name}",
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
-        
-        # Pause request queue during reload
+
         await request_queue_manager.set_reloading(True)
-        
         try:
             drained = await request_queue_manager.drain_active_requests(timeout=30.0)
             if not drained:
-                logger.warning("Not all requests drained - proceeding with reload anyway")
-            
-            logger.info(f"Hot-reloading model: {config.model_path} -> {model_path}")
-            llm.reload_model(model_path)
+                logger.warning("Not all requests drained - proceeding anyway")
 
-            # Sync gateway client with new model name
+            llm.reload_model(model_path)
             if gateway_client:
                 gateway_client.model_name = config.model_name
-                gateway_client.own_url = gateway_client.tunnel_url  # Re-affirm tunnel URL
-                logger.info(f"Gateway client synced to new model: {config.model_name}")
+                gateway_client.own_url = gateway_client.tunnel_url
+                asyncio.create_task(gateway_client.send_event("node_updated"))
 
             config.save_active_model(model_path, config.model_name)
 
-            # Notify gateway of model change
-            if gateway_client:
-                asyncio.create_task(gateway_client.send_event("node_updated"))
-                logger.info(f"Notified gateway of model change: {config.model_name}")
-
-            # Broadcast node_updated event via SSE so connected UIs see the change
             if sse_manager:
                 try:
                     await sse_manager.broadcast_event("node_updated", {
@@ -1719,34 +1922,24 @@ async def select_model(request: Request):
                             "node_id": config.node_id,
                             "url": _get_own_url(),
                             "model": config.model_name,
-                            "load": 0.0,
-                            "tps": 0.0,
-                            "uptime": 0,
+                            "load": 0.0, "tps": 0.0, "uptime": 0,
                             "last_seen": int(time.time()),
                         },
                         "timestamp": time.time(),
                         "source": "model_reload",
                     })
-                    logger.info(f"SSE broadcast: node_updated with new model {config.model_name}")
                 except Exception as e:
-                    logger.warning(f"Failed to broadcast model change via SSE: {e}")
-            
+                    logger.warning(f"Failed to broadcast model change: {e}")
+
             return {
                 "success": True,
-                "data": {
-                    "model_path": model_path,
-                    "model_name": config.model_name,
-                    "mode": "hot_reload",
-                    "reloaded": True,
-                    "drained": drained
-                },
+                "data": {"model_path": model_path, "model_name": config.model_name, "mode": "hot_reload", "reloaded": True, "drained": drained},
                 "message": f"Model hot-reloaded: {config.model_name}",
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
-            
         finally:
             await request_queue_manager.set_reloading(False)
-        
+
     except HTTPException:
         raise
     except Exception as e:
