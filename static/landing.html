@@ -230,6 +230,7 @@ for chunk in response:
             <ul class="nav nav-pills justify-content-center mb-4" id="platformTabs">
                 <li class="nav-item"><a class="nav-link active" data-bs-toggle="pill" href="#platformMac">🍎 Apple Silicon</a></li>
                 <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#platformNvidia">💚 NVIDIA GPU</a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#platformWindows">🪟 Windows</a></li>
                 <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#platformCpu">🖥️ CPU Only</a></li>
             </ul>
 
@@ -279,6 +280,41 @@ sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
                                         <strong>8GB VRAM</strong> (RTX 3070/4060): Tiny &amp; Fast tiers<br>
                                         <strong>12GB VRAM</strong> (RTX 3060 12GB/4070): Up to Standard tier<br>
                                         <strong>24GB VRAM</strong> (RTX 3090/4090): Up to Premium tier
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="platformWindows">
+                    <div class="row justify-content-center">
+                        <div class="col-md-8">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body p-4">
+                                    <h5><i class="fab fa-windows"></i> Windows 10 / 11</h5>
+                                    <p class="text-muted mb-3">Works on any Windows 10/11 system with Python 3.8+ installed. For NVIDIA GPUs, ensure drivers and CUDA toolkit are installed. Use <code>start-app.bat</code> instead of <code>sh start-app.sh</code>.</p>
+                                    <div class="code-block mb-3">
+                                        <div class="code-header"><span>Command Prompt / PowerShell</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                                        <pre><code>git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+start-app.bat --tunnel --bootstrap-peers https://llamanet.app</code></pre>
+                                    </div>
+                                    <p class="small text-muted mb-2">
+                                        <i class="fas fa-info-circle"></i>
+                                        <strong>Pre-load a model at startup:</strong>
+                                    </p>
+                                    <div class="code-block mb-3">
+                                        <div class="code-header"><span>Command Prompt (with model)</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                                        <pre><code>start-app.bat run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M ^
+  --tunnel ^
+  --bootstrap-peers https://llamanet.app</code></pre>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        <i class="fas fa-info-circle"></i>
+                                        <strong>Requirements:</strong> Python must be in your PATH (install from <a href="https://www.python.org/downloads/" target="_blank">python.org</a> with "Add to PATH" checked)<br>
+                                        <strong>CPU-only:</strong> <code>set N_GPU_LAYERS=0</code> then run the command above<br>
+                                        <strong>NVIDIA GPU:</strong> Install <a href="https://developer.nvidia.com/cuda-downloads" target="_blank">CUDA toolkit</a> — GPU detected automatically
                                     </p>
                                 </div>
                             </div>
