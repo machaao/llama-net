@@ -15,7 +15,7 @@ import os
 import time
 from typing import Dict, Any, Optional, List
 import aiohttp
-from common.utils import get_logger, get_host_ip
+from common.utils import get_logger, get_host_ip, get_tunnel_url_file
 
 logger = get_logger(__name__)
 
@@ -327,7 +327,7 @@ class GatewayClient:
         if url:
             return url.rstrip("/")
 
-        tunnel_file = "/tmp/llamanet_tunnel_url"
+        tunnel_file = get_tunnel_url_file()
         try:
             if os.path.exists(tunnel_file):
                 with open(tunnel_file) as f:

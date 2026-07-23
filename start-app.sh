@@ -197,7 +197,7 @@ start_cloudflare_tunnel() {
     local config_file="$HOME/.cloudflared/config.yml"
 
     # Remove stale tunnel URL from previous runs
-    rm -f /tmp/llamanet_tunnel_url
+    rm -f "${TMPDIR:-/tmp}/llamanet_tunnel_url"
 
     echo ""
 
@@ -296,7 +296,7 @@ start_cloudflare_tunnel() {
     if [ -n "$TUNNEL_URL" ]; then
         export LLAMANET_TUNNEL_URL="$TUNNEL_URL"
         # Write tunnel URL to file so the Python process can discover it
-        echo "$TUNNEL_URL" > /tmp/llamanet_tunnel_url
+        echo "$TUNNEL_URL" > "${TMPDIR:-/tmp}/llamanet_tunnel_url"
         echo ""
         echo "╔══════════════════════════════════════════════════════════════╗"
         echo "║  🌍 Cloudflare Tunnel Active                                ║"

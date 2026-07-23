@@ -127,6 +127,12 @@ def get_host_ip(public_ip: Optional[str] = None) -> str:
     
     return ip
 
+
+def get_tunnel_url_file() -> str:
+    """Get cross-platform path for tunnel URL file (works on Windows, macOS, Linux)"""
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "llamanet_tunnel_url")
+
 def normalize_stop_tokens(stop):
     """Normalize stop tokens to the format expected by llama-cpp-python"""
     if stop is None:

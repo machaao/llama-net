@@ -267,6 +267,35 @@ For CPU-only or non-NVIDIA setups:
 N_GPU_LAYERS=0 sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
 ```
 
+### Windows
+
+Works on Windows 10/11 with Python 3.8+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
+
+```cmd
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+start-app.bat run hf.co/user/Model:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
+```
+
+Or start without a model (download via Web UI):
+
+```cmd
+start-app.bat --tunnel --bootstrap-peers https://llamanet.app
+```
+
+For CPU-only mode:
+
+```cmd
+set N_GPU_LAYERS=0
+start-app.bat --tunnel --bootstrap-peers https://llamanet.app
+```
+
+**Notes:**
+- Use `start-app.bat` instead of `sh start-app.sh` on Windows
+- Python must be in your PATH (install from python.org with "Add to PATH" checked)
+- `cloudflared` for tunnels can be downloaded from https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/
+
 ### Cloud / Remote Operators
 
 Run a node on any VPS or cloud instance (AWS, GCP, Azure, Hetzner, etc.):

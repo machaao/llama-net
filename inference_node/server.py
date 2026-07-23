@@ -30,7 +30,7 @@ from inference_node.request_queue import RequestQueueManager
 from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
 from inference_node.event_publisher import GatewayEventPublisher
-from common.utils import get_logger, get_host_ip
+from common.utils import get_logger, get_host_ip, get_tunnel_url_file
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
 
@@ -53,7 +53,7 @@ def _get_own_url() -> str:
     # Always check fresh sources first (file/env may have updated URL)
     tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
     if not tunnel_url:
-        tunnel_file = "/tmp/llamanet_tunnel_url"
+        tunnel_file = get_tunnel_url_file()
         try:
             if os.path.exists(tunnel_file):
                 with open(tunnel_file) as f:
@@ -1351,7 +1351,7 @@ async def tunnel_status():
     """Return tunnel status for the node."""
     tunnel_url = os.environ.get("LLAMANET_TUNNEL_URL", "")
     if not tunnel_url:
-        tunnel_file = "/tmp/llamanet_tunnel_url"
+        tunnel_file = get_tunnel_url_file()
         try:
             if os.path.exists(tunnel_file):
                 with open(tunnel_file) as f:
