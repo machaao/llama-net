@@ -104,7 +104,17 @@ class ModelRouter:
                     data["node_info"] = {"node_id": node["node_hash"], "model": node["model_name"], "processing_node": "routed"}
                 return JSONResponse(content=data, headers=extra_headers)
         except asyncio.TimeoutError:
+            logger.warning(f"Timeout forwarding to peer {node.get('node_hash', '')[:8]}")
             return JSONResponse(status_code=504, content={"error": {"message": "Node request timed out", "type": "gateway_timeout"}})
+        except (aiohttp.ClientConnectionError, OSError) as e:
+            node_hash = node.get("node_hash", "")
+            logger.warning(f"Node {node_hash[:8]} unreachable: {e}")
+            # Mark node stale immediately so next request routes elsewhere
+            try:
+                self.db.deregister_node(node_hash)
+            except Exception:
+                pass
+            return JSONResponse(status_code=503, content={"error": {"message": "Node unreachable — try again shortly", "type": "service_unavailable"}})
         except Exception as e:
             logger.error(f"Error forwarding request: {e}")
             return JSONResponse(status_code=502, content={"error": {"message": f"Failed to reach node: {str(e)}", "type": "bad_gateway"}})
