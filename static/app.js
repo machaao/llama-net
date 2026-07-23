@@ -312,6 +312,26 @@ class LlamaNetUI {
 
     // ── Pool Methods ──
 
+    async evictPoolModel(modelName) {
+        if (!modelName || !confirm('Unload ' + modelName + ' from pool?')) return;
+        try {
+            const resp = await fetch(`${this.baseUrl}/models/pool/evict`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_name: modelName })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                this.showToast('success', 'Unloaded: ' + modelName);
+                await this.loadPoolStatus();
+            } else {
+                this.showToast('error', 'Failed: ' + (data.message || 'Unknown error'));
+            }
+        } catch (e) {
+            this.showToast('error', 'Evict failed: ' + e.message);
+        }
+    }
+
     async loadPoolStatus() {
         try {
             const resp = await fetch(`${this.baseUrl}/models/pool`);
@@ -321,6 +341,7 @@ class LlamaNetUI {
                     this.updatePoolStatusBar(data);
                     this.updateModelSwitcher(data);
                     this.updatePoolCountBadge(data);
+                    this.renderPoolModels(data);
                 }
                 return data;
             }
