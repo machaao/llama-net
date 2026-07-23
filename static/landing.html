@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LlamaNet — Share Your GPU With The World</title>
+    <title>LlamaNet — Run AI Models on Your Mac or GPU Rig</title>
+    <meta name="description" content="Turn your Apple Silicon Mac or NVIDIA GPU into a free public AI API. Run Llama, Qwen, Mistral, DeepSeek and hundreds of open-source LLMs. OpenAI-compatible API. No Docker. No cloud GPU bills.">
+    <meta name="keywords" content="LLM inference, local AI, Apple Silicon ML, M1 M2 M3 M4 machine learning, GGUF models, llama.cpp, OpenAI compatible API, free AI API, distributed inference, decentralized AI, run AI locally, local LLM, GPU sharing, NVIDIA inference, self-hosted AI, Qwen, Llama, Mistral, DeepSeek, open-source AI">
+    <meta property="og:title" content="LlamaNet — Run AI Models on Your Mac or GPU Rig">
+    <meta property="og:description" content="Turn your Apple Silicon Mac or NVIDIA GPU into a free public AI API in 60 seconds. No Docker, no port forwarding, no cloud GPU bills.">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦙</text></svg>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -25,17 +29,18 @@
     <section class="hero-section">
         <div class="container text-center">
             <h1 class="display-4 fw-bold">🦙 LlamaNet</h1>
-            <p class="lead mb-3">Share Your GPU With The World</p>
-            <p class="mb-4 hero-description">Run any open-source LLM on your hardware. Get a public API in 60 seconds.<br>No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.</p>
-            <div class="d-flex justify-content-center gap-3 mb-4">
+            <p class="lead mb-3">Run AI Models on Your Mac or GPU Rig. Share Them With The World.</p>
+            <p class="mb-4 hero-description">Turn your Apple Silicon Mac, NVIDIA GPU, or any computer into a free, public AI API.<br>Run Llama, Qwen, Mistral, DeepSeek — any open-source LLM. OpenAI-compatible.<br><strong>No Docker. No port forwarding. No cloud GPU bills.</strong></p>
+            <div class="d-flex justify-content-center gap-3 mb-4 flex-wrap">
                 <a href="#" class="btn btn-light btn-lg" onclick="app.signInWithGoogle()"><i class="fab fa-google"></i> Get Your Free API Key</a>
-                <a href="https://github.com/machaao/llama-net" class="btn btn-outline-light btn-lg" target="_blank"><i class="fab fa-github"></i> Run a Node</a>
+                <a href="https://github.com/machaao/llama-net" class="btn btn-outline-light btn-lg" target="_blank"><i class="fab fa-github"></i> Run a Node on Your Mac</a>
             </div>
             <div class="hero-badges d-flex justify-content-center gap-2 flex-wrap">
-                <span class="badge bg-light text-dark"><i class="fas fa-bolt"></i> OpenAI Compatible</span>
+                <span class="badge bg-light text-dark"><i class="fas fa-apple-alt"></i> Apple Silicon M1–M4</span>
+                <span class="badge bg-light text-dark"><i class="fas fa-microchip"></i> NVIDIA GPU</span>
+                <span class="badge bg-light text-dark"><i class="fas fa-exchange-alt"></i> OpenAI Compatible</span>
                 <span class="badge bg-light text-dark"><i class="fas fa-globe"></i> Free Public URLs</span>
-                <span class="badge bg-light text-dark"><i class="fas fa-rocket"></i> 60 Second Setup</span>
-                <span class="badge bg-light text-dark"><i class="fas fa-brain"></i> Any GGUF Model</span>
+                <span class="badge bg-light text-dark"><i class="fas fa-bolt"></i> 60 Second Setup</span>
             </div>
         </div>
     </section>
@@ -211,6 +216,95 @@ for chunk in response:
                         Sizes are approximate for Q4_K_M quantization. Apple Silicon uses unified memory.
                         Use <a href="#models">Model Search</a> above to find and download any model.
                     </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Platform-Specific Quick Start -->
+    <section class="py-5 bg-light">
+        <div class="container">
+            <h2 class="text-center mb-2">Start a Node on Your Machine</h2>
+            <p class="text-center text-muted mb-5">Pick your platform. Same command. Automatic GPU detection.</p>
+
+            <ul class="nav nav-pills justify-content-center mb-4" id="platformTabs">
+                <li class="nav-item"><a class="nav-link active" data-bs-toggle="pill" href="#platformMac">🍎 Apple Silicon</a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#platformNvidia">💚 NVIDIA GPU</a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#platformCpu">🖥️ CPU Only</a></li>
+            </ul>
+
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="platformMac">
+                    <div class="row justify-content-center">
+                        <div class="col-md-8">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body p-4">
+                                    <h5><i class="fas fa-apple-alt"></i> Apple Silicon — M1, M2, M3, M4</h5>
+                                    <p class="text-muted mb-3">Metal GPU acceleration is <strong>automatic</strong>. No drivers, no CUDA, no setup. Works on MacBook Air, MacBook Pro, Mac Mini, Mac Studio, and Mac Pro with any M-series chip.</p>
+                                    <div class="code-block mb-3">
+                                        <div class="code-header"><span>Terminal (macOS)</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                                        <pre><code>git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+./start-app.sh --tunnel --bootstrap-peers https://llamanet.app</code></pre>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        <i class="fas fa-info-circle"></i>
+                                        <strong>8GB RAM</strong> (M1/M2/M3/M4 base): Tiny &amp; Fast tiers at Q4_K_M<br>
+                                        <strong>16GB RAM</strong> (Pro): Up to Standard tier comfortably<br>
+                                        <strong>36GB+ RAM</strong> (Max/Ultra): Up to Coding tier and beyond
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="platformNvidia">
+                    <div class="row justify-content-center">
+                        <div class="col-md-8">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body p-4">
+                                    <h5><i class="fas fa-microchip"></i> NVIDIA GPU — CUDA</h5>
+                                    <p class="text-muted mb-3">Works on any Linux or Windows system with NVIDIA drivers and CUDA installed. LlamaNet auto-detects your GPU and offloads model layers automatically.</p>
+                                    <div class="code-block mb-3">
+                                        <div class="code-header"><span>Terminal (Linux)</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                                        <pre><code>git clone https://github.com/machaao/llama-net.git
+cd llama-net
+pip install -r requirements-inference.txt
+./start-app.sh run hf.co/Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M \
+  --tunnel --bootstrap-peers https://llamanet.app</code></pre>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        <i class="fas fa-info-circle"></i>
+                                        <strong>8GB VRAM</strong> (RTX 3070/4060): Tiny &amp; Fast tiers<br>
+                                        <strong>12GB VRAM</strong> (RTX 3060 12GB/4070): Up to Standard tier<br>
+                                        <strong>24GB VRAM</strong> (RTX 3090/4090): Up to Premium tier
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="platformCpu">
+                    <div class="row justify-content-center">
+                        <div class="col-md-8">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body p-4">
+                                    <h5><i class="fas fa-desktop"></i> CPU Only</h5>
+                                    <p class="text-muted mb-3">No dedicated GPU? Smaller models (Tiny &amp; Fast tiers) run well on modern CPUs. Significantly slower than GPU inference, but works on any machine.</p>
+                                    <div class="code-block mb-3">
+                                        <div class="code-header"><span>Terminal</span><button class="btn btn-sm btn-outline-light copy-btn" onclick="app.copyCode(this)"><i class="fas fa-copy"></i> Copy</button></div>
+                                        <pre><code>N_GPU_LAYERS=0 ./start-app.sh \
+  --tunnel --bootstrap-peers https://llamanet.app</code></pre>
+                                    </div>
+                                    <p class="small text-muted mb-0">
+                                        <i class="fas fa-info-circle"></i>
+                                        Best with <strong>Tiny tier</strong> models: Phi-4 Mini, Qwen 1.5B
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
