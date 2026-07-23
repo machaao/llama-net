@@ -617,6 +617,14 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
             logger.info(f"Forwarding completion for '{target_model_name}' to peer {peer.get('node_id', '')[:8]}...")
             return await _forward_request(request.dict(), "completions", peer, stream=request.stream)
 
+    # Track actual model name used for inference (not config.model_name)
+    active_llm = llm
+    if model_pool and target_model_name:
+        slot = model_pool.get_for_inference(target_model_name)
+        if slot:
+            active_llm = slot.llm
+    actual_model_name = active_llm.config.model_name if active_llm != llm else config.model_name
+
     try:
         # Handle streaming with robust error handling
         if request.stream:
@@ -649,7 +657,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
                 "node_id": config.node_id,
                 "ip": get_host_ip(),
                 "port": config.port,
-                "model": config.model_name,
+                "model": actual_model_name,
                 "processing_node": "local",
                 "queued": True
             }
@@ -657,7 +665,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
             return StreamingResponse(
                 create_streaming_completion_response(
                     request_id=request_id,
-                    model=request.model,
+                    model=actual_model_name,
                     stream_generator=local_stream_generator(),
                     node_info=node_info
                 ),
@@ -701,7 +709,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
             "node_id": config.node_id,
             "ip": get_host_ip(),
             "port": config.port,
-            "model": config.model_name,
+            "model": actual_model_name,
             "processing_node": "local",
             "queued": True
         }
@@ -709,7 +717,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
         return OpenAICompletionResponse(
             id=f"cmpl-{uuid.uuid4().hex[:8]}",
             created=int(time.time()),
-            model=request.model,
+            model=actual_model_name,
             choices=[choice],
             usage=usage,
             node_info=node_info
@@ -985,6 +993,9 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
         else:
             logger.debug(f"Pool routing: using active model")
 
+    # Track actual model name used for inference (not config.model_name)
+    actual_model_name = active_llm.config.model_name if active_llm != llm else config.model_name
+
     try:
         if request.stream:
             request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -1018,7 +1029,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                 "node_id": config.node_id,
                 "ip": get_host_ip(),
                 "port": config.port,
-                "model": config.model_name,
+                "model": actual_model_name,
                 "processing_node": "local",
                 "chat_template": "auto",
                 "queued": True,
@@ -1028,7 +1039,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             return StreamingResponse(
                 create_streaming_chat_response(
                     request_id=request_id,
-                    model=request.model,
+                    model=actual_model_name,
                     stream_generator=local_stream_generator(),
                     node_info=node_info
                 ),
@@ -1082,7 +1093,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             "node_id": config.node_id,
             "ip": get_host_ip(),
             "port": config.port,
-            "model": config.model_name,
+            "model": actual_model_name,
             "processing_node": "local",
             "chat_template": "auto",
             "queued": True,
@@ -1092,7 +1103,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
         return OpenAIChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
             created=int(time.time()),
-            model=request.model,
+            model=actual_model_name,
             choices=[choice],
             usage=usage,
             node_info=node_info
