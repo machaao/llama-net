@@ -248,7 +248,7 @@ class SupabaseManager:
                     models[slug] = {"model_name": node["model_name"], "model_slug": slug, "node_count": 0}
                 models[slug]["node_count"] += 1
 
-            # Also discover pool models from metadata
+            # Also discover pool models from metadata AND assign nodes to them
             all_nodes_result = self.client.table("nodes").select(
                 "*"
             ).eq("status", "active").execute()
@@ -257,32 +257,40 @@ class SupabaseManager:
             if all_nodes:
                 from landing.node_registry import model_name_to_slug
                 for node in all_nodes:
-                    metrics = node.get("metrics", {}) or {}
-                    pool_models = metrics.get("pool_models", [])
+                    node_hash = node.get("node_hash", "")
+                    node_metrics = node.get("metrics", {}) or {}
+                    pool_models = node_metrics.get("pool_models", [])
+
+                    # For every model this node can serve (primary + pool),
+                    # ensure an entry exists in `models` and add this node to it.
+                    seen_slugs = set()
                     for pool_model_name in pool_models:
                         pool_slug = model_name_to_slug(pool_model_name)
+                        if pool_slug in seen_slugs:
+                            continue
+                        seen_slugs.add(pool_slug)
+
                         if pool_slug not in models:
                             models[pool_slug] = {
                                 "model_name": pool_model_name,
                                 "model_slug": pool_slug,
                                 "node_count": 0,
-                                "pool_discovered": True
+                                "pool_discovered": True,
                             }
-                        if pool_slug != node.get("model_slug"):
-                            models[pool_slug]["node_count"] += 1
 
+                        node_hashes = [n.get("node_hash", "") for n in models[pool_slug].get("nodes", [])]
+                        if node_hash not in node_hashes:
+                            if "nodes" not in models[pool_slug]:
+                                models[pool_slug]["nodes"] = []
+                            models[pool_slug]["nodes"].append(node)
+                            if pool_slug != node.get("model_slug"):
+                                models[pool_slug]["node_count"] += 1
+
+            # Calculate aggregated metrics for every model
             for slug, model in models.items():
                 if model.get("pool_discovered"):
-                    # Pool-discovered models: find nodes from all_nodes that have this in their pool
-                    from landing.node_registry import model_name_to_slug
-                    pool_nodes = []
-                    for node in all_nodes:
-                        node_metrics = node.get("metrics", {}) or {}
-                        node_pool_models = node_metrics.get("pool_models", [])
-                        node_pool_slugs = [model_name_to_slug(m) for m in node_pool_models]
-                        if slug in node_pool_slugs:
-                            pool_nodes.append(node)
-                    nodes = pool_nodes
+                    # Pool models already have their nodes assigned above
+                    nodes = model.get("nodes", [])
                 else:
                     nodes = self.get_nodes_for_model(slug)
                 model["total_tps"] = sum(n.get("tps", 0) for n in nodes)

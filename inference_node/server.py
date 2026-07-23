@@ -375,36 +375,54 @@ async def web_ui():
 # OpenAI-compatible endpoints only
 @app.get("/v1/models")
 async def list_models():
-    """List available models (OpenAI-compatible) with chat format info"""
+    """List available models (OpenAI-compatible) — includes all pool models"""
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
     
-    # Get chat template info if available
-    chat_format_info = {}
-    if llm:
+    models_data = []
+    
+    # Build model list from pool (all loaded models)
+    if model_pool:
+        for slot in model_pool.slots.values():
+            model_dict = OpenAIModel(
+                id=slot.model_name,
+                created=int(time.time()),
+                owned_by="llamanet"
+            ).dict()
+            # Add chat format info if available
+            if slot.llm:
+                try:
+                    template_info = slot.llm.get_chat_template_info()
+                    model_dict["chat_format"] = template_info.get("chat_format", "unknown")
+                    model_dict["detected_format"] = template_info.get("detected_format", "unknown")
+                    model_dict["supports_chat"] = template_info.get("supports_chat", False)
+                    model_dict["template_auto_detected"] = template_info.get("template_auto_detected", False)
+                except Exception as e:
+                    logger.warning(f"Could not get chat format info for {slot.model_name}: {e}")
+            models_data.append(model_dict)
+    elif llm:
+        # Single model fallback (no pool)
+        model_dict = OpenAIModel(
+            id=config.model_name,
+            created=int(time.time()),
+            owned_by="llamanet"
+        ).dict()
         try:
             template_info = llm.get_chat_template_info()
-            chat_format_info = {
-                "chat_format": template_info.get("chat_format", "unknown"),
-                "detected_format": template_info.get("detected_format", "unknown"),
-                "supports_chat": template_info.get("supports_chat", False),
-                "template_auto_detected": template_info.get("template_auto_detected", False)
-            }
+            model_dict["chat_format"] = template_info.get("chat_format", "unknown")
+            model_dict["detected_format"] = template_info.get("detected_format", "unknown")
+            model_dict["supports_chat"] = template_info.get("supports_chat", False)
+            model_dict["template_auto_detected"] = template_info.get("template_auto_detected", False)
         except Exception as e:
             logger.warning(f"Could not get chat format info: {e}")
-            chat_format_info = {"chat_format": "unknown", "error": str(e)}
+        models_data.append(model_dict)
     
-    model_data = OpenAIModel(
-        id=config.model_name,
-        created=int(time.time()),
-        owned_by="llamanet"
-    )
+    if not models_data:
+        models_data.append(
+            OpenAIModel(id="no-model", created=int(time.time()), owned_by="llamanet").dict()
+        )
     
-    # Add chat format info to the model data
-    model_dict = model_data.dict()
-    model_dict.update(chat_format_info)
-    
-    return OpenAIModelList(data=[model_dict])
+    return OpenAIModelList(data=models_data)
 
 @app.get("/v1/models/network")
 async def list_network_models():

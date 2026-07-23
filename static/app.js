@@ -896,8 +896,16 @@ class LlamaNetUI {
         if (Object.keys(modelGroups).length === 0) {
             return '<div class="text-muted small">No models discovered on network</div>';
         }
-        
-        return Object.entries(modelGroups).map(([modelName, nodes]) => {
+
+        // Detect pool mode: all models served by a single local node
+        let poolModeIndicator = '';
+        const allNodeIds = new Set();
+        Object.values(modelGroups).forEach(nodes => nodes.forEach(n => allNodeIds.add(n.node_id)));
+        if (allNodeIds.size === 1 && Object.keys(modelGroups).length > 1) {
+            poolModeIndicator = '<div class="mb-2 p-2 bg-light rounded"><small class="text-primary fw-bold"><i class="fas fa-layer-group"></i> Pool Mode — ' + Object.keys(modelGroups).length + ' models loaded on 1 node</small></div>';
+        }
+
+        return poolModeIndicator + Object.entries(modelGroups).map(([modelName, nodes]) => {
             const avgLoad = nodes.reduce((sum, n) => sum + n.load, 0) / nodes.length;
             const totalTps = nodes.reduce((sum, n) => sum + n.tps, 0);
             const availability = this.getAvailability(nodes.length);
