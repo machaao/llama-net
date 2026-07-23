@@ -135,6 +135,87 @@ for chunk in response:
             </div>
         </div>
     </section>
+    <!-- Supported Models -->
+    <section class="py-5">
+        <div class="container">
+            <h2 class="text-center mb-2">Recommended Models</h2>
+            <p class="text-center text-muted mb-5">Run any GGUF model. These tiers map to your hardware.</p>
+            <div class="row justify-content-center">
+                <div class="col-md-10">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Tier</th>
+                                    <th>Model</th>
+                                    <th>Size (Q4)</th>
+                                    <th>Min RAM</th>
+                                    <th>Best For</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="badge bg-secondary">Tiny</span></td>
+                                    <td><strong>Phi-4 Mini</strong></td>
+                                    <td>~1.5 GB</td>
+                                    <td>8 GB</td>
+                                    <td>Quick tasks, edge devices, fast iteration</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="badge bg-info">Fast</span></td>
+                                    <td><strong>Qwen 4B</strong></td>
+                                    <td>~2.5 GB</td>
+                                    <td>8 GB</td>
+                                    <td>Daily driver — fast responses, solid quality</td>
+                                </tr>
+                                <tr class="table-primary">
+                                    <td><span class="badge bg-primary">Standard</span></td>
+                                    <td><strong>Ministral 3 8B</strong></td>
+                                    <td>~4.5 GB</td>
+                                    <td>16 GB</td>
+                                    <td>Best all-round balance of speed and quality</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="badge bg-warning text-dark">Coding</span></td>
+                                    <td><strong>Qwen 14B</strong></td>
+                                    <td>~8 GB</td>
+                                    <td>32 GB</td>
+                                    <td>Code generation, technical tasks</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="badge bg-success">Premium</span></td>
+                                    <td><strong>GPT-OSS 20B</strong></td>
+                                    <td>~12 GB</td>
+                                    <td>32 GB</td>
+                                    <td>High-quality general-purpose inference</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="badge bg-danger">High Quality</span></td>
+                                    <td><strong>Qwen 35B-A3B</strong></td>
+                                    <td>~20 GB</td>
+                                    <td>48 GB</td>
+                                    <td>Expert-level reasoning, long-form generation</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="badge bg-dark">Reasoning</span></td>
+                                    <td><strong>DeepSeek-R1 Distill 32B</strong></td>
+                                    <td>~18 GB</td>
+                                    <td>48 GB</td>
+                                    <td>Chain-of-thought reasoning, math, analysis</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="text-center text-muted small mt-3">
+                        <i class="fas fa-info-circle"></i>
+                        Sizes are approximate for Q4_K_M quantization. Apple Silicon uses unified memory.
+                        Use <a href="#models">Model Search</a> above to find and download any model.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <footer class="py-4 bg-dark text-white">
         <div class="container text-center">
             <p class="mb-2">Made with ❤️ using <a href="https://machai.live" class="text-info">MACH-AI</a></p>
