@@ -441,6 +441,13 @@ async def list_network_models():
     metrics = llm.get_metrics() if llm else {}
     models_dict: Dict[str, Any] = {}
 
+    # Build pool models list for node metadata
+    pool_models_list = []
+    if model_pool:
+        pool_models_list = list(model_pool.slots.keys())
+    elif config.model_name:
+        pool_models_list = [config.model_name]
+
     # Add active model
     if config.model_name:
         models_dict[config.model_name] = {
@@ -455,6 +462,8 @@ async def list_network_models():
             "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
             "total_tokens": metrics.get("total_tokens", 0),
             "gpu_info": system_info.get("gpu") if system_info else "",
+            "pool_models": pool_models_list,
+            "is_pool_model": len(pool_models_list) > 1,
         }))
 
     # Add other pool models (non-active slots)
@@ -476,6 +485,8 @@ async def list_network_models():
                     "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
                     "total_tokens": slot_metrics.get("total_tokens", 0),
                     "gpu_info": system_info.get("gpu") if system_info else "",
+                    "pool_models": pool_models_list,
+                    "is_pool_model": True,
                 }))
 
     return {

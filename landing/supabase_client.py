@@ -281,16 +281,17 @@ class SupabaseManager:
                                 "model_slug": pool_slug,
                                 "node_count": 0,
                                 "pool_discovered": True,
+                                "nodes": [],
                             }
-                        elif "nodes" not in models[pool_slug]:
+
+                        # Always ensure "nodes" key exists
+                        if "nodes" not in models[pool_slug]:
                             models[pool_slug]["nodes"] = []
 
-                        node_hashes = [n.get("node_hash", "") for n in models[pool_slug].get("nodes", [])]
+                        node_hashes = [n.get("node_hash", "") for n in models[pool_slug]["nodes"]]
                         if node_hash not in node_hashes:
-                            if "nodes" not in models[pool_slug]:
-                                models[pool_slug]["nodes"] = []
                             models[pool_slug]["nodes"].append(node)
-                            models[pool_slug]["node_count"] = len(models[pool_slug].get("nodes", []))
+                            models[pool_slug]["node_count"] = len(models[pool_slug]["nodes"])
 
             # Calculate aggregated metrics for every model
             for slug, model in models.items():

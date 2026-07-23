@@ -271,21 +271,40 @@ class GatewayClient:
     async def send_event(self, event_type: str, extra_data: Dict[str, Any] = None):
         """Send an event to the gateway (node_joined, node_left, node_updated)."""
         try:
+            metrics = self._get_metrics()
+
+            # Ensure pool_models is present as a top-level list for the gateway
+            # GatewayClient._get_metrics() stores pool info under metrics['pool']
+            # but the gateway endpoint reads from body.get("models", []) and
+            # body.get("metrics", {}).get("pool_models", [])
+            if self.model_pool:
+                pool_info = self.model_pool.get_network_info()
+                models_list = pool_info.get("models", [])
+                if models_list:
+                    metrics["pool_models"] = models_list
+                    metrics["pool_size"] = len(models_list)
+
+            payload = {
+                "event_type": event_type,
+                "node_id": self.node_id,
+                "model": self.model_name,
+                "url": self.own_url,
+                "ip": self.public_ip,
+                "port": self.port,
+                "models": [self.model_name] + (
+                    [m for m in (self.model_pool.get_network_info().get("models", [])) if m != self.model_name]
+                    if self.model_pool else []
+                ),
+                "metrics": metrics,
+                **(extra_data or {}),
+            }
+
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as session:
                 async with session.post(
                     f"{self.gateway_url}/api/nodes/event",
-                    json={
-                        "event_type": event_type,
-                        "node_id": self.node_id,
-                        "model": self.model_name,
-                        "url": self.own_url,
-                        "ip": self.public_ip,
-                        "port": self.port,
-                        "metrics": self._get_metrics(),
-                        **(extra_data or {}),
-                    },
+                    json=payload,
                 ) as resp:
                     logger.debug(f"Event '{event_type}' sent → {resp.status}")
         except Exception as e:

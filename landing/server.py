@@ -426,9 +426,15 @@ async def node_heartbeat(request: Request):
                 if old_val == 0 and new_val == 0:
                     continue
                 denom = max(abs(old_val), 0.01)
-                if abs(new_val - old_val) / denom > 0.30:
+                if abs(new_val - old_val) / denom > 0.15:
                     should_broadcast = True
                     break
+
+            # Also broadcast if pool_models changed
+            if not should_broadcast and pool_models:
+                prev_pool = (prev.get("metrics", {}) or {}).get("pool_models", [])
+                if sorted(prev_pool) != sorted(pool_models):
+                    should_broadcast = True
     except Exception as e:
         logger.debug(f"Could not read previous metrics for {node_hash}: {e}")
 
@@ -661,14 +667,27 @@ async def publish_node_event(request: Request):
                     model_slug = new_slug
                     logger.info(f"📡 Node {node_hash} model changed → {new_model}")
 
-            supabase_mgr.update_node_metrics(node_hash, body.get("metrics", {}))
+            # Extract pool_models from multiple possible locations in the payload
+            # GatewayClient sends metrics['pool']['models'] via send_event
+            event_metrics = body.get("metrics", {})
+            event_pool_models = (
+                event_metrics.get("pool_models", [])
+                or event_metrics.get("pool", {}).get("models", [])
+            )
+            # Also check top-level "models" key (heartbeat handler convention)
+            if not event_pool_models:
+                event_pool_models = body.get("models", [])
+            # Inject pool_models into metrics for update_node_metrics to persist
+            if event_pool_models:
+                event_metrics["pool_models"] = event_pool_models
+                event_metrics["pool_size"] = len(event_pool_models)
 
-            event_pool_models = body.get("metrics", {}).get("pool_models", [])
+            supabase_mgr.update_node_metrics(node_hash, event_metrics)
 
             if sse_mgr:
                 await sse_mgr.broadcast("node_updated", {
                     "node_hash": node_hash, "model_name": model_name,
-                    "metrics": body.get("metrics", {}),
+                    "metrics": event_metrics,
                     "pool_models": event_pool_models,
                 })
 
