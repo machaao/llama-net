@@ -248,9 +248,11 @@ class SupabaseManager:
             all_nodes_result = self.client.table("nodes").select(
                 "*"
             ).eq("status", "active").execute()
-            if all_nodes_result.data:
+            all_nodes = all_nodes_result.data or []
+
+            if all_nodes:
                 from landing.node_registry import model_name_to_slug
-                for node in all_nodes_result.data:
+                for node in all_nodes:
                     metrics = node.get("metrics", {}) or {}
                     pool_models = metrics.get("pool_models", [])
                     for pool_model_name in pool_models:
@@ -266,7 +268,19 @@ class SupabaseManager:
                             models[pool_slug]["node_count"] += 1
 
             for slug, model in models.items():
-                nodes = self.get_nodes_for_model(slug)
+                if model.get("pool_discovered"):
+                    # Pool-discovered models: find nodes from all_nodes that have this in their pool
+                    from landing.node_registry import model_name_to_slug
+                    pool_nodes = []
+                    for node in all_nodes:
+                        node_metrics = node.get("metrics", {}) or {}
+                        node_pool_models = node_metrics.get("pool_models", [])
+                        node_pool_slugs = [model_name_to_slug(m) for m in node_pool_models]
+                        if slug in node_pool_slugs:
+                            pool_nodes.append(node)
+                    nodes = pool_nodes
+                else:
+                    nodes = self.get_nodes_for_model(slug)
                 model["total_tps"] = sum(n.get("tps", 0) for n in nodes)
                 model["avg_load"] = sum(n.get("load", 0) for n in nodes) / len(nodes) if nodes else 0
                 model["avg_ttft"] = sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes) if nodes else 0

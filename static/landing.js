@@ -49,29 +49,59 @@ class LandingApp {
     handleSSEEvent(data) {
         switch (data.type) {
             case 'initial_state':
+                if (!this._nodePoolModels) this._nodePoolModels = {};
+                if (!this._lastKnownNodes) this._lastKnownNodes = {};
+                // Extract pool models from initial model data
+                if (data.models) {
+                    data.models.forEach(m => {
+                        (m.nodes || []).forEach(n => {
+                            if (n.node_hash) {
+                                this._lastKnownNodes[n.node_hash] = m.model_name;
+                            }
+                        });
+                    });
+                }
                 if (data.models) this.renderModels(data.models);
                 if (data.stats) this.updateStatsDisplay(data.stats);
                 break;
             case 'node_joined':
+                // Track pool models for this node
+                if (!this._lastKnownNodes) this._lastKnownNodes = {};
+                if (!this._nodePoolModels) this._nodePoolModels = {};
+                this._lastKnownNodes[data.node_hash] = data.model_name;
+                if (data.pool_models && data.pool_models.length > 0) {
+                    this._nodePoolModels[data.node_hash] = data.pool_models;
+                }
                 this.debouncedRefresh();
                 this.showToast(`🆕 New node online: ${this.escapeHtml(data.model_name || '')}`);
                 break;
             case 'node_updated':
                 // Detect model name change (hot-reload)
+                if (!this._lastKnownNodes) this._lastKnownNodes = {};
+                if (!this._nodePoolModels) this._nodePoolModels = {};
                 const prevNode = this._lastKnownNodes?.[data.node_hash];
                 const modelChanged = prevNode && prevNode !== data.model_name && data.model_name;
-                this.debouncedRefresh();
+                this._lastKnownNodes[data.node_hash] = data.model_name;
+                // Track pool models
+                if (data.pool_models && data.pool_models.length > 0) {
+                    const prevPool = this._nodePoolModels[data.node_hash];
+                    const poolChanged = !prevPool || JSON.stringify(prevPool) !== JSON.stringify(data.pool_models);
+                    this._nodePoolModels[data.node_hash] = data.pool_models;
+                    if (poolChanged) {
+                        this.debouncedRefresh();
+                    }
+                }
                 if (modelChanged) {
                     this.showToast(`🔄 Node ${data.node_hash?.substring(0, 8)}... switched to ${this.escapeHtml(data.model_name)}`);
-                    // Track model change for future detection
-                    if (!this._lastKnownNodes) this._lastKnownNodes = {};
                     this._lastKnownNodes[data.node_hash] = data.model_name;
                 }
+                this.debouncedRefresh();
                 break;
             case 'node_left':
                 this.debouncedRefresh();
                 this.showToast(`👋 Node disconnected: ${this.escapeHtml(data.model_name || '')}`);
                 if (this._lastKnownNodes) delete this._lastKnownNodes[data.node_hash];
+                if (this._nodePoolModels) delete this._nodePoolModels[data.node_hash];
                 break;
             case 'heartbeat':
                 break;
@@ -242,14 +272,21 @@ class LandingApp {
         resultsDiv.innerHTML = '<div class="col-md-8">' + models.map(model => {
             const avgLoad = model.avg_load || 0;
             const loadClass = avgLoad < 0.3 ? 'load-low' : avgLoad < 0.7 ? 'load-med' : 'load-high';
-            const nodesHtml = (model.nodes || []).map(node => `
+            const nodesHtml = (model.nodes || []).map(node => {
+                const nodePoolModels = this._nodePoolModels?.[node.node_hash] || [];
+                const poolBadge = nodePoolModels.length > 1
+                    ? `<span class="badge bg-info ms-1" style="font-size:0.6rem" title="Pool: ${nodePoolModels.map(m => this.escapeHtml(m)).join(', ')}"><i class="fas fa-layer-group"></i> ${nodePoolModels.length} models</span>`
+                    : '';
+                return `
                 <div class="node-row">
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
                     <span class="node-metric ${loadClass} me-1">${(node.load || 0).toFixed(2)} load</span>
+                    ${poolBadge}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
-                </div>`).join('');
+                </div>`;
+            }).join('');
             return `<div class="model-card">
                 <div class="d-flex justify-content-between align-items-start">
                     <div><span class="status-dot online"></span><span class="model-name">${this.escapeHtml(model.model_name)}</span></div>

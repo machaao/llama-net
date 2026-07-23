@@ -440,7 +440,8 @@ async def node_heartbeat(request: Request):
                 await sse_mgr.broadcast("node_updated", {
                     "node_hash": node_hash,
                     "model_name": node.data[0].get("model_name", "unknown"),
-                    "metrics": metrics
+                    "metrics": metrics,
+                    "pool_models": pool_models,
                 })
         except Exception:
             pass
@@ -531,6 +532,7 @@ async def publish_node(request: Request):
                 "model_name": model_name,
                 "model_slug": model_slug,
                 "url": tunnel_url or body.get("url", ""),
+                "pool_models": models_list,
             })
 
         logger.info(f"{'Published' if is_new else 'Updated'} node {node_hash} model={model_name}")
@@ -622,9 +624,11 @@ async def publish_node_event(request: Request):
             }
 
             if sse_mgr:
+                event_pool_models = body.get("metrics", {}).get("pool_models", [])
                 await sse_mgr.broadcast("node_joined", {
                     "node_hash": node_hash, "model_name": model_name,
                     "model_slug": model_slug, "url": body.get("url", ""),
+                    "pool_models": event_pool_models,
                 })
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
 
@@ -679,9 +683,11 @@ async def publish_node_event(request: Request):
             }
 
             if sse_mgr:
+                event_pool_models = body.get("metrics", {}).get("pool_models", [])
                 await sse_mgr.broadcast("node_updated", {
                     "node_hash": node_hash, "model_name": model_name,
-                    "metrics": body.get("metrics", {})
+                    "metrics": body.get("metrics", {}),
+                    "pool_models": event_pool_models,
                 })
 
         elif event_type == "peer_discovered":
