@@ -32,6 +32,7 @@ class GatewayClient:
         metrics_callback=None,
         tunnel_url: str = "",
         public_ip: str = "",
+        model_pool=None,
     ):
         self.gateway_url = gateway_url.rstrip("/")
         self.node_id = node_id
@@ -42,6 +43,7 @@ class GatewayClient:
         self.tunnel_url = tunnel_url or self._detect_tunnel_url()
         self.public_ip = public_ip  # Only use explicitly provided IP; no auto-detection needed (tunnel-only)
         self.own_url = self.tunnel_url  # Tunnel-only — no IP:port fallback
+        self.model_pool = model_pool
 
         self.running = False
         self.registered = False
@@ -75,6 +77,10 @@ class GatewayClient:
                         "url": self.own_url,
                         "tunnel_url": self.tunnel_url,
                         "model": self.model_name,
+                        "models": [self.model_name] + (
+                            [m for m in (self.model_pool.get_network_info().get("models", [])) if m != self.model_name]
+                            if self.model_pool else []
+                        ),
                         "ip": self.public_ip,
                         "port": self.port,
                         "metrics": metrics,
@@ -195,6 +201,7 @@ class GatewayClient:
                                 "node_hash": self.node_hash,
                                 "url": self.own_url,
                                 "metrics": metrics,
+                                "models": metrics.get("pool", {}).get("models", [self.model_name]),
                             },
                         ) as resp:
                             if resp.status != 200:
@@ -312,13 +319,21 @@ class GatewayClient:
             logger.debug(f"Peer refresh failed: {e}")
 
     def _get_metrics(self) -> Dict[str, Any]:
-        """Get current metrics from callback."""
+        """Get current metrics from callback, including pool info."""
+        metrics = {}
         if self.metrics_callback:
             try:
-                return self.metrics_callback()
+                metrics = self.metrics_callback()
             except Exception:
                 pass
-        return {"load": 0, "tps": 0, "uptime": 0}
+        else:
+            metrics = {"load": 0, "tps": 0, "uptime": 0}
+
+        # Include pool info if available
+        if self.model_pool:
+            metrics['pool'] = self.model_pool.get_network_info()
+
+        return metrics
 
     @staticmethod
     def _detect_tunnel_url() -> str:
