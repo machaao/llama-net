@@ -710,7 +710,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
             "ip": get_host_ip(),
             "port": config.port,
             "model": actual_model_name,
-            "processing_node": "local",
+            "processing_node": config.node_id,
             "queued": True
         }
         
