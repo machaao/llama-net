@@ -310,6 +310,111 @@ class LlamaNetUI {
         }, 30000);
     }
 
+    // ── Pool Methods ──
+
+    async loadPoolStatus() {
+        try {
+            const resp = await fetch(`${this.baseUrl}/models/pool`);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.enabled) {
+                    this.updatePoolStatusBar(data);
+                    this.updateModelSwitcher(data);
+                    this.updatePoolCountBadge(data);
+                }
+                return data;
+            }
+        } catch (e) {
+            console.debug('Pool status not available:', e);
+        }
+        return null;
+    }
+
+    updatePoolStatusBar(poolData) {
+        const bar = document.getElementById('pool-status-bar');
+        if (!bar || !poolData) return;
+
+        const used = poolData.used_slots || 0;
+        const max = poolData.max_models || 0;
+        const memoryUsed = poolData.memory_used_gb || 0;
+
+        const dots = [];
+        for (let i = 0; i < max; i++) {
+            const slot = poolData.slots?.[i];
+            if (slot?.is_active) {
+                dots.push('<span class="pool-slot-indicator active" title="Active: ' + this.escapeHtml(slot.model_name) + '"></span>');
+            } else if (slot) {
+                dots.push('<span class="pool-slot-indicator loaded" title="Loaded: ' + this.escapeHtml(slot.model_name) + '"></span>');
+            } else {
+                dots.push('<span class="pool-slot-indicator empty" title="Empty slot"></span>');
+            }
+        }
+
+        bar.innerHTML = 'Pool: ' + dots.join('') + ' ' + used + '/' + max + (memoryUsed > 0 ? ' \u00b7 ' + memoryUsed + ' GB' : '');
+    }
+
+    updateModelSwitcher(poolData) {
+        const select = document.getElementById('pool-model-select');
+        if (!select || !poolData?.slots?.length) return;
+
+        if (poolData.slots.length <= 1) {
+            select.classList.add('d-none');
+            return;
+        }
+
+        select.classList.remove('d-none');
+        select.innerHTML = poolData.slots.map(slot =>
+            '<option value="' + this.escapeHtml(slot.model_name) + '"' + (slot.is_active ? ' selected' : '') + '>' + this.escapeHtml(slot.model_name) + (slot.is_active ? ' \u26a1' : '') + '</option>'
+        ).join('');
+    }
+
+    updatePoolCountBadge(poolData) {
+        const badge = document.getElementById('poolCountBadge');
+        if (!badge) return;
+        const used = poolData?.used_slots || 0;
+        if (used > 0) {
+            badge.style.display = 'inline';
+            badge.textContent = used;
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    async switchPoolModel(modelName) {
+        if (!modelName) return;
+        try {
+            const overlay = document.getElementById('model-reload-overlay');
+            overlay.style.display = 'flex';
+
+            const resp = await fetch(this.baseUrl + '/models/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model_path: modelName, load_mode: 'pool' })
+            });
+
+            const data = await resp.json();
+            overlay.style.display = 'none';
+
+            if (data.success) {
+                const mode = data.data?.mode;
+                if (mode === 'instant_switch') {
+                    this.showToast('success', '\u26a1 Switched to ' + modelName + ' (instant)');
+                } else {
+                    this.showToast('success', data.message || ('Loaded ' + modelName));
+                }
+                this.selectedModel = modelName;
+                this.updateChatInterface(modelName);
+                localStorage.setItem('llamanet_selected_model', modelName);
+                await this.loadPoolStatus();
+            } else {
+                this.showToast('error', 'Failed: ' + (data.message || 'Unknown error'));
+            }
+        } catch (e) {
+            document.getElementById('model-reload-overlay').style.display = 'none';
+            this.showToast('error', 'Switch failed: ' + e.message);
+        }
+    }
+
     async loadTunnelStatus() {
         try {
             const resp = await fetch(`${this.baseUrl}/tunnel/status`).catch(() => null);
@@ -459,11 +564,16 @@ class LlamaNetUI {
                         
                         // Handle model change (hot-reload / switch)
                         if (modelChanged) {
-                            console.log(`🔄 Model changed: ${previousNode.model} → ${normalizedNode.model}`);
+                            console.log('🔄 Model changed: ' + previousNode.model + ' → ' + normalizedNode.model);
                             this.selectedModel = normalizedNode.model;
                             this.updateChatInterface(normalizedNode.model);
                             localStorage.setItem('llamanet_selected_model', normalizedNode.model);
-                            this.showToast('success', `🔄 Model switched to: ${normalizedNode.model}`);
+                            this.showToast('success', '🔄 Model switched to: ' + normalizedNode.model);
+                        }
+
+                        // Refresh pool status on model changes
+                        if (modelChanged || data.source === 'pool_load' || data.source === 'instant_switch') {
+                            this.loadPoolStatus();
                         }
                         
                         this.updateNetworkDisplayRealTime();
@@ -3154,7 +3264,7 @@ class ModelDownloaderUI {
             const response = await fetch(`${this.baseUrl}/models/select`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_path: modelPath })
+                body: JSON.stringify({ model_path: modelPath, load_mode: 'pool' })
             });
             const data = await response.json();
             if (data.success) {
@@ -3171,8 +3281,9 @@ class ModelDownloaderUI {
                     llamaNetUI.updateChatInterface(data.data.model_name);
                     localStorage.setItem('llamanet_selected_model', data.data.model_name);
 
-                    // Refresh network status after model loads (heavier models need more time)
+                    // Refresh pool and network status after model loads
                     setTimeout(() => {
+                        llamaNetUI.loadPoolStatus();
                         llamaNetUI.refreshNetworkDataOnTopologyChange();
                     }, 3000);
                 }
