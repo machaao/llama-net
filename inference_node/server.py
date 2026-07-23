@@ -49,6 +49,11 @@ rate_limiter = None
 model_pool = None
 _active_sse_tasks: set = set()
 
+
+def _sanitize_node_for_api(node: dict) -> dict:
+    """Remove sensitive fields (url, ip, port) from a node dict for public API responses."""
+    return {k: v for k, v in node.items() if k not in ("url", "ip", "port")}
+
 def _get_own_url() -> str:
     """Get this node's public tunnel URL. Always checks fresh sources."""
     # Always check fresh sources first (file/env may have updated URL)
@@ -414,16 +419,15 @@ async def list_network_models():
             "id": config.model_name, "object": "model",
             "created": int(time.time()), "owned_by": "llamanet",
             "node_count": 1,
-            "nodes": [{
+            "nodes": [_sanitize_node_for_api({
                 "node_id": config.node_id,
-                "url": _get_own_url(),
                 "model": config.model_name,
                 "load": metrics.get("load", 0),
                 "tps": metrics.get("tps", 0),
                 "uptime": metrics.get("uptime", 0),
                 "last_seen": int(time.time()),
                 "total_tokens": metrics.get("total_tokens", 0),
-            }]
+            })]
         }
         return {"object": "list", "data": [local_model_data], "total_models": 1, "total_nodes": 1}
 
@@ -436,14 +440,14 @@ async def list_network_models():
             "id": config.model_name, "object": "model", "created": int(time.time()),
             "owned_by": "llamanet", "node_count": 0, "nodes": [],
         }
-        models_dict[config.model_name]["nodes"].append({
-            "node_id": config.node_id, "url": _get_own_url(),
+        models_dict[config.model_name]["nodes"].append(_sanitize_node_for_api({
+            "node_id": config.node_id,
             "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
             "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
             "ttft": metrics.get("ttft", 0), "latency": metrics.get("latency", 0),
             "total_tokens": metrics.get("total_tokens", 0),
             "gpu_info": system_info.get("gpu") if system_info else "",
-        })
+        }))
         models_dict[config.model_name]["node_count"] = 1
 
     # Compute our own node_hash to exclude self from peers
@@ -460,7 +464,7 @@ async def list_network_models():
                 "owned_by": "llamanet", "node_count": 0, "nodes": [],
             }
         models_dict[model]["node_count"] += 1
-        models_dict[model]["nodes"].append(peer)
+        models_dict[model]["nodes"].append(_sanitize_node_for_api(peer))
 
     return {"object": "list", "data": list(models_dict.values()), "total_models": len(models_dict), "total_nodes": len(peers) + (0 if config.no_model_mode else 1)}
 
@@ -482,6 +486,13 @@ async def get_models_statistics():
             }
         # Single local node
         metrics = llm.get_metrics() if llm else {}
+        local_node = _sanitize_node_for_api({
+            "node_id": config.node_id,
+            "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
+            "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
+            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
+            "total_tokens": metrics.get("total_tokens", 0),
+        })
         return {
             "network_summary": {
                 "total_models": 1, "total_nodes": 1,
@@ -494,21 +505,9 @@ async def get_models_statistics():
                     "node_count": 1,
                     "avg_load": metrics.get("load", 0),
                     "total_tps": metrics.get("tps", 0),
-                    "best_node": {
-                        "node_id": config.node_id, "url": _get_own_url(),
-                        "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
-                        "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
-                    },
+                    "best_node": local_node,
                     "availability": "low",
-                    "nodes": [
-                        {
-                            "node_id": config.node_id, "url": _get_own_url(),
-                            "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
-                            "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
-                            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
-                            "total_tokens": metrics.get("total_tokens", 0),
-                        }
-                    ],
+                    "nodes": [local_node],
                 }
             },
         }
@@ -522,16 +521,15 @@ async def get_models_statistics():
     # Include current node
     if not config.no_model_mode and llm:
         metrics = llm.get_metrics()
+        local_node = _sanitize_node_for_api({
+            "node_id": config.node_id,
+            "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
+            "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
+            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
+            "total_tokens": metrics.get("total_tokens", 0),
+        })
         models_dict[config.model_name] = {
-            "nodes": [
-                {
-                    "node_id": config.node_id, "url": _get_own_url(),
-                    "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
-                    "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
-                    "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
-                    "total_tokens": metrics.get("total_tokens", 0),
-                }
-            ],
+            "nodes": [local_node],
             "total_load": metrics.get("load", 0), "total_tps": metrics.get("tps", 0),
         }
         total_load += metrics.get("load", 0)
@@ -547,7 +545,7 @@ async def get_models_statistics():
         model = peer.get("model", "unknown")
         if model not in models_dict:
             models_dict[model] = {"nodes": [], "total_load": 0, "total_tps": 0}
-        models_dict[model]["nodes"].append(peer)
+        models_dict[model]["nodes"].append(_sanitize_node_for_api(peer))
         models_dict[model]["total_load"] += peer.get("load", 0)
         models_dict[model]["total_tps"] += peer.get("tps", 0)
         total_load += peer.get("load", 0)
@@ -1502,7 +1500,7 @@ async def network_events(request: Request):
         try:
             yield f"data: {json.dumps({'type': 'connected', 'connection_id': connection_id})}\n\n"
             if llm and config:
-                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name, 'url': _get_own_url()}})}\n\n"
+                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name}})}\n\n"
             while True:
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=25)

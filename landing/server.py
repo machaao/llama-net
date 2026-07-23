@@ -62,6 +62,23 @@ _heartbeat_last_seen_map = {}  # node_hash -> {last_seen, metrics}
 _node_pool_models_map = {}     # node_hash -> [model_name, ...]
 
 
+def _sanitize_node(node: dict) -> dict:
+    """Remove sensitive fields (url, ip, port) from a node dict for public API responses."""
+    sanitized = {k: v for k, v in node.items() if k not in ("url", "ip", "port")}
+    return sanitized
+
+
+def _sanitize_models(models: list) -> list:
+    """Sanitize all nodes inside a models list."""
+    sanitized = []
+    for model in models:
+        m = dict(model)
+        if "nodes" in m and isinstance(m["nodes"], list):
+            m["nodes"] = [_sanitize_node(n) for n in m["nodes"]]
+        sanitized.append(m)
+    return sanitized
+
+
 async def _heartbeat_monitor_loop():
     """Monitor heartbeat timestamps and detect stale nodes + metric changes — event-driven"""
     STALE_THRESHOLD = 90  # seconds without heartbeat = stale
@@ -237,7 +254,7 @@ async def network_events(request: Request):
                     if nh in _node_pool_models_map:
                         node["pool_models"] = _node_pool_models_map[nh]
 
-            yield f"data: {json.dumps({'type': 'initial_state', 'models': models, 'stats': stats})}\n\n"
+            yield f"data: {json.dumps({'type': 'initial_state', 'models': _sanitize_models(models), 'stats': stats})}\n\n"
 
             # Send recent heartbeat state for nodes to provide current metrics
             try:
@@ -543,7 +560,6 @@ async def publish_node(request: Request):
                 "node_hash": node_hash,
                 "model_name": model_name,
                 "model_slug": model_slug,
-                "url": tunnel_url or body.get("url", ""),
                 "pool_models": models_list,
             })
 
@@ -642,7 +658,7 @@ async def publish_node_event(request: Request):
             if sse_mgr:
                 await sse_mgr.broadcast("node_joined", {
                     "node_hash": node_hash, "model_name": model_name,
-                    "model_slug": model_slug, "url": body.get("url", ""),
+                    "model_slug": model_slug,
                     "pool_models": event_pool_models,
                 })
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
@@ -778,7 +794,7 @@ async def handle_peer_notification(request: Request):
                 if sse_mgr:
                     await sse_mgr.broadcast("node_joined", {
                         "node_hash": peer_hash, "model_name": peer_model,
-                        "model_slug": model_slug, "url": peer_url,
+                        "model_slug": model_slug,
                         "discovered_by": notifier_node_id
                     })
 
@@ -807,19 +823,19 @@ async def my_nodes(request: Request):
 @app.get("/api/models")
 async def list_models():
     models = supabase_mgr.list_active_models()
-    return {"models": models, "total": len(models)}
+    return {"models": _sanitize_models(models), "total": len(models)}
 
 
 @app.get("/api/models/search")
 async def search_models(q: str = "", limit: int = 50):
     models = supabase_mgr.list_active_models()
-    return {"models": models, "total": len(models)}
+    return {"models": _sanitize_models(models), "total": len(models)}
 
 
 @app.get("/api/models/{model_slug}")
 async def get_model_nodes(model_slug: str):
     nodes = supabase_mgr.get_nodes_for_model(model_slug)
-    return {"model_slug": model_slug, "nodes": nodes, "total": len(nodes)}
+    return {"model_slug": model_slug, "nodes": [_sanitize_node(n) for n in nodes], "total": len(nodes)}
 
 
 @app.get("/api/network/stats")

@@ -124,8 +124,7 @@ class DashboardApp {
                 <span class="model-stat"><i class="fas fa-bolt"></i> <span class="value">${(node.tps || 0).toFixed(1)}</span> TPS</span>
                 <span class="model-stat"><i class="fas fa-tachometer-alt"></i> <span class="value">${(node.load || 0).toFixed(2)}</span> load</span>
                 ${node.gpu_info ? `<span class="model-stat"><i class="fas fa-microchip"></i> ${this.escapeHtml(node.gpu_info)}</span>` : ''}
-            </div>
-            <div class="mt-2"><code class="small">${this.escapeHtml(node.url)}</code></div></div>`).join('');
+            </div></div>`).join('');
     }
     async deregisterNode(nodeHash) { if (!confirm('Deregister this node?')) return; try { await fetch(`${this.baseUrl}/api/nodes/${nodeHash}`, { method: 'DELETE', credentials: 'include' }); await this.loadMyNodes(); } catch (e) { alert('Failed to deregister'); } }
     copyRegisterCmd() { this.copyToClipboard(document.getElementById('register-cmd').textContent); }

@@ -1863,7 +1863,7 @@ class LlamaNetUI {
                     <h6><i class="fas fa-server"></i> Node Information (Real-time)</h6>
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${nodeData.node_id}<br>
-                        <strong>Address:</strong> ${nodeData.url ? '<code class="small">' + this.escapeHtml(nodeData.url) + '</code>' : 'local'}<br>
+                        <strong>Address:</strong> Routed via gateway<br>
                         <strong>Model:</strong> ${nodeData.model}<br>
                         <strong>Last Seen:</strong> ${lastSeenText}
                     </div>
@@ -1943,7 +1943,7 @@ class LlamaNetUI {
                     <div class="network-detail-item">
                         <strong>Node ID:</strong> ${nodeInfo.node_id}<br>
                         <strong>Status:</strong> ${statusBadge} ${isCurrentNode ? '<span class="badge bg-primary ms-1">Current Node</span>' : ''}<br>
-                        <strong>Address:</strong> ${nodeInfo.url ? '<code class="small">' + this.escapeHtml(nodeInfo.url) + '</code>' : 'local'}<br>
+                        <strong>Address:</strong> ${isCurrentNode ? 'Local node' : 'Routed via gateway'}<br>
                         <strong>Model:</strong> ${nodeInfo.model}<br>
                         ${nodeInfo.model_path ? `<strong>Model Path:</strong> ${nodeInfo.model_path}<br>` : ''}
                         <strong>Last Seen:</strong> ${lastSeenText}
@@ -2605,10 +2605,11 @@ class LlamaNetUI {
     }
     
     getNodeAddress(node) {
-        if (node.url) {
-            try { return new URL(node.url).hostname; } catch (e) { return node.url; }
+        // URL is no longer exposed to public API — show node ID prefix instead
+        if (node.node_id) {
+            return `node ${node.node_id.substring(0, 8)}...`;
         }
-        return 'local';
+        return 'via gateway';
     }
     
     // SSE-only real-time updates (no polling)
