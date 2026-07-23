@@ -243,15 +243,37 @@ class SupabaseManager:
                 if slug not in models:
                     models[slug] = {"model_name": node["model_name"], "model_slug": slug, "node_count": 0}
                 models[slug]["node_count"] += 1
+
+            # Also discover pool models from metadata
+            all_nodes_result = self.client.table("nodes").select(
+                "*"
+            ).eq("status", "active").execute()
+            if all_nodes_result.data:
+                from landing.node_registry import model_name_to_slug
+                for node in all_nodes_result.data:
+                    metrics = node.get("metrics", {}) or {}
+                    pool_models = metrics.get("pool_models", [])
+                    for pool_model_name in pool_models:
+                        pool_slug = model_name_to_slug(pool_model_name)
+                        if pool_slug not in models:
+                            models[pool_slug] = {
+                                "model_name": pool_model_name,
+                                "model_slug": pool_slug,
+                                "node_count": 0,
+                                "pool_discovered": True
+                            }
+                        if pool_slug != node.get("model_slug"):
+                            models[pool_slug]["node_count"] += 1
+
             for slug, model in models.items():
                 nodes = self.get_nodes_for_model(slug)
                 model["total_tps"] = sum(n.get("tps", 0) for n in nodes)
                 model["avg_load"] = sum(n.get("load", 0) for n in nodes) / len(nodes) if nodes else 0
                 model["avg_ttft"] = sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes) if nodes else 0
                 model["total_tokens"] = sum(n.get("total_tokens", 0) for n in nodes)
-                model["best_node"] = min(nodes, key=lambda n: n.get("load", 1))
+                model["best_node"] = min(nodes, key=lambda n: n.get("load", 1)) if nodes else None
                 model["nodes"] = nodes
-            # Remove stale model entries left behind by hot-reload (0 nodes after model switch)
+            # Remove stale model entries
             models = {slug: m for slug, m in models.items() if m["node_count"] > 0}
             return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
         except Exception as e:

@@ -383,6 +383,12 @@ async def node_heartbeat(request: Request):
     metrics = body.get("metrics", {})
     node_url = body.get("url", "")
 
+    # Accept pool models from heartbeat payload
+    pool_models = body.get("models", [])
+    if pool_models and len(pool_models) > 0:
+        metrics["pool_models"] = pool_models
+        metrics["pool_size"] = len(pool_models)
+
     # Validate URL before processing
     if node_url:
         is_safe, reason = RequestValidator.validate_node_url(node_url)
@@ -476,6 +482,13 @@ async def publish_node(request: Request):
         model_name = body.get("model", "unknown")
         model_slug = model_name_to_slug(model_name)
         tunnel_url = body.get("tunnel_url", "")
+
+        # Accept pool models list
+        models_list = body.get("models", [model_name])
+        reg_metrics = body.get("metrics", {})
+        if len(models_list) > 1:
+            reg_metrics["pool_models"] = models_list
+            reg_metrics["pool_size"] = len(models_list)
         system_user_id = "00000000-0000-0000-0000-000000000000"
 
         # Ensure system user exists (foreign key requirement)
@@ -501,7 +514,7 @@ async def publish_node(request: Request):
             user_id=system_user_id, node_hash=node_hash, model_name=model_name,
             model_slug=model_slug, url=tunnel_url or body.get("url", ""),
             ip=body.get("ip", ""), port=body.get("port", 8000),
-            gpu_info=body.get("gpu", ""), metrics=body.get("metrics", {}),
+            gpu_info=body.get("gpu", ""), metrics=reg_metrics,
         )
 
         # Track heartbeat from gossip publishes so the monitor doesn't mark it stale
