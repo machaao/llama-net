@@ -86,6 +86,10 @@ class InferenceConfig:
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
             self.verbose = args.verbose or bool(load_env_var("VERBOSE", True))
 
+            # Pool configuration
+            self.max_models = int(load_env_var("MAX_MODELS", "0"))
+            self.memory_budget_gb = float(load_env_var("MEMORY_BUDGET_GB", "0"))
+
             # Handle --no-gpu flag (overrides GPU layers and disables Metal)
             if args.no_gpu:
                 self.n_gpu_layers = 0
