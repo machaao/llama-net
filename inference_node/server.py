@@ -97,7 +97,7 @@ def _sync_tunnel_url_to_gateway(url: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global config, llm, system_info, heartbeat_manager, sse_manager, request_queue_manager, download_manager, gateway_client, rate_limiter
+    global config, llm, system_info, heartbeat_manager, sse_manager, request_queue_manager, download_manager, gateway_client, rate_limiter, model_pool
 
     try:
         config = InferenceConfig()
