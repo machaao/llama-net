@@ -380,6 +380,77 @@ class LlamaNetUI {
         }
     }
 
+    renderPoolModels(poolData) {
+        const container = document.getElementById('poolModelsList');
+        if (!container || !poolData) return;
+
+        if (!poolData.enabled || poolData.used_slots === 0) {
+            container.innerHTML = '<div class="text-center text-muted py-4">' +
+                '<i class="fas fa-layer-group fa-2x mb-2"></i>' +
+                '<p>No models loaded in pool</p>' +
+                '<p class="small">Select a model from the Local Models tab to load it into the pool.</p>' +
+                '</div>';
+            return;
+        }
+
+        const memoryPercent = poolData.memory_percent || 0;
+        const barClass = memoryPercent < 60 ? 'safe' : memoryPercent < 85 ? 'warning' : 'danger';
+        const lruCandidate = poolData.lru_candidate;
+
+        let html = '<div class="mb-3">';
+        html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+        html += '<span class="small fw-bold"><i class="fas fa-memory"></i> Memory: ' +
+            (poolData.memory_used_gb || 0) + ' / ' + (poolData.memory_budget_gb || 0) + ' GB</span>';
+        html += '<span class="small text-muted">' + poolData.used_slots + '/' + poolData.max_models + ' slots</span>';
+        html += '</div>';
+        html += '<div class="pool-memory-bar"><div class="pool-memory-bar-fill ' + barClass +
+            '" style="width: ' + memoryPercent + '%"></div></div>';
+        html += '</div>';
+
+        (poolData.slots || []).forEach(function(slot) {
+            var isActive = slot.is_active;
+            var isLRU = slot.model_name === lruCandidate;
+            var itemClass = 'pool-model-item';
+            if (isActive) itemClass += ' active-model';
+            if (isLRU && !isActive) itemClass += ' lru-candidate';
+
+            html += '<div class="' + itemClass + '">';
+            html += '<div class="d-flex justify-content-between align-items-start">';
+            html += '<div>';
+            html += '<h6 class="mb-1">';
+            if (isActive) {
+                html += '<span class="pool-slot-indicator active"></span> ';
+            } else {
+                html += '<span class="pool-slot-indicator loaded"></span> ';
+            }
+            html += llamaNetUI.escapeHtml(slot.model_name);
+            if (isActive) html += ' <span class="badge bg-primary ms-1">Active</span>';
+            if (isLRU && !isActive) html += ' <span class="badge bg-warning text-dark ms-1">LRU</span>';
+            html += '</h6>';
+            html += '<div class="small text-muted">';
+            html += '<div><i class="fas fa-hdd"></i> ' + (slot.size_display || 'Unknown') + '</div>';
+            html += '<div><i class="fas fa-clock"></i> Last used: ' + (slot.last_accessed_ago < 60 ?
+                Math.round(slot.last_accessed_ago) + 's ago' :
+                Math.round(slot.last_accessed_ago / 60) + 'm ago') + '</div>';
+            html += '<div><i class="fas fa-redo"></i> Accessed: ' + (slot.access_count || 0) + ' times</div>';
+            if (slot.metrics) {
+                html += '<div><i class="fas fa-bolt"></i> ' + ((slot.metrics.tps || 0)).toFixed(1) + ' TPS</div>';
+            }
+            html += '</div></div>';
+            html += '<div class="d-flex gap-1">';
+            if (!isActive) {
+                html += '<button class="btn btn-sm btn-primary" onclick="llamaNetUI.switchPoolModel(\'' +
+                    llamaNetUI.escapeHtml(slot.model_name) + '\')"><i class="fas fa-check"></i> Use</button>';
+            }
+            html += '<button class="btn btn-sm btn-outline-danger" onclick="llamaNetUI.evictPoolModel(\'' +
+                llamaNetUI.escapeHtml(slot.model_name) + '\')"><i class="fas fa-times"></i> Unload</button>';
+            html += '</div></div>';
+            html += '</div>';
+        });
+
+        container.innerHTML = html;
+    }
+
     async switchPoolModel(modelName) {
         if (!modelName) return;
         try {
@@ -3318,6 +3389,11 @@ class ModelDownloaderUI {
         modal.show();
         document.getElementById('local-tab').addEventListener('shown.bs.tab', () => this.loadLocalModels());
         document.getElementById('downloads-tab').addEventListener('shown.bs.tab', () => this.renderDownloads());
+        document.getElementById('pool-tab').addEventListener('shown.bs.tab', () => {
+            if (typeof llamaNetUI !== 'undefined') {
+                llamaNetUI.loadPoolStatus();
+            }
+        });
         this.loadTrendingModels();
         this._initSearchAutocomplete();
     }
