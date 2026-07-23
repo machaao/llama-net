@@ -346,10 +346,12 @@ class LlamaNetUI {
             if (resp.ok) {
                 const data = await resp.json();
                 if (data.enabled) {
+                    this._lastPoolData = data;
                     this.updatePoolStatusBar(data);
                     this.updateModelSwitcher(data);
                     this.updatePoolCountBadge(data);
                     this.renderPoolModels(data);
+                    this.updateChatModelSelector();
                 }
                 return data;
             }
@@ -406,6 +408,81 @@ class LlamaNetUI {
             badge.textContent = used;
         } else {
             badge.style.display = 'none';
+        }
+    }
+
+    updateChatModelSelector() {
+        const select = document.getElementById('chat-model-select');
+        if (!select) return;
+
+        const allModels = new Map();
+
+        if (this._lastPoolData && this._lastPoolData.slots) {
+            this._lastPoolData.slots.forEach(slot => {
+                allModels.set(slot.model_name, {
+                    name: slot.model_name,
+                    path: slot.model_path,
+                    source: 'pool',
+                    is_active: slot.is_active,
+                });
+            });
+        }
+
+        this.activeNodes.forEach(node => {
+            if (node.model && node.model !== 'unknown' && !allModels.has(node.model)) {
+                allModels.set(node.model, {
+                    name: node.model,
+                    path: '',
+                    source: 'network',
+                    is_active: false,
+                });
+            }
+        });
+
+        const previous = select.value;
+        select.innerHTML = '';
+
+        if (allModels.size === 0) {
+            select.innerHTML = '<option value="">No models available</option>';
+            return;
+        }
+
+        allModels.forEach((info, name) => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.dataset.source = info.source;
+            opt.dataset.path = info.path || '';
+            if (info.source === 'pool') {
+                opt.textContent = (info.is_active ? '\u26a1 ' : '\u2705 ') + name + ' (local)';
+            } else {
+                opt.textContent = '\ud83c\udf10 ' + name + ' (network)';
+            }
+            select.appendChild(opt);
+        });
+
+        const modelToSelect = previous || this.selectedModel || '';
+        if (modelToSelect && allModels.has(modelToSelect)) {
+            select.value = modelToSelect;
+        } else if (allModels.size > 0) {
+            const firstPool = Array.from(allModels.values()).find(m => m.source === 'pool');
+            select.value = firstPool ? firstPool.name : allModels.keys().next().value;
+        }
+
+        this.selectedModel = select.value;
+    }
+
+    onChatModelSelect(selectEl) {
+        if (!selectEl || !selectEl.value) return;
+        const modelName = selectEl.value;
+        const source = selectEl.selectedOptions[0]?.dataset.source;
+        const modelPath = selectEl.selectedOptions[0]?.dataset.path || '';
+
+        this.selectedModel = modelName;
+        localStorage.setItem('llamanet_selected_model', modelName);
+        this.updateChatInterface(modelName);
+
+        if (source === 'pool' && modelPath) {
+            this.switchPoolModel(modelName, modelPath);
         }
     }
 
@@ -551,6 +628,7 @@ class LlamaNetUI {
                 const modelsData = await modelsResponse.json();
                 this.updateActiveNodesFromAPI(modelsData);
                 this.updateNetworkDisplayRealTime();
+                this.updateChatModelSelector();
                 console.log('✅ Initial network status loaded');
             } else {
                 this.showNetworkError('Unable to connect to LlamaNet node');
@@ -677,6 +755,7 @@ class LlamaNetUI {
                         }
                         
                         this.updateNetworkDisplayRealTime();
+                        this.updateChatModelSelector();
                     }
                 }
                 break;
@@ -1160,6 +1239,7 @@ class LlamaNetUI {
                 const modelsData = await modelsResponse.json();
                 this.updateActiveNodesFromAPI(modelsData);
                 this.updateNetworkDisplayRealTime();
+                this.updateChatModelSelector();
                 console.log('🔄 Network data refreshed');
             } else {
                 this.updateNetworkDisplayRealTime();
@@ -1627,6 +1707,23 @@ class LlamaNetUI {
             // Update the current model selection
             this.selectedModel = modelId;
             
+            // Sync the chat model selector dropdown
+            const chatSelect = document.getElementById('chat-model-select');
+            if (chatSelect) {
+                let found = false;
+                for (const opt of chatSelect.options) {
+                    if (opt.value === modelId) { found = true; break; }
+                }
+                if (!found) {
+                    const opt = document.createElement('option');
+                    opt.value = modelId;
+                    opt.dataset.source = 'network';
+                    opt.textContent = '\ud83c\udf10 ' + modelId + ' (network)';
+                    chatSelect.appendChild(opt);
+                }
+                chatSelect.value = modelId;
+            }
+            
             // Update UI to show selection
             document.querySelectorAll('.model-group').forEach(group => {
                 group.classList.remove('selected-model');
@@ -2084,17 +2181,18 @@ class LlamaNetUI {
         // Add current message
         messages.push({ role: 'user', content: message });
         
-        // Use selected model if available, otherwise default
-        const modelToUse = this.selectedModel || 'llamanet';
+        // Read model from the visible selector dropdown
+        const chatSelect = document.getElementById('chat-model-select');
+        const modelToUse = (chatSelect && chatSelect.value) ? chatSelect.value : (this.selectedModel || 'llamanet');
         
         const requestBody = {
-            model: modelToUse,  // Use selected model
+            model: modelToUse,
             messages: messages,
             max_tokens: maxTokens,
             temperature: temperature,
             stream: streamingEnabled,
             strategy: strategy,
-            target_model: this.selectedModel  // Add explicit target model parameter
+            target_model: modelToUse  // Ensure pool routing uses the selected model
         };
 
         if (streamingEnabled) {
