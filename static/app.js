@@ -971,7 +971,7 @@ class LlamaNetUI {
                                 ${lastEventType === 'node_joined' ? '<i class="fas fa-plus-circle text-success ms-1" title="Recently joined"></i>' : ''}
                             </div>
                             <div class="text-muted small">
-                                <div><i class="fas fa-globe"></i> ${this.getNodeAddress(node)}</div>
+                                <div><i class="fas fa-home"></i> local</div>
                                 <div><i class="fas fa-clock"></i> Up: ${uptimeText} | ${lastSeenText}</div>
                                 ${this.renderNodeMetricsBadge(node)}
                                 ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
