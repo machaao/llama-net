@@ -306,7 +306,7 @@ For dedicated GPU machines (desktop, workstation, or server):
 
 2. **Start with a model:**
    ```bash
-   sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+   sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
      --tunnel --bootstrap-peers https://llamanet.app
    ```
 
@@ -331,10 +331,9 @@ For dedicated GPU machines (desktop, workstation, or server):
 - 4GB+ RAM (depends on model size)
 - `cloudflared` (auto-installed by `start-app.sh` on macOS/Linux)
 
-## License
+  sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
+    --tunnel \
+    --bootstrap-peers https://llamanet.app
+```
 
-Apache License 2.0 — see [LICENSE](./LICENSE)
-
-## Made with ❤️ using MACH-AI
-
-Built with [MACH-AI](https://machai.live)
+**Tips:**
