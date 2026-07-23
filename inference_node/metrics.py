@@ -45,25 +45,51 @@ class SystemInfo:
     
     @staticmethod
     def get_cpu_info() -> str:
-        """Get CPU information with caching and fallback methods"""
+        """Get CPU information with caching and fallback methods.
+
+        On Apple Silicon, platform.processor() returns a generic string
+        like 'arm'.  We detect this and call sysctl to get the real chip
+        name (e.g. 'Apple M1 Pro').
+        """
         current_time = time.time()
-        
+
         # Use cache if available and fresh
-        if (SystemInfo._cpu_info_cache and 
+        if (SystemInfo._cpu_info_cache and
             current_time - SystemInfo._cache_time < SystemInfo._cache_ttl):
             return SystemInfo._cpu_info_cache
-        
+
         try:
-            # Try multiple methods to get CPU info
+            system = platform.system()
+            machine = platform.machine()
+
+            # macOS Apple Silicon — sysctl gives "Apple M1 Pro" etc.
+            if system == "Darwin" and machine == "arm64":
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ["sysctl", "-n", "machdep.cpu.brand_string"],
+                        capture_output=True, text=True, timeout=3,
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        cpu_info = result.stdout.strip()
+                        SystemInfo._cpu_info_cache = cpu_info
+                        SystemInfo._cache_time = current_time
+                        return cpu_info
+                except Exception:
+                    pass
+                cpu_info = "Apple Silicon (arm64)"
+                SystemInfo._cpu_info_cache = cpu_info
+                SystemInfo._cache_time = current_time
+                return cpu_info
+
+            # Intel macOS / Linux / Windows — use platform.processor()
             cpu_info = platform.processor()
-            if cpu_info and cpu_info.strip():
+            if cpu_info and cpu_info.strip() and cpu_info.strip().lower() != "arm":
                 SystemInfo._cpu_info_cache = cpu_info.strip()
                 SystemInfo._cache_time = current_time
                 return SystemInfo._cpu_info_cache
-            
+
             # Fallback to machine type
-            machine = platform.machine()
-            system = platform.system()
             cpu_info = f"{system} {machine}"
             SystemInfo._cpu_info_cache = cpu_info
             SystemInfo._cache_time = current_time
