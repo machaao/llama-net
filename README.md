@@ -25,7 +25,7 @@ sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
 You can also pre-load a model at startup:
 
 ```bash
-sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
+sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
   --tunnel \
   --bootstrap-peers https://llamanet.app
 ```
@@ -43,7 +43,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="Llama-3.2-3B-Instruct",
+    model="Ministral-3-8B-Instruct",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 
