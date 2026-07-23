@@ -48,7 +48,16 @@ class ModelRouter:
         models = self.db.list_active_models()
         return {
             "object": "list",
-            "data": [{"id": m["model_name"], "object": "model", "created": int(time.time()), "owned_by": "llamanet", "node_count": m["node_count"], "total_tps": m.get("total_tps", 0), "avg_load": m.get("avg_load", 0)} for m in models],
+            "data": [{
+                "id": m["model_name"],
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "llamanet",
+                "node_count": m["node_count"],
+                "total_tps": m.get("total_tps", 0),
+                "avg_load": m.get("avg_load", 0),
+                "pool_discovered": m.get("pool_discovered", False),
+            } for m in models],
         }
 
     async def _select_node(self, model_name: str, strategy: str = "load_balanced") -> Optional[Dict[str, Any]]:
@@ -58,22 +67,22 @@ class ModelRouter:
         nodes = self.db.get_nodes_for_model(model_slug)
 
         if not nodes:
-            all_models = self.db.list_active_models()
-            for m in all_models:
-                if model_slug in m["model_slug"] or m["model_slug"] in model_slug:
-                    nodes = m.get("nodes", [])
-                    break
-
-        if not nodes:
-            # Search persisted pool_models in DB metrics column
+            # Search pool_models in persisted DB metrics column (O(n) scan)
             all_active = self.db.search_nodes(status="active", limit=100)
-            nodes = []
             for node in all_active:
                 node_metrics = node.get("metrics", {}) or {}
                 pool_models = node_metrics.get("pool_models", [])
                 pool_slugs = [model_name_to_slug(m) for m in pool_models]
                 if model_slug in pool_slugs:
                     nodes.append(node)
+
+        if not nodes:
+            # Last resort: fuzzy match via list_active_models
+            all_models = self.db.list_active_models()
+            for m in all_models:
+                if model_slug in m["model_slug"] or m["model_slug"] in model_slug:
+                    nodes = m.get("nodes", [])
+                    break
 
         if not nodes:
             return None
