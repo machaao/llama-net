@@ -81,7 +81,12 @@
             <div class="col-md-9">
                 <div class="card h-100">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5><i class="fas fa-comments"></i> Chat Interface</h5>
+                        <div class="d-flex align-items-center gap-2">
+                            <h5 class="mb-0"><i class="fas fa-comments"></i> Chat Interface</h5>
+                            <div id="pool-status-bar" class="small text-muted"></div>
+                            <select id="pool-model-select" class="form-select form-select-sm d-none" style="width: auto;" onchange="llamaNetUI.switchPoolModel(this.value)">
+                            </select>
+                        </div>
                         <button class="btn btn-outline-primary btn-sm" onclick="toggleSystemPrompt()" id="system-prompt-toggle">
                             <i class="fas fa-cog"></i> System Prompt
                         </button>
@@ -284,6 +289,12 @@
                                 <i class="fas fa-hdd"></i> Local Models
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="pool-tab" data-bs-toggle="tab" href="#poolPanel">
+                                <i class="fas fa-layer-group"></i> Pool
+                                <span class="badge bg-info ms-1" id="poolCountBadge" style="display:none;">0</span>
+                            </a>
+                        </li>
                     </ul>
                     <div class="tab-content p-3">
                         <div class="tab-pane fade show active" id="searchPanel">
@@ -323,6 +334,14 @@
                                 <div class="text-center text-muted py-4">
                                     <div class="spinner-border text-primary" role="status"></div>
                                     <p class="mt-2">Loading local models...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="poolPanel">
+                            <div id="poolModelsList">
+                                <div class="text-center text-muted py-4">
+                                    <div class="spinner-border text-primary" role="status"></div>
+                                    <p class="mt-2">Loading pool status...</p>
                                 </div>
                             </div>
                         </div>
