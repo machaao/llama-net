@@ -84,23 +84,75 @@ set -- $REMAINING_ARGS
 
 if [ "$ENABLE_TUNNEL" = "true" ] && ! command -v cloudflared >/dev/null 2>&1; then
     echo "📦 Installing cloudflared..."
+    INSTALL_OK=false
+
     if [ "$(uname)" = "Darwin" ]; then
+        # macOS — try Homebrew first, then standalone binary
         if command -v brew >/dev/null 2>&1; then
-            brew install cloudflared
-        else
-            CF_ARCH=$(uname -m); [ "$CF_ARCH" = "arm64" ] && CF_ARCH="arm64" || CF_ARCH="amd64"
-            curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${CF_ARCH}.tgz" -o /tmp/cf.tgz
-            tar -xzf /tmp/cf.tgz -C /tmp && sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
-            rm -f /tmp/cf.tgz /tmp/cloudflared
+            echo "   Using Homebrew..."
+            if brew install cloudflared; then
+                INSTALL_OK=true
+            else
+                echo "   ⚠️  Homebrew install failed, trying standalone binary..."
+            fi
         fi
+
+        if [ "$INSTALL_OK" = "false" ]; then
+            CF_ARCH=$(uname -m)
+            [ "$CF_ARCH" = "x86_64" ] && CF_ARCH="amd64"
+            CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${CF_ARCH}.tgz"
+            CF_TMPDIR=$(mktemp -d)
+            echo "   Downloading cloudflared for macOS ${CF_ARCH}..."
+            if curl -fsSL "$CF_URL" -o "$CF_TMPDIR/cloudflared.tgz" 2>/dev/null; then
+                tar -xzf "$CF_TMPDIR/cloudflared.tgz" -C "$CF_TMPDIR" 2>/dev/null
+                # Find the binary wherever tar extracted it
+                CF_BIN=$(find "$CF_TMPDIR" -name cloudflared -type f ! -name "*.tgz" | head -1)
+                if [ -n "$CF_BIN" ] && [ -f "$CF_BIN" ]; then
+                    sudo install -m 755 "$CF_BIN" /usr/local/bin/cloudflared
+                    INSTALL_OK=true
+                    echo "   ✅ Installed to /usr/local/bin/cloudflared"
+                else
+                    echo "   ❌ Binary not found in downloaded archive"
+                fi
+            else
+                echo "   ❌ Download failed. Install manually:"
+                echo "      brew install cloudflared"
+            fi
+            rm -rf "$CF_TMPDIR"
+        fi
+
     elif [ "$(uname)" = "Linux" ]; then
-        curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
-        sudo chmod +x /usr/local/bin/cloudflared
+        echo "   Downloading cloudflared for Linux..."
+        if curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared; then
+            sudo chmod +x /usr/local/bin/cloudflared
+            INSTALL_OK=true
+            echo "   ✅ Installed to /usr/local/bin/cloudflared"
+        else
+            echo "   ❌ Download failed. Install manually:"
+            echo "      curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared"
+            echo "      sudo chmod +x /usr/local/bin/cloudflared"
+        fi
+
     else
-        echo "❌ Install cloudflared manually"; ENABLE_TUNNEL=false
+        echo "   ❌ Automatic install not supported on $(uname)"
+        echo "      Download from: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/"
+    fi
+
+    if [ "$INSTALL_OK" = "false" ]; then
+        echo "⚠️  Continuing without tunnel — install cloudflared and re-run with --tunnel"
+        ENABLE_TUNNEL=false
     fi
 fi
-[ "$ENABLE_TUNNEL" = "true" ] && command -v cloudflared >/dev/null 2>&1 && echo "✅ cloudflared: $(cloudflared --version 2>&1 | head -1)" || { ENABLE_TUNNEL=false; }
+
+# Final check — verify cloudflared is available
+if [ "$ENABLE_TUNNEL" = "true" ]; then
+    if command -v cloudflared >/dev/null 2>&1; then
+        echo "✅ cloudflared: $(cloudflared --version 2>&1 | head -1)"
+    else
+        echo "⚠️  cloudflared not found — continuing without tunnel"
+        ENABLE_TUNNEL=false
+    fi
+fi
 
 # Handle 'run' command
 if [ "$1" = "run" ]; then
