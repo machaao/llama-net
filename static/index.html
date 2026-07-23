@@ -84,7 +84,7 @@
                         <div class="d-flex align-items-center gap-2">
                             <h5 class="mb-0"><i class="fas fa-comments"></i> Chat Interface</h5>
                             <div id="pool-status-bar" class="small text-muted"></div>
-                            <select id="pool-model-select" class="form-select form-select-sm d-none" style="width: auto;" onchange="llamaNetUI.switchPoolModel(this.value)">
+                            <select id="pool-model-select" class="form-select form-select-sm d-none" style="width: auto;" onchange="var opt=this.selectedOptions[0]; llamaNetUI.switchPoolModel(this.value, opt.dataset.path)">
                             </select>
                         </div>
                         <button class="btn btn-outline-primary btn-sm" onclick="toggleSystemPrompt()" id="system-prompt-toggle">

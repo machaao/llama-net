@@ -385,7 +385,7 @@ class LlamaNetUI {
 
         select.classList.remove('d-none');
         select.innerHTML = poolData.slots.map(slot =>
-            '<option value="' + this.escapeHtml(slot.model_name) + '"' + (slot.is_active ? ' selected' : '') + '>' + this.escapeHtml(slot.model_name) + (slot.is_active ? ' \u26a1' : '') + '</option>'
+            '<option value="' + this.escapeHtml(slot.model_name) + '" data-path="' + this.escapeHtml(slot.model_path) + '"' + (slot.is_active ? ' selected' : '') + '>' + this.escapeHtml(slot.model_name) + (slot.is_active ? ' \u26a1' : '') + '</option>'
         ).join('');
     }
 
@@ -461,7 +461,7 @@ class LlamaNetUI {
             html += '<div class="d-flex gap-1">';
             if (!isActive) {
                 html += '<button class="btn btn-sm btn-primary" onclick="llamaNetUI.switchPoolModel(\'' +
-                    llamaNetUI.escapeHtml(slot.model_name) + '\')"><i class="fas fa-check"></i> Use</button>';
+                    llamaNetUI.escapeHtml(slot.model_name) + '\', \'' + llamaNetUI.escapeHtml(slot.model_path) + '\')"><i class="fas fa-check"></i> Use</button>';
             }
             html += '<button class="btn btn-sm btn-outline-danger" onclick="llamaNetUI.evictPoolModel(\'' +
                 llamaNetUI.escapeHtml(slot.model_name) + '\')"><i class="fas fa-times"></i> Unload</button>';
@@ -472,7 +472,7 @@ class LlamaNetUI {
         container.innerHTML = html;
     }
 
-    async switchPoolModel(modelName) {
+    async switchPoolModel(modelName, modelPath) {
         if (!modelName) return;
         try {
             const overlay = document.getElementById('model-reload-overlay');
@@ -481,7 +481,7 @@ class LlamaNetUI {
             const resp = await fetch(this.baseUrl + '/models/select', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_path: modelName, load_mode: 'pool' })
+                body: JSON.stringify({ model_path: modelPath || modelName, load_mode: 'pool' })
             });
 
             const data = await resp.json();
