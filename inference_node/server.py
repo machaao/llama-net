@@ -658,7 +658,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
                 "ip": get_host_ip(),
                 "port": config.port,
                 "model": actual_model_name,
-                "processing_node": "local",
+                "processing_node": config.node_id,
                 "queued": True
             }
             
@@ -854,7 +854,7 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
             "ip": get_host_ip(),
             "port": config.port,
             "model": config.model_name,
-            "processing_node": "local"
+            "processing_node": config.node_id
         }
         
         return OpenAICompletionResponse(
@@ -1030,7 +1030,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                 "ip": get_host_ip(),
                 "port": config.port,
                 "model": actual_model_name,
-                "processing_node": "local",
+                "processing_node": config.node_id,
                 "chat_template": "auto",
                 "queued": True,
                 "reasoning_enabled": enable_reasoning
@@ -1094,7 +1094,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
             "ip": get_host_ip(),
             "port": config.port,
             "model": actual_model_name,
-            "processing_node": "local",
+            "processing_node": config.node_id,
             "chat_template": "auto",
             "queued": True,
             "reasoning_enabled": enable_reasoning
@@ -1260,7 +1260,7 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
             "ip": get_host_ip(),
             "port": config.port,
             "model": config.model_name,
-            "processing_node": "local",
+            "processing_node": config.node_id,
             "chat_template": "auto",
             "reasoning_enabled": enable_reasoning
         }
