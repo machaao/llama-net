@@ -1669,7 +1669,7 @@ async def delete_local_model_endpoint(model_id: str):
 @app.post("/models/select")
 async def select_model(request: Request):
     """Select a model — instant switch if in pool, otherwise load (may evict LRU)."""
-    global llm
+    global llm, gateway_client
 
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
