@@ -128,6 +128,9 @@ class LlamaNetUI {
         this.connectionStatus = 'connecting';
         this.errorCount = 0;
         
+        // Local node detection
+        this.localNodeId = null;
+
         // Restore selected model from localStorage
         this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
         
@@ -141,6 +144,11 @@ class LlamaNetUI {
         // Start ONLY SSE-based network monitoring using unified SSE manager
         this.startUnifiedSSENetworkMonitoring();
         
+        // Detect local node ID from /info endpoint
+        fetch(`${this.baseUrl}/info`).then(r => r.ok ? r.json() : null).then(data => {
+            if (data?.node_id) this.localNodeId = data.node_id;
+        }).catch(() => {});
+
         // Load tunnel status
         this.loadTunnelStatus();
         
@@ -902,9 +910,9 @@ class LlamaNetUI {
                             <i class="fas fa-brain"></i> ${modelName}
                             <span class="badge bg-${availabilityClass} ms-1">${availability}</span>
                         </div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel('${modelName}')" title="Select this model">
-                            <i class="fas fa-check"></i>
-                        </button>
+                        ${nodes.some(n => n.node_id === this.localNodeId)
+                            ? '<button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel(\'' + modelName + '\')" title="Select this model (local)"><i class="fas fa-check"></i></button>'
+                            : '<span class="badge bg-warning text-dark" title="This model is on a remote node. Requests will be forwarded."><i class="fas fa-globe me-1"></i>Remote</span>'}
                     </div>
                     <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
                         ${this.renderModelNodesRealTime(nodes)}

@@ -1332,23 +1332,47 @@ async def _forward_request(request_body: dict, endpoint: str, target_peer: dict,
 
     try:
         timeout = aiohttp.ClientTimeout(total=120, connect=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=request_body, headers=headers) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise HTTPException(status_code=resp.status, detail=error_text)
+        session = aiohttp.ClientSession(timeout=timeout)
+        resp = await session.post(url, json=request_body, headers=headers)
 
-                if stream:
-                    return StreamingResponse(
-                        resp.content.iter_any(),
-                        media_type="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no"},
-                    )
-                else:
-                    data = await resp.json()
-                    return JSONResponse(content=data)
+        if resp.status != 200:
+            error_text = await resp.text()
+            await session.close()
+            raise HTTPException(status_code=resp.status, detail=error_text)
+
+        if stream:
+            async def safe_stream():
+                try:
+                    async for chunk in resp.content.iter_any():
+                        yield chunk
+                except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError, ConnectionResetError) as e:
+                    logger.warning(f"Peer stream connection closed: {e}")
+                    yield f"data: {json.dumps({'error': 'Peer connection closed', 'type': 'stream_error'})}\n\n"
+                except Exception as e:
+                    logger.error(f"Peer stream error: {e}")
+                    yield f"data: {json.dumps({'error': str(e), 'type': 'stream_error'})}\n\n"
+                finally:
+                    await session.close()
+
+            return StreamingResponse(
+                safe_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no"},
+            )
+        else:
+            data = await resp.json()
+            await session.close()
+            return JSONResponse(content=data)
+    except HTTPException:
+        raise
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Peer request timed out")
+    except aiohttp.ClientConnectionError as e:
+        logger.error(f"Failed to connect to peer: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to reach peer: connection error")
+    except Exception as e:
+        logger.error(f"Error forwarding request: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to reach peer: {str(e)}")
 
 # Status and utility endpoints
 @app.get("/models/pool")
