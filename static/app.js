@@ -1742,6 +1742,7 @@ class LlamaNetUI {
             
             // Store selection in localStorage for persistence
             localStorage.setItem('llamanet_selected_model', modelId);
+            localStorage.setItem('llamanet_selected_model_name', modelId);
             
         } catch (error) {
             console.error('Error selecting model:', error);
