@@ -81,11 +81,12 @@
             <div class="col-md-9">
                 <div class="card h-100">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <div class="d-flex align-items-center gap-2">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
                             <h5 class="mb-0"><i class="fas fa-comments"></i> Chat Interface</h5>
-                            <div id="pool-status-bar" class="small text-muted"></div>
-                            <select id="pool-model-select" class="form-select form-select-sm d-none" style="width: auto;" onchange="var opt=this.selectedOptions[0]; llamaNetUI.switchPoolModel(this.value, opt.dataset.path)">
+                            <select id="chat-model-select" class="form-select form-select-sm" style="max-width: 320px; font-size: 0.8rem;" onchange="llamaNetUI.onChatModelSelect(this)">
+                                <option value="">Loading models...</option>
                             </select>
+                            <div id="pool-status-bar" class="small text-muted"></div>
                         </div>
                         <button class="btn btn-outline-primary btn-sm" onclick="toggleSystemPrompt()" id="system-prompt-toggle">
                             <i class="fas fa-cog"></i> System Prompt
