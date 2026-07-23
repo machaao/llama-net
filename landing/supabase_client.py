@@ -172,9 +172,8 @@ class SupabaseManager:
                 "last_heartbeat": "now()", "status": "active",
             }
 
-            # Persist pool_models if present (for multi-model pool discovery)
-            if metrics.get("pool_models"):
-                update_data["metrics"] = {"pool_models": metrics["pool_models"]}
+            # Note: pool_models are tracked via heartbeat events (in-memory)
+            # and broadcast through SSE. No DB column needed.
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
             return len(result.data) > 0
