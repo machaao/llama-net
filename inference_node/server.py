@@ -30,6 +30,7 @@ from inference_node.request_queue import RequestQueueManager
 from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
 from inference_node.event_publisher import GatewayEventPublisher
+from inference_node.model_pool import ModelPool
 from common.utils import get_logger, get_host_ip, get_tunnel_url_file
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
@@ -399,6 +400,9 @@ async def list_models():
                     model_dict["template_auto_detected"] = template_info.get("template_auto_detected", False)
                 except Exception as e:
                     logger.warning(f"Could not get chat format info for {slot.model_name}: {e}")
+            # Mark which model is currently active
+            model_dict["is_active"] = (slot.model_name == model_pool.active_model)
+            model_dict["size_display"] = ModelPool._format_size(slot.size_bytes) if slot.size_bytes else "Unknown"
             models_data.append(model_dict)
     elif llm:
         # Single model fallback (no pool)
@@ -415,6 +419,7 @@ async def list_models():
             model_dict["template_auto_detected"] = template_info.get("template_auto_detected", False)
         except Exception as e:
             logger.warning(f"Could not get chat format info: {e}")
+        model_dict["is_active"] = True
         models_data.append(model_dict)
     
     if not models_data:
