@@ -354,7 +354,20 @@ class SupabaseManager:
             cumulative = self._get_cumulative_tokens()
             if not nodes:
                 return {"total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0, "total_tokens": cumulative}
+
             models = set(n["model_slug"] for n in nodes)
+
+            # Also count pool models from in-memory heartbeat cache
+            try:
+                import landing.server as _gw
+                mem_pool = getattr(_gw, '_node_pool_models_map', {})
+                for node_hash, pool_models in mem_pool.items():
+                    for model_name in pool_models:
+                        slug = model_name_to_slug(model_name)
+                        models.add(slug)
+            except Exception:
+                pass
+
             active_tokens = sum(n.get("total_tokens", 0) for n in nodes)
             return {
                 "total_nodes": len(nodes), "total_models": len(models),
