@@ -77,6 +77,23 @@ def _sanitize_models(models: list) -> list:
     return sanitized
 
 
+async def _periodic_stats_broadcast():
+    """Broadcast aggregated network stats every 30s so landing page stays fresh."""
+    while True:
+        try:
+            await asyncio.sleep(30)
+            if not sse_mgr or not supabase_mgr:
+                continue
+            stats = supabase_mgr.get_network_stats()
+            await sse_mgr.broadcast("stats_update", {
+                "stats": stats,
+            })
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Periodic stats broadcast error: {e}")
+
+
 async def _heartbeat_monitor_loop():
     """Monitor heartbeat timestamps and detect stale nodes — reads from Supabase"""
     STALE_THRESHOLD = 45
@@ -140,11 +157,13 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("Cloudflare not configured - tunnel provisioning disabled")
         cleanup_task = asyncio.create_task(_heartbeat_monitor_loop())
+        stats_task = asyncio.create_task(_periodic_stats_broadcast())
         logger.info("✅ Gateway started successfully")
     except Exception as e:
         logger.error(f"Failed to start gateway: {e}")
         raise
     yield
+    stats_task.cancel()
     cleanup_task.cancel()
     logger.info("Gateway stopped")
 
@@ -426,7 +445,7 @@ async def node_heartbeat(request: Request):
                 if old_val == 0 and new_val == 0:
                     continue
                 denom = max(abs(old_val), 0.01)
-                if abs(new_val - old_val) / denom > 0.15:
+                if abs(new_val - old_val) / denom > 0.05:
                     should_broadcast = True
                     break
 
@@ -533,6 +552,11 @@ async def publish_node(request: Request):
                 "model_name": model_name,
                 "model_slug": model_slug,
                 "pool_models": models_list,
+                "load": reg_metrics.get("load", 0),
+                "tps": reg_metrics.get("tps", 0),
+                "ttft": reg_metrics.get("ttft"),
+                "latency": reg_metrics.get("latency"),
+                "total_tokens": reg_metrics.get("total_tokens", 0),
             })
 
         logger.info(f"{'Published' if is_new else 'Updated'} node {node_hash} model={model_name}")
@@ -623,6 +647,11 @@ async def publish_node_event(request: Request):
                     "node_hash": node_hash, "model_name": model_name,
                     "model_slug": model_slug,
                     "pool_models": event_pool_models,
+                    "load": body.get("metrics", {}).get("load", 0),
+                    "tps": body.get("metrics", {}).get("tps", 0),
+                    "ttft": body.get("metrics", {}).get("ttft"),
+                    "latency": body.get("metrics", {}).get("latency"),
+                    "total_tokens": body.get("metrics", {}).get("total_tokens", 0),
                 })
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
 
@@ -689,6 +718,11 @@ async def publish_node_event(request: Request):
                     "node_hash": node_hash, "model_name": model_name,
                     "metrics": event_metrics,
                     "pool_models": event_pool_models,
+                    "load": event_metrics.get("load", 0),
+                    "tps": event_metrics.get("tps", 0),
+                    "ttft": event_metrics.get("ttft"),
+                    "latency": event_metrics.get("latency"),
+                    "total_tokens": event_metrics.get("total_tokens", 0),
                 })
 
         elif event_type == "peer_discovered":
