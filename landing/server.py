@@ -81,10 +81,10 @@ def _sanitize_models(models: list) -> list:
 
 async def _heartbeat_monitor_loop():
     """Monitor heartbeat timestamps and detect stale nodes + metric changes — event-driven"""
-    STALE_THRESHOLD = 90  # seconds without heartbeat = stale
+    STALE_THRESHOLD = 45  # seconds without heartbeat = stale (aggressive for fast cleanup)
     while True:
         try:
-            await asyncio.sleep(15)
+            await asyncio.sleep(5)
             if not supabase_mgr:
                 continue
 
@@ -580,9 +580,7 @@ async def publish_node(request: Request):
 @app.post("/api/nodes/unpublish")
 async def unpublish_node(request: Request):
     """Public endpoint for inference nodes to signal departure (no user auth required)"""
-    limit_resp = await _enforce_rate_limit(request, "node_event")
-    if limit_resp:
-        return limit_resp
+    # Skip rate limiting for departure events — nodes must be able to leave
     try:
         body = await request.json()
         node_id = body.get("node_id")
@@ -594,6 +592,10 @@ async def unpublish_node(request: Request):
 
         # Mark node as inactive in Supabase
         supabase_mgr.deregister_node(node_hash)
+
+        # Clean up in-memory tracking immediately
+        _heartbeat_last_seen_map.pop(node_hash, None)
+        _node_pool_models_map.pop(node_hash, None)
 
         # Broadcast SSE departure event
         if sse_mgr:

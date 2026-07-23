@@ -197,9 +197,9 @@ async def lifespan(app: FastAPI):
 
     if gateway_client:
         try:
-            await asyncio.wait_for(gateway_client.unregister(), timeout=3.0)
+            await asyncio.wait_for(gateway_client.unregister(), timeout=8.0)
         except Exception:
-            pass
+            logger.warning("⚠️ Unregister timed out — node may appear stale on gateway")
     if model_pool:
         try:
             config.save_pool_history(model_pool.get_history())

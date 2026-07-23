@@ -99,31 +99,40 @@ class GatewayClient:
             return False
 
     async def unregister(self):
-        """Notify gateway that this node is leaving."""
+        """Notify gateway that this node is leaving. Retries on failure."""
         self.running = False
         if not self.registered:
             return
 
-        try:
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=5)
-            ) as session:
-                async with session.post(
-                    f"{self.gateway_url}/api/nodes/unpublish",
-                    json={
-                        "node_id": self.node_id,
-                        "model": self.model_name,
-                        "reason": "graceful_shutdown",
-                    },
-                ) as resp:
-                    if resp.status == 200:
-                        logger.info("✅ Unregistered from gateway")
-                    else:
-                        logger.warning(f"Unregister returned {resp.status}")
-        except Exception as e:
-            logger.debug(f"Unregister error: {e}")
-        finally:
-            self.registered = False
+        payload = {
+            "node_id": self.node_id,
+            "model": self.model_name,
+            "reason": "graceful_shutdown",
+        }
+
+        for attempt in range(3):
+            try:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=3)
+                ) as session:
+                    async with session.post(
+                        f"{self.gateway_url}/api/nodes/unpublish",
+                        json=payload,
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info("✅ Unregistered from gateway")
+                            self.registered = False
+                            return
+                        else:
+                            logger.warning(f"Unregister returned {resp.status} (attempt {attempt + 1})")
+            except Exception as e:
+                logger.warning(f"Unregister error (attempt {attempt + 1}): {e}")
+
+            if attempt < 2:
+                await asyncio.sleep(0.5)
+
+        logger.warning("⚠️ Failed to unregister from gateway after 3 attempts")
+        self.registered = False
 
     # ─── background loops ───────────────────────────────────────
 

@@ -389,11 +389,8 @@ cleanup_sleep() {
 cleanup() {
     echo "🛑 Received shutdown signal, stopping LlamaNet node..."
     cleanup_sleep
-    if [ ! -z "$TUNNEL_PID" ]; then
-        echo "🌐 Stopping Cloudflare Tunnel..."
-        kill $TUNNEL_PID 2>/dev/null || true
-    fi
 
+    # Stop server FIRST — it sends departure event to gateway before shutting down
     if [ ! -z "$SERVER_PID" ]; then
         echo "📤 Sending SIGTERM to server process $SERVER_PID..."
         # Send SIGTERM and let the application handle graceful shutdown
@@ -425,6 +422,12 @@ cleanup() {
         # Force kill if still running
         echo "⚠️ Forcing server shutdown..."
         kill -KILL $SERVER_PID 2>/dev/null || true
+    fi
+
+    # Now stop tunnel AFTER server has finished
+    if [ ! -z "$TUNNEL_PID" ]; then
+        echo "🌐 Stopping Cloudflare Tunnel..."
+        kill $TUNNEL_PID 2>/dev/null || true
     fi
     exit 0
 }
