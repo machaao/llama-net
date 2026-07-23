@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 class HeartbeatManager:
     """Manages node health monitoring and heartbeat signals"""
     
-    def __init__(self, node_id: str, metrics_callback: Callable[[], Dict[str, Any]], interval: int = 10):
+    def __init__(self, node_id: str, metrics_callback: Callable[[], Dict[str, Any]], interval: int = 10, pool_status_callback: Callable = None):
         self.node_id = node_id
         self.metrics_callback = metrics_callback
         self.interval = interval
@@ -18,6 +18,7 @@ class HeartbeatManager:
         self._last_heartbeat_wall_time = 0
         self._max_gap_detected = 0
         self._wake_events = 0
+        self.pool_status_callback = pool_status_callback
         
     async def start(self):
         """Start the heartbeat system"""
@@ -71,8 +72,16 @@ class HeartbeatManager:
         self._last_heartbeat_wall_time = current_time
         self.last_heartbeat = current_time
         
-        # Log heartbeat (in production, this would send to monitoring system)
-        logger.debug(f"💓 Heartbeat from {self.node_id[:8]}... - Load: {metrics.get('load', 0):.2f}, TPS: {metrics.get('tps', 0):.2f}")
+        # Include pool info if callback is set
+        if self.pool_status_callback:
+            try:
+                metrics['pool'] = self.pool_status_callback()
+            except Exception:
+                pass
+
+        # Log heartbeat
+        pool_info = f" pool={metrics.get('pool', {}).get('used', '?')}" if metrics.get('pool') else ""
+        logger.debug(f"💓 Heartbeat from {self.node_id[:8]}... - Load: {metrics.get('load', 0):.2f}, TPS: {metrics.get('tps', 0):.2f}{pool_info}")
         
     def is_healthy(self) -> bool:
         """Check if the node is healthy based on recent heartbeats"""

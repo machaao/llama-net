@@ -62,6 +62,15 @@ class ModelRouter:
                     nodes = m.get("nodes", [])
                     break
         if not nodes:
+            # Search nodes that have this model in their pool
+            all_active = self.db.search_nodes(status="active", limit=100)
+            for node in all_active:
+                node_metrics = node.get("metrics", {}) or {}
+                pool_models = node_metrics.get("pool_models", [])
+                pool_slugs = [model_name_to_slug(m) for m in pool_models]
+                if model_slug in pool_slugs:
+                    nodes.append(node)
+        if not nodes:
             return None
         if strategy == "round_robin":
             idx = self._rr_index.get(model_slug, 0) % len(nodes)

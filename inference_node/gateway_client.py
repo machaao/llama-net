@@ -310,6 +310,13 @@ class GatewayClient:
                                     "load": node.get("load", 0),
                                     "tps": node.get("tps", 0),
                                     "gpu_info": node.get("gpu_info", ""),
+                                    "ttft": node.get("ttft"),
+                                    "latency": node.get("latency"),
+                                    "total_tokens": node.get("total_tokens", 0),
+                                    "uptime": node.get("uptime", 0),
+                                    "last_seen": node.get("last_seen"),
+                                    "ip": node.get("ip", ""),
+                                    "port": node.get("port", 0),
                                 })
 
                         self._peers = peers

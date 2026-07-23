@@ -1506,3 +1506,103 @@ pre {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.85; }
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* MODEL POOL STYLES                                      */
+/* ═══════════════════════════════════════════════════════ */
+
+.pool-slot-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid #dee2e6;
+    margin-right: 3px;
+    vertical-align: middle;
+}
+
+.pool-slot-indicator.loaded {
+    background-color: var(--success-color);
+    box-shadow: 0 0 4px rgba(25, 135, 84, 0.4);
+}
+
+.pool-slot-indicator.active {
+    background-color: var(--primary-color);
+    box-shadow: 0 0 4px rgba(13, 110, 253, 0.4);
+}
+
+.pool-slot-indicator.empty {
+    background-color: #e9ecef;
+}
+
+.pool-model-item {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: all 0.2s ease;
+}
+
+.pool-model-item.active-model {
+    border-color: var(--primary-color);
+    border-width: 2px;
+    background-color: rgba(13, 110, 253, 0.02);
+}
+
+.pool-model-item.lru-candidate {
+    border-left: 3px solid var(--warning-color);
+}
+
+.pool-memory-bar {
+    height: 8px;
+    border-radius: 4px;
+    background-color: #e9ecef;
+    overflow: hidden;
+}
+
+.pool-memory-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.pool-memory-bar-fill.safe {
+    background-color: var(--success-color);
+}
+
+.pool-memory-bar-fill.warning {
+    background-color: var(--warning-color);
+}
+
+.pool-memory-bar-fill.danger {
+    background-color: var(--danger-color);
+}
+
+.model-instant-switch {
+    animation: instantSwitchPulse 0.3s ease;
+}
+
+@keyframes instantSwitchPulse {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(13, 110, 253, 0.15); }
+    100% { background-color: transparent; }
+}
+
+.eviction-warning {
+    border-left: 4px solid var(--warning-color);
+    background-color: rgba(255, 193, 7, 0.05);
+    padding: 1rem;
+    border-radius: 0.375rem;
+}
+
+#pool-model-select {
+    max-width: 200px;
+    font-size: 0.85rem;
+}
+
+#pool-status-bar {
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+}

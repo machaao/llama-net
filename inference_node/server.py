@@ -408,171 +408,124 @@ async def list_models():
 
 @app.get("/v1/models/network")
 async def list_network_models():
-    """List all available models across the network via gateway."""
+    """List local models on this node only (no remote peers)."""
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
-    if not gateway_client:
-        if config.no_model_mode:
-            return {"object": "list", "data": [], "total_models": 0, "total_nodes": 0}
-        metrics = llm.get_metrics() if llm else {}
-        local_model_data = {
-            "id": config.model_name, "object": "model",
-            "created": int(time.time()), "owned_by": "llamanet",
-            "node_count": 1,
-            "nodes": [_sanitize_node_for_api({
-                "node_id": config.node_id,
-                "model": config.model_name,
-                "load": metrics.get("load", 0),
-                "tps": metrics.get("tps", 0),
-                "uptime": metrics.get("uptime", 0),
-                "last_seen": int(time.time()),
-                "total_tokens": metrics.get("total_tokens", 0),
-            })]
-        }
-        return {"object": "list", "data": [local_model_data], "total_models": 1, "total_nodes": 1}
 
-    peers = await gateway_client.get_peers()
+    if config.no_model_mode:
+        return {"object": "list", "data": [], "total_models": 0, "total_nodes": 0}
+
+    metrics = llm.get_metrics() if llm else {}
     models_dict: Dict[str, Any] = {}
 
-    if not config.no_model_mode:
-        metrics = llm.get_metrics() if llm else {}
+    # Add active model
+    if config.model_name:
         models_dict[config.model_name] = {
             "id": config.model_name, "object": "model", "created": int(time.time()),
-            "owned_by": "llamanet", "node_count": 0, "nodes": [],
+            "owned_by": "llamanet", "node_count": 1, "nodes": [],
         }
         models_dict[config.model_name]["nodes"].append(_sanitize_node_for_api({
             "node_id": config.node_id,
+            "model": config.model_name,
             "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
             "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
-            "ttft": metrics.get("ttft", 0), "latency": metrics.get("latency", 0),
+            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
             "total_tokens": metrics.get("total_tokens", 0),
             "gpu_info": system_info.get("gpu") if system_info else "",
         }))
-        models_dict[config.model_name]["node_count"] = 1
 
-    # Compute our own node_hash to exclude self from peers
-    own_node_hash = hashlib.sha256(config.node_id.encode()).hexdigest()[:12]
+    # Add other pool models (non-active slots)
+    if model_pool:
+        for name, slot in model_pool.slots.items():
+            if name == config.model_name:
+                continue  # Already added above
+            if name not in models_dict:
+                models_dict[name] = {
+                    "id": name, "object": "model", "created": int(time.time()),
+                    "owned_by": "llamanet", "node_count": 1, "nodes": [],
+                }
+                slot_metrics = slot.metrics.get_performance_metrics()
+                models_dict[name]["nodes"].append(_sanitize_node_for_api({
+                    "node_id": config.node_id,
+                    "model": name,
+                    "load": slot_metrics.get("load", 0), "tps": slot_metrics.get("tps", 0),
+                    "uptime": slot_metrics.get("uptime", 0), "last_seen": int(time.time()),
+                    "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
+                    "total_tokens": slot_metrics.get("total_tokens", 0),
+                    "gpu_info": system_info.get("gpu") if system_info else "",
+                }))
 
-    for peer in peers:
-        # Skip ourselves — we're already added above
-        if peer.get("node_id") == own_node_hash:
-            continue
-        model = peer.get("model", "unknown")
-        if model not in models_dict:
-            models_dict[model] = {
-                "id": model, "object": "model", "created": int(time.time()),
-                "owned_by": "llamanet", "node_count": 0, "nodes": [],
-            }
-        models_dict[model]["node_count"] += 1
-        models_dict[model]["nodes"].append(_sanitize_node_for_api(peer))
-
-    return {"object": "list", "data": list(models_dict.values()), "total_models": len(models_dict), "total_nodes": len(peers) + (0 if config.no_model_mode else 1)}
+    return {
+        "object": "list", "data": list(models_dict.values()),
+        "total_models": len(models_dict), "total_nodes": 1,
+    }
 
 @app.get("/models/statistics")
 async def get_models_statistics():
-    """Get detailed statistics about models available on the network via gateway."""
+    """Get statistics for local models only."""
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
 
-    if not gateway_client:
-        if config.no_model_mode:
-            return {
-                "network_summary": {
-                    "total_models": 0, "total_nodes": 0,
-                    "avg_network_load": 0, "total_network_tps": 0,
-                    "timestamp": time.time(),
-                },
-                "models": {},
-            }
-        # Single local node
-        metrics = llm.get_metrics() if llm else {}
-        local_node = _sanitize_node_for_api({
-            "node_id": config.node_id,
-            "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
-            "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
-            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
-            "total_tokens": metrics.get("total_tokens", 0),
-        })
+    if config.no_model_mode:
         return {
             "network_summary": {
-                "total_models": 1, "total_nodes": 1,
-                "avg_network_load": metrics.get("load", 0),
-                "total_network_tps": metrics.get("tps", 0),
+                "total_models": 0, "total_nodes": 0,
+                "avg_network_load": 0, "total_network_tps": 0,
                 "timestamp": time.time(),
             },
-            "models": {
-                config.model_name: {
-                    "node_count": 1,
-                    "avg_load": metrics.get("load", 0),
-                    "total_tps": metrics.get("tps", 0),
-                    "best_node": local_node,
-                    "availability": "low",
-                    "nodes": [local_node],
-                }
-            },
+            "models": {},
         }
 
-    # Build stats from gateway peer list
-    peers = await gateway_client.get_peers()
+    metrics = llm.get_metrics() if llm else {}
+    local_node = _sanitize_node_for_api({
+        "node_id": config.node_id,
+        "model": config.model_name,
+        "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
+        "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
+        "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
+        "total_tokens": metrics.get("total_tokens", 0),
+    })
+
     models_dict: Dict[str, Any] = {}
-    total_load = 0.0
-    total_tps = 0.0
 
-    # Include current node
-    if not config.no_model_mode and llm:
-        metrics = llm.get_metrics()
-        local_node = _sanitize_node_for_api({
-            "node_id": config.node_id,
-            "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
-            "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
-            "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
-            "total_tokens": metrics.get("total_tokens", 0),
-        })
-        models_dict[config.model_name] = {
-            "nodes": [local_node],
-            "total_load": metrics.get("load", 0), "total_tps": metrics.get("tps", 0),
-        }
-        total_load += metrics.get("load", 0)
-        total_tps += metrics.get("tps", 0)
+    # Active model
+    if config.model_name:
+        models_dict[config.model_name] = {"nodes": [local_node]}
 
-    # Compute our own node_hash to exclude self from peers
-    own_node_hash = hashlib.sha256(config.node_id.encode()).hexdigest()[:12]
+    # Pool models
+    if model_pool:
+        for name, slot in model_pool.slots.items():
+            if name == config.model_name:
+                continue
+            slot_metrics = slot.metrics.get_performance_metrics()
+            pool_node = _sanitize_node_for_api({
+                "node_id": config.node_id,
+                "model": name,
+                "load": slot_metrics.get("load", 0), "tps": slot_metrics.get("tps", 0),
+                "uptime": slot_metrics.get("uptime", 0), "last_seen": int(time.time()),
+                "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
+                "total_tokens": slot_metrics.get("total_tokens", 0),
+            })
+            models_dict[name] = {"nodes": [pool_node]}
 
-    for peer in peers:
-        # Skip ourselves — we're already included above
-        if peer.get("node_id") == own_node_hash:
-            continue
-        model = peer.get("model", "unknown")
-        if model not in models_dict:
-            models_dict[model] = {"nodes": [], "total_load": 0, "total_tps": 0}
-        models_dict[model]["nodes"].append(_sanitize_node_for_api(peer))
-        models_dict[model]["total_load"] += peer.get("load", 0)
-        models_dict[model]["total_tps"] += peer.get("tps", 0)
-        total_load += peer.get("load", 0)
-        total_tps += peer.get("tps", 0)
-
-    total_nodes = len(peers) + (0 if config.no_model_mode else 1)
     statistics: Dict[str, Any] = {
         "network_summary": {
-            "total_models": len(models_dict), "total_nodes": total_nodes,
-            "avg_network_load": total_load / total_nodes if total_nodes else 0,
-            "total_network_tps": total_tps, "timestamp": time.time(),
+            "total_models": len(models_dict), "total_nodes": 1,
+            "avg_network_load": metrics.get("load", 0),
+            "total_network_tps": metrics.get("tps", 0),
+            "timestamp": time.time(),
         },
         "models": {},
     }
 
     for model_name, model_data in models_dict.items():
         nodes = model_data["nodes"]
-        node_count = len(nodes)
-        load_values = [n.get("load", 0) for n in nodes]
-        tps_values = [n.get("tps", 0) for n in nodes]
-        best_node = min(nodes, key=lambda n: n.get("load", 1)) if nodes else None
         statistics["models"][model_name] = {
-            "node_count": node_count,
-            "avg_load": sum(load_values) / node_count if node_count else 0,
-            "total_tps": sum(tps_values),
-            "best_node": best_node,
-            "availability": "high" if node_count > 2 else "medium" if node_count > 1 else "low",
+            "node_count": len(nodes),
+            "avg_load": nodes[0].get("load", 0) if nodes else 0,
+            "total_tps": nodes[0].get("tps", 0) if nodes else 0,
+            "best_node": nodes[0] if nodes else None,
+            "availability": "local",
             "nodes": nodes,
         }
 

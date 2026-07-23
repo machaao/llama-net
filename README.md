@@ -94,6 +94,29 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 - **Real-time Network** — SSE-powered live updates for node status, model availability, and metrics
 - **GPU Auto-detect** — NVIDIA, Apple Silicon, CPU fallback
 
+## Multi-Model Pool
+
+LlamaNet supports loading multiple models simultaneously in a pool with automatic LRU (Least Recently Used) eviction. This lets you:
+
+- **Instant model switching** — switch between loaded models without reload time
+- **Memory-aware capacity** — auto-detects how many models fit in your RAM/VRAM
+- **LRU eviction** — when pool is full, the least recently used model is evicted to make room
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_MODELS` | `0` (auto) | Max models in memory (0 = auto-detect from RAM) |
+| `MEMORY_BUDGET_GB` | `0` (auto) | Max RAM for models (0 = auto-detect) |
+
+### How It Works
+
+1. **First model** loads normally on startup (or via Web UI)
+2. **Loading a second model** adds it to the pool (if capacity allows)
+3. **When pool is full**, the least recently used model is evicted
+4. **Switching between pool models** is instant — no reload overlay
+5. **Pool state persists** across restarts via `~/.llamanet/pool_history.json`
+
 ## Recommended Models by Tier
 
 | Tier | Model | Size (Q4_K_M) | Min RAM | Best For |
