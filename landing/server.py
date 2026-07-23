@@ -59,7 +59,6 @@ registry = None
 sse_mgr = None
 rate_limiter = None
 _heartbeat_last_seen_map = {}  # node_hash -> {last_seen, metrics}
-_node_pool_models_map = {}     # node_hash -> [model_name, ...]
 
 
 def _sanitize_node(node: dict) -> dict:
@@ -103,7 +102,6 @@ async def _heartbeat_monitor_loop():
 
                         supabase_mgr.deregister_node(node_hash)
                         _heartbeat_last_seen_map.pop(node_hash, None)
-                        _node_pool_models_map.pop(node_hash, None)
 
                         if sse_mgr:
                             await sse_mgr.broadcast("node_left", {
@@ -246,13 +244,6 @@ async def network_events(request: Request):
             yield f"data: {json.dumps({'type': 'connected', 'connection_id': conn_id})}\n\n"
             models = supabase_mgr.list_active_models()
             stats = supabase_mgr.get_network_stats()
-
-            # Enrich models with pool_models from in-memory cache
-            for model in models:
-                for node in model.get("nodes", []):
-                    nh = node.get("node_hash", "")
-                    if nh in _node_pool_models_map:
-                        node["pool_models"] = _node_pool_models_map[nh]
 
             yield f"data: {json.dumps({'type': 'initial_state', 'models': _sanitize_models(models), 'stats': stats})}\n\n"
 
@@ -410,12 +401,11 @@ async def node_heartbeat(request: Request):
     metrics = body.get("metrics", {})
     node_url = body.get("url", "")
 
-    # Accept pool models from heartbeat payload
+    # Accept pool models from heartbeat payload (persisted to DB via registry.heartbeat)
     pool_models = body.get("models", [])
     if pool_models and len(pool_models) > 0:
         metrics["pool_models"] = pool_models
         metrics["pool_size"] = len(pool_models)
-        _node_pool_models_map[node_hash] = pool_models
 
     # Validate URL before processing
     if node_url:
@@ -525,7 +515,6 @@ async def publish_node(request: Request):
         if len(models_list) > 1:
             reg_metrics["pool_models"] = models_list
             reg_metrics["pool_size"] = len(models_list)
-        _node_pool_models_map[node_hash] = models_list
         system_user_id = "00000000-0000-0000-0000-000000000000"
 
         # Ensure system user exists (foreign key requirement)
@@ -595,7 +584,6 @@ async def unpublish_node(request: Request):
 
         # Clean up in-memory tracking immediately
         _heartbeat_last_seen_map.pop(node_hash, None)
-        _node_pool_models_map.pop(node_hash, None)
 
         # Broadcast SSE departure event
         if sse_mgr:
@@ -661,8 +649,6 @@ async def publish_node_event(request: Request):
             }
 
             event_pool_models = body.get("metrics", {}).get("pool_models", [])
-            if event_pool_models:
-                _node_pool_models_map[node_hash] = event_pool_models
 
             if sse_mgr:
                 await sse_mgr.broadcast("node_joined", {
@@ -675,7 +661,6 @@ async def publish_node_event(request: Request):
         elif event_type == "node_left":
             supabase_mgr.deregister_node(node_hash)
             _heartbeat_last_seen_map.pop(node_hash, None)
-            _node_pool_models_map.pop(node_hash, None)
 
             if sse_mgr:
                 await sse_mgr.broadcast("node_left", {
@@ -723,8 +708,6 @@ async def publish_node_event(request: Request):
             }
 
             event_pool_models = body.get("metrics", {}).get("pool_models", [])
-            if event_pool_models:
-                _node_pool_models_map[node_hash] = event_pool_models
 
             if sse_mgr:
                 await sse_mgr.broadcast("node_updated", {

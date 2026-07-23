@@ -173,8 +173,9 @@ class SupabaseManager:
                 "last_heartbeat": "now()", "status": "active",
             }
 
-            # Note: pool_models are tracked via heartbeat events (in-memory)
-            # and broadcast through SSE. No DB column needed.
+            # Persist pool_models to metrics column for durability across restarts
+            if "pool_models" in metrics:
+                update_data["pool_models"] = metrics["pool_models"]
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
             return len(result.data) > 0
@@ -257,21 +258,13 @@ class SupabaseManager:
 
             if all_nodes:
                 from landing.node_registry import model_name_to_slug
-                import landing.server as _gw
-                mem_pool = getattr(_gw, '_node_pool_models_map', {})
 
                 for node in all_nodes:
                     node_hash = node.get("node_hash", "")
                     node_metrics = node.get("metrics", {}) or {}
 
-                    # Always merge: DB pool_models + in-memory pool map
-                    db_pool = node_metrics.get("pool_models", [])
-                    mem_models = mem_pool.get(node_hash, [])
-                    # Union of both sources, preserving order (memory first — most current)
-                    all_model_names = list(mem_models)
-                    for m in db_pool:
-                        if m not in all_model_names:
-                            all_model_names.append(m)
+                    # Read pool_models from persisted DB metrics column
+                    all_model_names = node_metrics.get("pool_models", [])
 
                     # For every model this node can serve (primary + pool),
                     # ensure an entry exists in `models` and add this node to it.
@@ -358,16 +351,12 @@ class SupabaseManager:
 
             models = set(n["model_slug"] for n in nodes)
 
-            # Also count pool models from in-memory heartbeat cache
-            try:
-                import landing.server as _gw
-                mem_pool = getattr(_gw, '_node_pool_models_map', {})
-                for node_hash, pool_models in mem_pool.items():
-                    for model_name in pool_models:
-                        slug = model_name_to_slug(model_name)
-                        models.add(slug)
-            except Exception:
-                pass
+            # Also count pool models from persisted DB metrics column
+            for n in nodes:
+                node_metrics = n.get("metrics", {}) or {}
+                for model_name in node_metrics.get("pool_models", []):
+                    slug = model_name_to_slug(model_name)
+                    models.add(slug)
 
             active_tokens = sum(n.get("total_tokens", 0) for n in nodes)
             return {

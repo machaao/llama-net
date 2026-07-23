@@ -53,7 +53,6 @@ class ModelRouter:
 
     async def _select_node(self, model_name: str, strategy: str = "load_balanced") -> Optional[Dict[str, Any]]:
         from landing.node_registry import model_name_to_slug
-        from landing.server import _node_pool_models_map  # in-memory pool map
 
         model_slug = model_name_to_slug(model_name)
         nodes = self.db.get_nodes_for_model(model_slug)
@@ -66,12 +65,12 @@ class ModelRouter:
                     break
 
         if not nodes:
-            # Use in-memory pool map (populated by heartbeats/events)
+            # Search persisted pool_models in DB metrics column
             all_active = self.db.search_nodes(status="active", limit=100)
             nodes = []
             for node in all_active:
-                node_hash = node.get("node_hash", "")
-                pool_models = _node_pool_models_map.get(node_hash, [])
+                node_metrics = node.get("metrics", {}) or {}
+                pool_models = node_metrics.get("pool_models", [])
                 pool_slugs = [model_name_to_slug(m) for m in pool_models]
                 if model_slug in pool_slugs:
                     nodes.append(node)
