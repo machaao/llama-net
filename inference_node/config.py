@@ -16,6 +16,7 @@ class InferenceConfig:
     """Configuration for the inference node"""
     
     ACTIVE_MODEL_FILE = os.path.expanduser("~/.llamanet/active_model")
+    POOL_HISTORY_FILE = os.path.expanduser("~/.llamanet/pool_history.json")
     
     def __init__(self, model_path: str = None):
         # Check for 'run' command in sys.argv
@@ -126,6 +127,10 @@ class InferenceConfig:
             self.n_batch = int(load_env_var("N_BATCH", 4096))
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
             self.verbose = bool(load_env_var("VERBOSE", False))
+
+            # Pool configuration
+            self.max_models = int(load_env_var("MAX_MODELS", "0"))
+            self.memory_budget_gb = float(load_env_var("MEMORY_BUDGET_GB", "0"))
         
         # No-model mode support
         self.no_model_mode = False
@@ -315,7 +320,8 @@ class InferenceConfig:
                 "model_path": model_path,
                 "model_name": model_name or os.path.basename(model_path),
                 "selected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "source": "ui"
+                "source": "ui",
+                "max_models": getattr(self, 'max_models', 0),
             }
             os.makedirs(os.path.dirname(self.ACTIVE_MODEL_FILE), exist_ok=True)
             with open(self.ACTIVE_MODEL_FILE, 'w') as f:
@@ -323,3 +329,26 @@ class InferenceConfig:
             logger.info(f"Saved active model: {model_path}")
         except Exception as e:
             logger.error(f"Could not save active model: {e}")
+
+    def load_pool_history(self) -> list:
+        """Load pool history from persistent storage"""
+        try:
+            import json
+            if os.path.exists(self.POOL_HISTORY_FILE):
+                with open(self.POOL_HISTORY_FILE, 'r') as f:
+                    data = json.load(f)
+                    return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.debug(f"Could not load pool history: {e}")
+        return []
+
+    def save_pool_history(self, history: list) -> None:
+        """Save pool history to persistent storage"""
+        try:
+            import json
+            os.makedirs(os.path.dirname(self.POOL_HISTORY_FILE), exist_ok=True)
+            with open(self.POOL_HISTORY_FILE, 'w') as f:
+                json.dump(history, f, indent=2)
+            logger.debug(f"Saved pool history: {len(history)} models")
+        except Exception as e:
+            logger.error(f"Could not save pool history: {e}")
