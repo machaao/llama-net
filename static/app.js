@@ -845,16 +845,16 @@ class LlamaNetUI {
         const newContent = `
             <div class="mb-3">
                 <h6>
-                    <i class="fas fa-server"></i> Network Status
+                    <i class="fas fa-server"></i> Local Node
                     <span class="live-indicator ms-2" title="Real-time updates via SSE">
                         <i class="fas fa-circle text-success live-pulse" style="font-size: 0.5rem;"></i>
                     </span>
                     <small class="text-muted ms-2" id="sse-status">Live</small>
                 </h6>
                 <div class="small mb-2">
-                    <div><i class="fas fa-network-wired"></i> Total Nodes: <span class="metric-value">${totalNodes}</span> (${onlineNodes} online)</div>
-                    <div><i class="fas fa-brain"></i> Models Available: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
-                    <div><i class="fas fa-heartbeat"></i> Network Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
+                    <div><i class="fas fa-server"></i> Node: <span class="metric-value">${nodes.length > 0 ? nodes[0].node_id.substring(0, 8) + '...' : 'N/A'}</span></div>
+                    <div><i class="fas fa-brain"></i> Models Loaded: <span class="metric-value">${this.nodeStats.modelsAvailable.size}</span></div>
+                    <div><i class="fas fa-heartbeat"></i> Health: ${this.getHealthBadge(this.nodeStats.networkHealth)}</div>
                     <div class="text-muted mt-1">
                         <i class="fas fa-clock"></i> Last refresh: ${refreshTime}
                         ${this.isConnected ? '<i class="fas fa-broadcast-tower ms-2 text-success" title="Real-time updates active"></i>' : ''}
@@ -910,9 +910,7 @@ class LlamaNetUI {
                             <i class="fas fa-brain"></i> ${modelName}
                             <span class="badge bg-${availabilityClass} ms-1">${availability}</span>
                         </div>
-                        ${nodes.some(n => n.node_id === this.localNodeId)
-                            ? '<button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel(\'' + modelName + '\')" title="Select this model (local)"><i class="fas fa-check"></i></button>'
-                            : '<span class="badge bg-warning text-dark" title="This model is on a remote node. Requests will be forwarded."><i class="fas fa-globe me-1"></i>Remote</span>'}
+                        <button class="btn btn-sm btn-outline-primary" onclick="llamaNetUI.selectModel('${modelName}')" title="Select this model"><i class="fas fa-check"></i></button>
                     </div>
                     <div class="model-nodes" style="max-height: 150px; overflow-y: auto;">
                         ${this.renderModelNodesRealTime(nodes)}
@@ -1573,7 +1571,7 @@ class LlamaNetUI {
                                 ${lastEventType === 'node_joined' ? '<i class="fas fa-plus-circle text-success ms-1" title="Recently joined"></i>' : ''}
                             </div>
                             <div class="text-muted small">
-                                <div><i class="fas fa-globe"></i> ${this.getNodeAddress(node)}</div>
+                                <div><i class="fas fa-home"></i> local</div>
                                 <div><i class="fas fa-clock"></i> Up: ${node.uptime ? `${Math.floor(node.uptime / 60)}m` : 'Unknown'} | ${lastSeenText}</div>
                                 ${this.renderNodeMetricsBadge(node)}
                                 ${eventAge ? `<div><i class="fas fa-broadcast-tower"></i> Event: ${eventAge}</div>` : ''}
@@ -2605,11 +2603,7 @@ class LlamaNetUI {
     }
     
     getNodeAddress(node) {
-        // URL is no longer exposed to public API — show node ID prefix instead
-        if (node.node_id) {
-            return `node ${node.node_id.substring(0, 8)}...`;
-        }
-        return 'via gateway';
+        return 'local';
     }
     
     // SSE-only real-time updates (no polling)
