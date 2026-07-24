@@ -3,15 +3,196 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LlamaNet — Run AI Models on Your Mac or GPU Rig</title>
+    <title>LlamaNet — Run AI Models on Your Mac or GPU Rig | Free OpenAI-Compatible API</title>
     <meta name="description" content="Turn your Apple Silicon Mac or NVIDIA GPU into a free public AI API. Run Llama, Qwen, Mistral, DeepSeek and hundreds of open-source LLMs. OpenAI-compatible API. No Docker. No cloud GPU bills.">
     <meta name="keywords" content="LLM inference, local AI, Apple Silicon ML, M1 M2 M3 M4 machine learning, GGUF models, llama.cpp, OpenAI compatible API, free AI API, distributed inference, decentralized AI, run AI locally, local LLM, GPU sharing, NVIDIA inference, self-hosted AI, Qwen, Llama, Mistral, DeepSeek, open-source AI">
+    <meta name="robots" content="index, follow">
+    <meta name="author" content="LlamaNet">
+    <link rel="canonical" href="https://llamanet.app/">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="LlamaNet">
     <meta property="og:title" content="LlamaNet — Run AI Models on Your Mac or GPU Rig">
-    <meta property="og:description" content="Turn your Apple Silicon Mac or NVIDIA GPU into a free public AI API in 60 seconds.">
+    <meta property="og:description" content="Turn your Apple Silicon Mac or NVIDIA GPU into a free public AI API in 60 seconds. OpenAI-compatible. No Docker.">
+    <meta property="og:url" content="https://llamanet.app/">
+    <meta property="og:image" content="https://llamanet.app/static/images/screenshot-v2.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="LlamaNet — Distributed AI Inference Network">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="LlamaNet — Run AI Models on Your Mac or GPU Rig">
+    <meta name="twitter:description" content="Turn your Apple Silicon Mac or NVIDIA GPU into a free public AI API in 60 seconds. OpenAI-compatible. No Docker.">
+    <meta name="twitter:image" content="https://llamanet.app/static/images/screenshot-v2.png">
+
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦙</text></svg>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/landing.css">
+
+    <!-- JSON-LD: Organization -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "LlamaNet",
+        "url": "https://llamanet.app",
+        "logo": "https://llamanet.app/static/images/screenshot-v2.png",
+        "description": "Decentralized inference network for open-source LLMs. Turn any Mac or GPU rig into a free public AI API.",
+        "sameAs": ["https://github.com/machaao/llama-net"],
+        "founder": {
+            "@type": "Organization",
+            "name": "MACHAAO"
+        }
+    }
+    </script>
+
+    <!-- JSON-LD: SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "LlamaNet",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "description": "Turn your Mac or GPU rig into a free public AI API. Run any open-source LLM with OpenAI-compatible endpoints.",
+        "url": "https://llamanet.app",
+        "downloadUrl": "https://llamanet.app/install.sh",
+        "softwareVersion": "0.1.0",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "featureList": [
+            "OpenAI-compatible API",
+            "Automatic Cloudflare tunnels",
+            "Multi-model pool with LRU eviction",
+            "Hot-reload models without restart",
+            "Reasoning model support (DeepSeek-R1, Qwen)",
+            "GPU auto-detection (NVIDIA, Apple Silicon, CPU)",
+            "Real-time network dashboard via SSE",
+            "Built-in model manager with Hugging Face search"
+        ]
+    }
+    </script>
+
+    <!-- JSON-LD: FAQPage -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What is LlamaNet?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "LlamaNet is a decentralized AI inference network that lets anyone turn their Mac, GPU rig, or server into a free public AI API. It provides OpenAI-compatible endpoints, automatic Cloudflare tunnels for public URLs, and a built-in model manager to search and download models from Hugging Face."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How do I install LlamaNet?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "On macOS or Linux, run: curl -sSL https://llamanet.app/install.sh | sh. On Windows, run: irm https://llamanet.app/install.ps1 | iex. Then start with: llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M. The installer handles Python, dependencies, and creates CLI shortcuts automatically."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What hardware do I need to run LlamaNet?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Any Mac with 8GB+ RAM works (M1, M2, M3, M4 with Metal GPU acceleration). Any NVIDIA GPU with 8GB+ VRAM works on Linux or Windows. CPU-only mode is also supported for smaller models. Apple Silicon gets automatic Metal acceleration with no driver setup needed."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is LlamaNet free to use?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes, LlamaNet is free and open source under the Apache 2.0 license. GPU owners contribute compute, and API consumers get free API keys at llamanet.app. There are no cloud GPU bills or subscription fees."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What AI models does LlamaNet support?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Any GGUF format model from Hugging Face is supported, including Llama, Qwen, Mistral, DeepSeek, Gemma, Phi, and hundreds more. The built-in Model Manager lets you search, download, and hot-swap models without restarting your node. Multi-model pool mode lets you load several models simultaneously."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How is LlamaNet different from Ollama or vLLM?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "LlamaNet is a distributed network, not a local-only tool. It automatically provisions Cloudflare tunnels for public URLs, registers nodes at a central gateway for routing, and lets API consumers use any node via OpenAI-compatible endpoints. Ollama runs locally; vLLM is a high-throughput serving engine. LlamaNet connects many independent nodes into one public API."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How does LlamaNet handle networking and NAT traversal?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Every LlamaNet node automatically creates a Cloudflare tunnel that provides a public HTTPS URL. No port forwarding, no Docker, no Kubernetes. The gateway at llamanet.app tracks all nodes and routes requests to the best available one based on load, latency, and model availability."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can I use LlamaNet commercially?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. LlamaNet is licensed under Apache 2.0, which permits commercial use. You can run nodes, consume the API, and build applications on top of it. Individual model licenses may have their own terms set by their creators on Hugging Face."
+                }
+            }
+        ]
+    }
+    </script>
+
+    <!-- JSON-LD: HowTo -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        "name": "How to Set Up a LlamaNet AI Inference Node",
+        "description": "Set up your own AI inference node in under 60 seconds",
+        "totalTime": "PT1M",
+        "tool": [
+            {"@type": "HowToTool", "name": "Computer with 8GB+ RAM or NVIDIA GPU"},
+            {"@type": "HowToTool", "name": "Python 3.9+"}
+        ],
+        "step": [
+            {
+                "@type": "HowToStep",
+                "position": 1,
+                "name": "Install LlamaNet",
+                "text": "Run the one-line installer: curl -sSL https://llamanet.app/install.sh | sh (macOS/Linux) or irm https://llamanet.app/install.ps1 | iex (Windows)."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 2,
+                "name": "Download a Model",
+                "text": "Open the Web UI at http://localhost:8000 and use the Model Manager to search and download a GGUF model from Hugging Face."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 3,
+                "name": "Get an API Key",
+                "text": "Sign in with Google at https://llamanet.app to get a free API key."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 4,
+                "name": "Use the API",
+                "text": "Use the OpenAI-compatible API with any client library pointing to https://llamanet.app/v1 as the base URL."
+            }
+        ]
+    }
+    </script>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -42,7 +223,7 @@
             </div>
         </div>
     </section>
-    <section class="download-section py-4">
+    <section id="install" class="download-section py-4">
         <div class="container">
             <div class="row justify-content-center g-3">
                 <div class="col-md-5">
@@ -130,9 +311,9 @@
             </div>
         </div>
     </section>
-    <section class="py-5">
+    <section id="quick-start" class="py-5">
         <div class="container">
-            <h2 class="text-center mb-4">Quick Start</h2>
+            <h2 class="text-center mb-4">Quick Start — OpenAI-Compatible API</h2>
             <div class="row justify-content-center">
                 <div class="col-md-8">
                     <div class="code-block mb-3">
@@ -165,7 +346,7 @@ for chunk in response:
             </div>
         </div>
     </section>
-    <section class="py-5 bg-light">
+    <section id="features" class="py-5 bg-light">
         <div class="container">
             <h2 class="text-center mb-5">Features</h2>
             <div class="row g-4">
@@ -388,6 +569,91 @@ start-app.bat --tunnel --bootstrap-peers https://llamanet.app</code></pre>
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section id="faq" class="py-5">
+        <div class="container">
+            <h2 class="text-center mb-2">Frequently Asked Questions</h2>
+            <p class="text-center text-muted mb-5">Everything you need to know about LlamaNet.</p>
+            <div class="row justify-content-center">
+                <div class="col-md-8">
+
+                    <details>
+                        <summary>What is LlamaNet?</summary>
+                        <div class="faq-answer">
+                            LlamaNet is a decentralized AI inference network that lets anyone turn their Mac, GPU rig, or server into a free public AI API. It provides OpenAI-compatible endpoints, automatic Cloudflare tunnels for public URLs, and a built-in model manager to search and download models from Hugging Face. GPU owners share compute; API consumers use the network with standard OpenAI client libraries.
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>How do I install LlamaNet?</summary>
+                        <div class="faq-answer">
+                            <p><strong>macOS / Linux:</strong></p>
+                            <pre><code>curl -sSL https://llamanet.app/install.sh | sh</code></pre>
+                            <p><strong>Windows:</strong></p>
+                            <pre><code>irm https://llamanet.app/install.ps1 | iex</code></pre>
+                            <p>Then start a node with a model:</p>
+                            <pre><code>llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M</code></pre>
+                            <p>The installer handles Python, dependencies, virtual environment, CLI shortcuts, and Desktop shortcuts automatically.</p>
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>What hardware do I need?</summary>
+                        <div class="faq-answer">
+                            <ul>
+                                <li><strong>Apple Silicon (M1/M2/M3/M4):</strong> 8GB+ RAM. Metal GPU acceleration is automatic — no drivers needed.</li>
+                                <li><strong>NVIDIA GPU:</strong> 8GB+ VRAM (RTX 3070, 4060, 3090, 4090, etc.). Install CUDA drivers first.</li>
+                                <li><strong>CPU only:</strong> Any modern CPU works with smaller models (Phi-4 Mini, Qwen 1.5B). Set <code>N_GPU_LAYERS=0</code>.</li>
+                            </ul>
+                            Larger RAM/VRAM lets you run larger, higher-quality models. See the <a href="#models">Recommended Models</a> table above.
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>Is LlamaNet free?</summary>
+                        <div class="faq-answer">
+                            Yes. LlamaNet is free and open source under the Apache 2.0 license. GPU owners contribute compute from their own hardware. API consumers get free API keys at <a href="https://llamanet.app">llamanet.app</a>. There are no cloud GPU bills, no subscription fees, and no usage limits beyond rate limiting to prevent abuse.
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>What models does LlamaNet support?</summary>
+                        <div class="faq-answer">
+                            Any GGUF format model from Hugging Face is supported, including Llama, Qwen, Mistral, DeepSeek, Gemma, Phi, and hundreds more. The built-in Model Manager lets you search Hugging Face, download with real-time progress, and hot-swap models without restarting your node. Multi-model pool mode lets you load several models simultaneously with LRU eviction.
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>How is LlamaNet different from Ollama or vLLM?</summary>
+                        <div class="faq-answer">
+                            <ul>
+                                <li><strong>LlamaNet</strong> is a distributed network. It connects independent nodes into one public API with automatic tunneling, gateway routing, and load balancing.</li>
+                                <li><strong>Ollama</strong> runs models locally on your machine. Great for personal use, but others cannot access your models remotely.</li>
+                                <li><strong>vLLM</strong> is a high-throughput serving engine designed for production deployments on dedicated GPU servers.</li>
+                            </ul>
+                            LlamaNet is for people who want to share their GPU with the world or consume a community-powered AI API — without managing infrastructure.
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>How does networking and NAT traversal work?</summary>
+                        <div class="faq-answer">
+                            Every LlamaNet node automatically creates a Cloudflare tunnel that provides a public HTTPS URL. No port forwarding, no Docker, no Kubernetes, no router configuration. The gateway at llamanet.app tracks all nodes and routes API requests to the best available node based on load, latency, and model availability. Quick tunnels work without a Cloudflare account; named tunnels give you a persistent URL.
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>Can I use LlamaNet commercially?</summary>
+                        <div class="faq-answer">
+                            Yes. LlamaNet is licensed under Apache 2.0, which permits commercial use. You can run nodes, consume the API, and build applications on top of it. Individual model licenses are set by their creators on Hugging Face — check each model's license card before commercial use.
+                        </div>
+                    </details>
+
                 </div>
             </div>
         </div>

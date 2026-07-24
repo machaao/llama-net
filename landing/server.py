@@ -355,6 +355,30 @@ async def uninstall_windows():
     return JSONResponse(status_code=404, content={"error": "Uninstaller not found"})
 
 
+@app.get("/robots.txt")
+async def robots():
+    """Serve robots.txt for crawlers"""
+    path = os.path.join(static_dir, "robots.txt")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/plain")
+    return JSONResponse(
+        status_code=404,
+        content={"error": "Not found"},
+    )
+
+
+@app.get("/sitemap.xml")
+async def sitemap():
+    """Serve sitemap for search engines"""
+    path = os.path.join(static_dir, "sitemap.xml")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="application/xml")
+    return JSONResponse(
+        status_code=404,
+        content={"error": "Not found"},
+    )
+
+
 @app.get("/auth/google")
 async def auth_google(request: Request):
     from urllib.parse import quote

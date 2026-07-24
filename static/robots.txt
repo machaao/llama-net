@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /auth/
+Disallow: /dashboard
+Disallow: /api/
+
+Sitemap: https://llamanet.app/sitemap.xml

@@ -37,6 +37,84 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:var(--text)}
 @media(max-width:768px){.hero-section{padding:3rem 0}.hero-section .display-4{font-size:2rem}.stat-value{font-size:1.5rem}.model-card .model-stats{gap:.5rem}}
 
 /* ═══════════════════════════════════════════════════════ */
+/* FAQ SECTION                                             */
+/* ═══════════════════════════════════════════════════════ */
+
+#faq details {
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    margin-bottom: 0.75rem;
+    background: #fff;
+    transition: box-shadow 0.2s ease;
+}
+
+#faq details:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+#faq summary {
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--text);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#faq summary::-webkit-details-marker {
+    display: none;
+}
+
+#faq summary::after {
+    content: '\f107';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    color: var(--muted);
+    transition: transform 0.2s ease;
+}
+
+#faq details[open] summary::after {
+    transform: rotate(180deg);
+}
+
+#faq details[open] summary {
+    border-bottom: 1px solid #dee2e6;
+    color: var(--primary);
+}
+
+#faq .faq-answer {
+    padding: 1rem 1.25rem;
+    line-height: 1.7;
+    color: #495057;
+}
+
+#faq .faq-answer p:last-child {
+    margin-bottom: 0;
+}
+
+#faq .faq-answer pre {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    font-size: 0.82rem;
+    overflow-x: auto;
+}
+
+#faq .faq-answer code {
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+}
+
+#faq .faq-answer pre code {
+    background-color: transparent;
+    padding: 0;
+    color: inherit;
+}
+
+/* ═══════════════════════════════════════════════════════ */
 /* DOWNLOAD SECTION                                       */
 /* ═══════════════════════════════════════════════════════ */
 
