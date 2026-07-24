@@ -77,3 +77,17 @@ SELECT '00000000-0000-0000-0000-000000000000', 'system@llamanet.app', 'LlamaNet 
 WHERE NOT EXISTS (
     SELECT 1 FROM users WHERE id = '00000000-0000-0000-0000-000000000000'
 );
+
+-- 6. Add per-node bearer token column
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_token TEXT;
+
+-- 7. Token usage tracking (per-API-key daily budgets)
+CREATE TABLE IF NOT EXISTS token_usage (
+    key_hash TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    tokens_consumed INTEGER NOT NULL DEFAULT 0,
+    requests_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (key_hash, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_usage_key_date ON token_usage(key_hash, date);

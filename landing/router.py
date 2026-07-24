@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import os
 import time
 import aiohttp
 from typing import Dict, Any, Optional, List
@@ -9,40 +11,226 @@ from common.utils import get_logger
 
 logger = get_logger(__name__)
 
+# Model size tiers for cost estimation (parameter count → multiplier)
+_MODEL_SIZE_TIERS = [
+    ("35b", 8), ("32b", 8), ("30b", 8), ("27b", 8), ("24b", 8), ("20b", 6),
+    ("14b", 4), ("13b", 4), ("12b", 4), ("11b", 4),
+    ("8b", 2), ("7b", 2), ("6b", 2),
+    ("3b", 1), ("2b", 1), ("1b", 1), ("0.5b", 1),
+]
+
+
+def _estimate_cost_multiplier(model_name: str) -> int:
+    """Estimate relative compute cost from model name."""
+    name_lower = model_name.lower()
+    for pattern, multiplier in _MODEL_SIZE_TIERS:
+        if pattern in name_lower:
+            return multiplier
+    return 2
+
+
+def _estimate_request_cost(max_tokens: int, model_name: str) -> float:
+    """Estimate compute units for a request."""
+    multiplier = _estimate_cost_multiplier(model_name)
+    return (max_tokens / 100.0) * multiplier
+
 
 class ModelRouter:
-    def __init__(self, supabase_manager):
+    def __init__(self, supabase_manager, node_token_manager=None):
         self.db = supabase_manager
+        self._node_token_manager = node_token_manager
         self._rr_index = {}
+        # Per-key in-flight request tracking for fairness
+        self._key_inflight: Dict[str, int] = {}
+        self._max_per_key_concurrent = int(
+            os.environ.get("LLAMANET_MAX_KEY_CONCURRENT", "3")
+        )
+        self._hourly_compute_budget = float(
+            os.environ.get("LLAMANET_HOURLY_COMPUTE_BUDGET", "10000")
+        )
+        # Per-key hourly compute tracking
+        self._key_hourly_compute: Dict[str, Dict[str, float]] = {}
+        self._lock = asyncio.Lock()
+
+    # ── Budget & Fairness Checks ─────────────────────────────────
+
+    async def check_token_budget(self, auth_key: str) -> Optional[JSONResponse]:
+        """Check if the API key has exceeded its daily token budget."""
+        if not auth_key:
+            return None
+        key_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+        usage = self.db.get_token_usage(key_hash)
+        budget = self.db.get_daily_token_budget()
+        consumed = usage.get("tokens_consumed", 0)
+        if consumed >= budget:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "message": f"Daily token budget exceeded ({consumed:,}/{budget:,} tokens used). Resets at midnight UTC.",
+                        "type": "token_budget_exceeded",
+                        "tokens_used": consumed,
+                        "tokens_budget": budget,
+                    }
+                },
+                headers={"X-Token-Remaining": "0", "X-Token-Budget": str(budget)},
+            )
+        return None
+
+    async def check_compute_budget(self, auth_key: str, estimated_cost: float) -> Optional[JSONResponse]:
+        """Check if the API key has exceeded its hourly compute budget."""
+        if not auth_key:
+            return None
+        key_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+        current_hour = int(time.time()) // 3600
+
+        async with self._lock:
+            entry = self._key_hourly_compute.get(key_hash, {"hour": 0, "used": 0.0})
+            if entry["hour"] != current_hour:
+                entry = {"hour": current_hour, "used": 0.0}
+            if entry["used"] + estimated_cost > self._hourly_compute_budget:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": {
+                            "message": "Hourly compute budget exceeded. Try smaller requests or wait.",
+                            "type": "compute_budget_exceeded",
+                            "compute_used": round(entry["used"], 1),
+                            "compute_budget": self._hourly_compute_budget,
+                        }
+                    },
+                )
+        return None
+
+    async def _acquire_key_slot(self, auth_key: str) -> Optional[JSONResponse]:
+        """Enforce per-key concurrency limit."""
+        if not auth_key:
+            return None
+        key_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+        async with self._lock:
+            current = self._key_inflight.get(key_hash, 0)
+            if current >= self._max_per_key_concurrent:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": {
+                            "message": f"Maximum {self._max_per_key_concurrent} concurrent requests per API key.",
+                            "type": "concurrent_limit",
+                        }
+                    },
+                )
+            self._key_inflight[key_hash] = current + 1
+        return None
+
+    async def _release_key_slot(self, auth_key: str):
+        """Release a concurrency slot after request completes."""
+        if not auth_key:
+            return
+        key_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+        async with self._lock:
+            current = self._key_inflight.get(key_hash, 0)
+            self._key_inflight[key_hash] = max(0, current - 1)
+
+    async def _record_compute_usage(self, auth_key: str, cost: float):
+        """Record compute usage for an API key."""
+        if not auth_key:
+            return
+        key_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+        current_hour = int(time.time()) // 3600
+        async with self._lock:
+            entry = self._key_hourly_compute.get(key_hash, {"hour": 0, "used": 0.0})
+            if entry["hour"] != current_hour:
+                entry = {"hour": current_hour, "used": 0.0}
+            entry["used"] += cost
+            self._key_hourly_compute[key_hash] = entry
+
+    def _get_auth_key(self, request: Request) -> Optional[str]:
+        """Extract the API key from the request."""
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:]
+        return None
+
+    # ── Routing ──────────────────────────────────────────────────
 
     async def route_chat_completion(self, request: Request, user_id: str):
         try:
             body = await request.json()
         except Exception:
             return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON body"}})
+
         model_name = body.get("model", "")
         strategy = body.pop("strategy", "load_balanced")
         stream = body.get("stream", False)
-        node = await self._select_node(model_name, strategy)
-        if not node:
-            return JSONResponse(status_code=503, content={"error": {"message": f"No nodes available for model '{model_name}'", "type": "server_error", "code": "no_nodes_available"}})
-        logger.info(f"Routing chat completion for '{model_name}' to {node['node_hash'][:8]}...")
-        url = f"{node['url'].rstrip('/')}/v1/chat/completions"
-        return await self._forward_request(url, body, stream, node)
+        max_tokens = body.get("max_tokens", 100)
+        auth_key = self._get_auth_key(request)
+
+        concurrency_err = await self._acquire_key_slot(auth_key)
+        if concurrency_err:
+            return concurrency_err
+
+        try:
+            budget_err = await self.check_token_budget(auth_key)
+            if budget_err:
+                return budget_err
+
+            estimated_cost = _estimate_request_cost(max_tokens, model_name)
+            compute_err = await self.check_compute_budget(auth_key, estimated_cost)
+            if compute_err:
+                return compute_err
+
+            node = await self._select_node(model_name, strategy)
+            if not node:
+                return JSONResponse(status_code=503, content={
+                    "error": {"message": f"No nodes available for model '{model_name}'", "type": "server_error", "code": "no_nodes_available"}
+                })
+
+            logger.info(f"Routing chat completion for '{model_name}' to {node['node_hash'][:8]}...")
+            url = f"{node['url'].rstrip('/')}/v1/chat/completions"
+            response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost)
+            await self._record_compute_usage(auth_key, estimated_cost)
+            return response
+        finally:
+            await self._release_key_slot(auth_key)
 
     async def route_completion(self, request: Request, user_id: str):
         try:
             body = await request.json()
         except Exception:
             return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON body"}})
+
         model_name = body.get("model", "")
         strategy = body.pop("strategy", "load_balanced")
         stream = body.get("stream", False)
-        node = await self._select_node(model_name, strategy)
-        if not node:
-            return JSONResponse(status_code=503, content={"error": {"message": f"No nodes available for model '{model_name}'"}})
-        url = f"{node['url'].rstrip('/')}/v1/completions"
-        return await self._forward_request(url, body, stream, node)
+        max_tokens = body.get("max_tokens", 100)
+        auth_key = self._get_auth_key(request)
+
+        concurrency_err = await self._acquire_key_slot(auth_key)
+        if concurrency_err:
+            return concurrency_err
+
+        try:
+            budget_err = await self.check_token_budget(auth_key)
+            if budget_err:
+                return budget_err
+
+            estimated_cost = _estimate_request_cost(max_tokens, model_name)
+            compute_err = await self.check_compute_budget(auth_key, estimated_cost)
+            if compute_err:
+                return compute_err
+
+            node = await self._select_node(model_name, strategy)
+            if not node:
+                return JSONResponse(status_code=503, content={
+                    "error": {"message": f"No nodes available for model '{model_name}'"}
+                })
+
+            url = f"{node['url'].rstrip('/')}/v1/completions"
+            response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost)
+            await self._record_compute_usage(auth_key, estimated_cost)
+            return response
+        finally:
+            await self._release_key_slot(auth_key)
 
     async def list_models(self) -> Dict[str, Any]:
         models = self.db.list_active_models()
@@ -67,7 +255,6 @@ class ModelRouter:
         nodes = self.db.get_nodes_for_model(model_slug)
 
         if not nodes:
-            # Search pool_models in persisted DB metrics column (O(n) scan)
             all_active = self.db.search_nodes(status="active", limit=100)
             for node in all_active:
                 node_metrics = node.get("metrics", {}) or {}
@@ -77,7 +264,6 @@ class ModelRouter:
                     nodes.append(node)
 
         if not nodes:
-            # Last resort: fuzzy match via list_active_models
             all_models = self.db.list_active_models()
             for m in all_models:
                 if model_slug in m["model_slug"] or m["model_slug"] in model_slug:
@@ -95,9 +281,17 @@ class ModelRouter:
             return random.choice(nodes)
         return min(nodes, key=lambda n: n.get("load", 1))
 
-    async def _forward_request(self, url: str, body: Dict, stream: bool, node: Dict[str, Any]):
+    async def _forward_request(self, url: str, body: Dict, stream: bool, node: Dict[str, Any], auth_key: str = "", estimated_cost: float = 0.0):
         headers = {"Content-Type": "application/json"}
         extra_headers = {"X-LLamaNet-Node": node["node_hash"], "X-LLamaNet-Model": node["model_name"]}
+
+        # ── Per-node bearer token for gateway→node auth ──
+        node_hash = node.get("node_hash", "")
+        if self._node_token_manager:
+            node_token = self._node_token_manager.get_token(node_hash)
+            if node_token:
+                headers["Authorization"] = f"Bearer {node_token}"
+
         try:
             timeout = aiohttp.ClientTimeout(total=120, connect=10)
             session = aiohttp.ClientSession(timeout=timeout)
@@ -105,15 +299,25 @@ class ModelRouter:
             if resp.status != 200:
                 error_text = await resp.text()
                 await session.close()
-                return JSONResponse(status_code=resp.status, content={"error": {"message": f"Node error: {error_text}", "type": "upstream_error"}}, headers=extra_headers)
+                return JSONResponse(status_code=resp.status, content={
+                    "error": {"message": f"Node error: {error_text}", "type": "upstream_error"}
+                }, headers=extra_headers)
             if stream:
                 return StreamingResponse(
-                    self._stream_response(resp, session), media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no", **extra_headers},
+                    self._stream_response(resp, session, auth_key),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Content-Type": "text/event-stream; charset=utf-8",
+                        "X-Accel-Buffering": "no",
+                        **extra_headers,
+                    },
                 )
             else:
                 data = await resp.json()
                 await session.close()
+                await self._track_response_tokens(auth_key, data)
                 if "node_info" not in data:
                     data["node_info"] = {"node_id": node["node_hash"], "model": node["model_name"], "processing_node": "routed"}
                 return JSONResponse(content=data, headers=extra_headers)
@@ -123,7 +327,6 @@ class ModelRouter:
         except (aiohttp.ClientConnectionError, OSError) as e:
             node_hash = node.get("node_hash", "")
             logger.warning(f"Node {node_hash[:8]} unreachable: {e}")
-            # Mark node stale immediately so next request routes elsewhere
             try:
                 self.db.deregister_node(node_hash)
             except Exception:
@@ -133,12 +336,39 @@ class ModelRouter:
             logger.error(f"Error forwarding request: {e}")
             return JSONResponse(status_code=502, content={"error": {"message": f"Failed to reach node: {str(e)}", "type": "bad_gateway"}})
 
-    async def _stream_response(self, resp, session):
+    async def _stream_response(self, resp, session, auth_key: str = ""):
+        """Stream response chunks and track token usage from final chunk."""
+        final_data = None
         try:
             async for chunk in resp.content.iter_any():
+                chunk_str = chunk.decode("utf-8", errors="replace")
+                for line in chunk_str.split("\n"):
+                    line = line.strip()
+                    if line.startswith("data: ") and line != "data: [DONE]":
+                        try:
+                            parsed = json.loads(line[6:])
+                            if parsed.get("usage"):
+                                final_data = parsed
+                        except (json.JSONDecodeError, ValueError):
+                            pass
                 yield chunk
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
             await session.close()
+            if final_data and auth_key:
+                await self._track_response_tokens(auth_key, final_data)
+
+    async def _track_response_tokens(self, auth_key: str, data: dict):
+        """Extract token usage from a response and record it."""
+        if not auth_key:
+            return
+        try:
+            usage = data.get("usage", {})
+            total_tokens = usage.get("total_tokens", 0)
+            if total_tokens > 0:
+                key_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+                self.db.record_token_usage(key_hash, total_tokens)
+        except Exception as e:
+            logger.debug(f"Token tracking error: {e}")

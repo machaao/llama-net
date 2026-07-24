@@ -99,6 +99,18 @@ class GatewayClient:
                 ) as resp:
                     if resp.status == 200:
                         self.registered = True
+
+                        # ── Store per-node bearer token from gateway ──
+                        try:
+                            resp_data = await resp.json()
+                            node_token = resp_data.get("node_token", "")
+                            if node_token:
+                                from common.gateway_auth import set_node_token
+                                set_node_token(node_token)
+                                logger.info("🔑 Node bearer token received from gateway")
+                        except Exception:
+                            logger.debug("No bearer token in registration response")
+
                         logger.info(f"✅ Registered with gateway: {self.gateway_url}")
                         return True
                     else:

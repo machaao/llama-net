@@ -1,6 +1,6 @@
 class DashboardApp {
     constructor() { this.baseUrl = window.location.origin; this.user = null; this.init(); }
-    async init() { await this.checkAuth(); await this.loadApiKeys(); await this.loadMyNodes(); await this.loadLiveModels(); }
+    async init() { await this.checkAuth(); await this.loadApiKeys(); await this.loadMyNodes(); await this.loadLiveModels(); await this.loadTokenUsage(); }
     async checkAuth() {
         try {
             const resp = await fetch(`${this.baseUrl}/auth/me`, { credentials: 'include' });
@@ -29,13 +29,24 @@ class DashboardApp {
         if (keyBanner) preHtml += keyBanner.outerHTML;
 
         if (!keys.length) { container.innerHTML = preHtml + '<div class="text-center text-muted py-3"><p>No API keys yet. Create one to get started!</p></div>'; return; }
-        container.innerHTML = preHtml + keys.map(key => `<div class="d-flex justify-content-between align-items-center p-2 border-bottom">
-            <div><code class="me-2">${this.escapeHtml(key.key_prefix)}</code><span class="text-muted small">${this.escapeHtml(key.name || 'default')}</span></div>
+        container.innerHTML = preHtml + keys.map(key => `<div class="d-flex justify-content-between align-items-start p-2 border-bottom">
+            <div class="flex-grow-1">
+                <div class="d-flex align-items-center">
+                    <code class="me-2">${this.escapeHtml(key.key_prefix)}</code>
+                    <span class="text-muted small">${this.escapeHtml(key.name || 'default')}</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 mt-1">
+                    ${key.last_used ? `<span class="text-muted small">Last used: ${new Date(key.last_used).toLocaleDateString()}</span>` : '<span class="text-muted small">Never used</span>'}
+                    <span class="badge ${key.is_active ? 'bg-success' : 'bg-secondary'}">${key.is_active ? 'Active' : 'Revoked'}</span>
+                </div>
+                <div id="token-usage-${key.id}"></div>
+            </div>
             <div class="d-flex align-items-center gap-2">
-                ${key.last_used ? `<span class="text-muted small">Last used: ${new Date(key.last_used).toLocaleDateString()}</span>` : '<span class="text-muted small">Never used</span>'}
-                <span class="badge ${key.is_active ? 'bg-success' : 'bg-secondary'}">${key.is_active ? 'Active' : 'Revoked'}</span>
                 ${key.is_active ? `<button class="btn btn-sm btn-outline-danger" data-revoke-key="${key.id}" onclick="dashApp.revokeApiKey('${key.id}')"><i class="fas fa-times"></i></button>` : ''}
             </div></div>`).join('');
+
+        // Load token usage for each active key
+        this.loadTokenUsage();
     }
     async createApiKey() {
         const container = document.getElementById('api-keys-list');
@@ -171,6 +182,50 @@ class DashboardApp {
             document.getElementById('live-models-loading').innerHTML = '<span class="text-muted">Could not load models</span>';
         }
     }
+    async loadTokenUsage() {
+        try {
+            const resp = await fetch(`${this.baseUrl}/auth/token-usage`, { credentials: 'include' });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            this.renderTokenUsage(data.keys || [], data.budget || 500000);
+        } catch (e) {
+            console.debug('Token usage not available:', e);
+        }
+    }
+
+    renderTokenUsage(keys, budget) {
+        keys.forEach(keyUsage => {
+            const container = document.getElementById(`token-usage-${keyUsage.key_id}`);
+            if (!container) return;
+
+            const percent = keyUsage.percent || 0;
+            const consumed = keyUsage.tokens_consumed || 0;
+            const requests = keyUsage.requests_count || 0;
+            const barClass = percent >= 100 ? 'exceeded' : percent >= 80 ? 'warning' : 'safe';
+            const textClass = percent >= 100 ? 'exceeded' : percent >= 80 ? 'warning' : '';
+
+            let html = '<div class="token-budget-bar">';
+            html += `<div class="token-budget-fill ${barClass}" style="width: ${Math.min(percent, 100)}%"></div>`;
+            html += '</div>';
+
+            if (percent >= 100) {
+                html += `<div class="token-usage-text exceeded">`;
+                html += `<i class="fas fa-ban"></i> ${consumed.toLocaleString()} / ${budget.toLocaleString()} tokens — BUDGET EXCEEDED`;
+                html += `</div>`;
+            } else if (percent >= 80) {
+                html += `<div class="token-usage-text warning">`;
+                html += `<i class="fas fa-exclamation-triangle"></i> ${consumed.toLocaleString()} / ${budget.toLocaleString()} tokens (${percent}%) · ${requests.toLocaleString()} requests`;
+                html += `</div>`;
+            } else {
+                html += `<div class="token-usage-text">`;
+                html += `<i class="fas fa-chart-bar"></i> ${consumed.toLocaleString()} / ${budget.toLocaleString()} tokens (${percent}%) · ${requests.toLocaleString()} requests`;
+                html += `</div>`;
+            }
+
+            container.innerHTML = html;
+        });
+    }
+
     updateLiveModelInfo() {
         const select = document.getElementById('live-model-select');
         const info = document.getElementById('live-model-info');

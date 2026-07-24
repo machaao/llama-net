@@ -17,6 +17,7 @@ from landing.supabase_client import SupabaseManager
 from landing.auth import AuthManager
 from landing.node_registry import NodeRegistry, CloudflareClient, model_name_to_slug
 from landing.router import ModelRouter
+from common.gateway_auth import NodeTokenManager
 from common.quality_gate import NodeQualityGate
 
 logger = get_logger(__name__)
@@ -60,6 +61,7 @@ registry = None
 sse_mgr = None
 rate_limiter = None
 quality_gate = None
+node_token_manager = None
 
 
 def _sanitize_node(node: dict) -> dict:
@@ -145,7 +147,8 @@ async def lifespan(app: FastAPI):
         auth_mgr = AuthManager(supabase_mgr)
         cf_client = CloudflareClient()
         registry = NodeRegistry(supabase_mgr, cf_client)
-        router = ModelRouter(supabase_mgr)
+        node_token_manager = NodeTokenManager(supabase_mgr)
+        router = ModelRouter(supabase_mgr, node_token_manager)
         sse_mgr = GatewaySSEManager()
         rate_limiter = RateLimiter(
             key_rpm=60, key_rph=1000, key_concurrent=5,
@@ -685,6 +688,9 @@ async def publish_node(request: Request):
                 "tps": probe_metrics.get("tps", 0),
             })
 
+        # ── Issue per-node bearer token ──
+        node_token = node_token_manager.generate_token(node_hash)
+
         # Broadcast SSE event
         if sse_mgr:
             event_type = "node_joined" if is_new else "node_updated"
@@ -701,7 +707,7 @@ async def publish_node(request: Request):
             })
 
         logger.info(f"{'Published' if is_new else 'Updated'} node {node_hash} model={model_name}")
-        return {"success": True, "node_hash": node_hash}
+        return {"success": True, "node_hash": node_hash, "node_token": node_token}
     except Exception as e:
         logger.error(f"Error in publish_node: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -719,6 +725,9 @@ async def unpublish_node(request: Request):
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
         model_name = body.get("model", "unknown")
+
+        # Revoke per-node bearer token
+        node_token_manager.revoke_token(node_hash)
 
         # Mark node as inactive in Supabase
         supabase_mgr.deregister_node(node_hash)
@@ -1056,6 +1065,24 @@ async def openai_chat_completions(request: Request):
         raise
     except Exception:
         return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON body"}})
+
+    # ── Token budget pre-check ──
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer ") and auth_header[7:].startswith("ln-"):
+        key_hash = hashlib.sha256(auth_header[7:].encode()).hexdigest()
+        usage = supabase_mgr.get_token_usage(key_hash)
+        budget = supabase_mgr.get_daily_token_budget()
+        if usage.get("tokens_consumed", 0) >= budget:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "message": f"Daily token budget exceeded ({usage['tokens_consumed']:,}/{budget:,} tokens). Resets at midnight UTC.",
+                        "type": "token_budget_exceeded",
+                    }
+                },
+            )
+
     return await router.route_chat_completion(request, user["id"])
 
 
@@ -1077,7 +1104,83 @@ async def openai_completions(request: Request):
         raise
     except Exception:
         return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON body"}})
+
+    # ── Token budget pre-check ──
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer ") and auth_header[7:].startswith("ln-"):
+        key_hash = hashlib.sha256(auth_header[7:].encode()).hexdigest()
+        usage = supabase_mgr.get_token_usage(key_hash)
+        budget = supabase_mgr.get_daily_token_budget()
+        if usage.get("tokens_consumed", 0) >= budget:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "message": f"Daily token budget exceeded ({usage['tokens_consumed']:,}/{budget:,} tokens). Resets at midnight UTC.",
+                        "type": "token_budget_exceeded",
+                    }
+                },
+            )
+
     return await router.route_completion(request, user["id"])
+
+
+@app.get("/auth/token-usage")
+async def get_token_usage(request: Request):
+    """Get today's token usage for the authenticated user's API keys."""
+    user = await auth_mgr.get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    keys = supabase_mgr.list_api_keys(user["id"])
+    budget = supabase_mgr.get_daily_token_budget()
+    usage_data = []
+
+    for key in keys:
+        try:
+            result = supabase_mgr.client.table("api_keys").select("key_hash").eq(
+                "id", key["id"]
+            ).execute()
+            if result.data:
+                actual_hash = result.data[0]["key_hash"]
+                usage = supabase_mgr.get_token_usage(actual_hash)
+                usage_data.append({
+                    "key_id": key["id"],
+                    "key_prefix": key.get("key_prefix", ""),
+                    "name": key.get("name", "default"),
+                    "is_active": key.get("is_active", False),
+                    "tokens_consumed": usage.get("tokens_consumed", 0),
+                    "requests_count": usage.get("requests_count", 0),
+                    "budget": budget,
+                    "percent": round(
+                        (usage.get("tokens_consumed", 0) / budget * 100) if budget > 0 else 0, 1
+                    ),
+                })
+            else:
+                usage_data.append({
+                    "key_id": key["id"],
+                    "key_prefix": key.get("key_prefix", ""),
+                    "name": key.get("name", "default"),
+                    "is_active": key.get("is_active", False),
+                    "tokens_consumed": 0,
+                    "requests_count": 0,
+                    "budget": budget,
+                    "percent": 0,
+                })
+        except Exception as e:
+            logger.debug(f"Token usage lookup error for key {key['id']}: {e}")
+            usage_data.append({
+                "key_id": key["id"],
+                "key_prefix": key.get("key_prefix", ""),
+                "name": key.get("name", "default"),
+                "is_active": key.get("is_active", False),
+                "tokens_consumed": 0,
+                "requests_count": 0,
+                "budget": budget,
+                "percent": 0,
+            })
+
+    return {"keys": usage_data, "budget": budget}
 
 
 def start_server():

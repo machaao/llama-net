@@ -82,6 +82,51 @@ class SupabaseManager:
             logger.error(f"Error validating API key: {e}")
             return None
 
+    def record_token_usage(self, key_hash: str, tokens: int) -> None:
+        """Atomically increment token usage for an API key today."""
+        try:
+            from datetime import date
+            today = date.today().isoformat()
+
+            result = self.client.table("token_usage").select("*").eq(
+                "key_hash", key_hash
+            ).eq("date", today).execute()
+
+            if result.data:
+                current = result.data[0]
+                self.client.table("token_usage").update({
+                    "tokens_consumed": current["tokens_consumed"] + tokens,
+                    "requests_count": current["requests_count"] + 1,
+                }).eq("key_hash", key_hash).eq("date", today).execute()
+            else:
+                self.client.table("token_usage").insert({
+                    "key_hash": key_hash,
+                    "date": today,
+                    "tokens_consumed": tokens,
+                    "requests_count": 1,
+                }).execute()
+        except Exception as e:
+            logger.error(f"Error recording token usage: {e}")
+
+    def get_token_usage(self, key_hash: str) -> dict:
+        """Get today's token usage for an API key."""
+        try:
+            from datetime import date
+            today = date.today().isoformat()
+            result = self.client.table("token_usage").select("*").eq(
+                "key_hash", key_hash
+            ).eq("date", today).execute()
+            if result.data:
+                return result.data[0]
+            return {"key_hash": key_hash, "date": today, "tokens_consumed": 0, "requests_count": 0}
+        except Exception as e:
+            logger.error(f"Error getting token usage: {e}")
+            return {"key_hash": key_hash, "tokens_consumed": 0, "requests_count": 0}
+
+    def get_daily_token_budget(self) -> int:
+        """Get the daily token budget per API key from env or default."""
+        return int(os.environ.get("LLAMANET_DAILY_TOKEN_BUDGET", "500000"))
+
     def list_api_keys(self, user_id: str) -> List[Dict[str, Any]]:
         try:
             result = self.client.table("api_keys").select(

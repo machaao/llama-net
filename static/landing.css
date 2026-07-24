@@ -211,3 +211,55 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:var(--text)}
         align-self: flex-end;
     }
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* TOKEN BUDGET STYLES                                    */
+/* ═══════════════════════════════════════════════════════ */
+
+.token-budget-bar {
+    height: 4px;
+    border-radius: 2px;
+    background-color: #e9ecef;
+    overflow: hidden;
+    margin-top: 0.375rem;
+}
+
+.token-budget-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.token-budget-fill.safe {
+    background-color: var(--success-color);
+}
+
+.token-budget-fill.warning {
+    background-color: var(--warning-color);
+}
+
+.token-budget-fill.exceeded {
+    background-color: var(--danger-color);
+}
+
+.token-usage-text {
+    font-size: 0.75rem;
+    color: var(--secondary-color);
+    margin-top: 0.25rem;
+}
+
+.token-usage-text.exceeded {
+    color: var(--danger-color);
+    font-weight: 600;
+}
+
+.token-usage-text.warning {
+    color: #997404;
+}
+
+.budget-warning-badge {
+    font-size: 0.7rem;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.75rem;
+    animation: livePulse 2s infinite;
+}

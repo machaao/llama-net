@@ -425,6 +425,61 @@ async def _broadcast_current_node_metrics():
     if gateway_client:
         asyncio.create_task(gateway_client.send_event("node_updated"))
 
+async def _verify_gateway_request(request: Request):
+    """Verify that the request came from the gateway via bearer token.
+    Returns None if OK, JSONResponse if denied.
+    """
+    from common.gateway_auth import verify_node_request
+
+    path = request.url.path
+    if path not in ("/v1/chat/completions", "/v1/completions"):
+        return None
+
+    auth_header = request.headers.get("Authorization", "")
+    is_valid, reason = verify_node_request(auth_header)
+
+    if not is_valid:
+        logger.warning(f"❌ Gateway auth rejected: {reason}")
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "message": "Direct access not allowed. Requests must be routed through the gateway.",
+                    "type": "forbidden",
+                }
+            },
+        )
+
+    return None
+
+
+async def _check_node_overload() -> Optional[JSONResponse]:
+    """Check if the node is overloaded and should reject new requests."""
+    if not llm or not model_pool:
+        return None
+
+    try:
+        is_overloaded = llm.metrics_manager.is_overloaded(
+            cpu_threshold=90.0,
+            memory_threshold=92.0,
+        )
+        if is_overloaded:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": "Node is currently overloaded. Please try again shortly.",
+                        "type": "node_overloaded",
+                    }
+                },
+                headers={"Retry-After": "10"},
+            )
+    except Exception:
+        pass
+
+    return None
+
+
 # Web UI endpoint
 @app.get("/")
 async def web_ui():
@@ -637,6 +692,16 @@ async def get_models_statistics():
 @app.post("/v1/completions")
 async def create_completion(request: Request, body: OpenAICompletionRequest):
     """Text completion — handle locally or route to best peer."""
+    # ── Gateway authentication ──
+    auth_err = await _verify_gateway_request(request)
+    if auth_err:
+        return auth_err
+
+    # ── Self-throttling ──
+    overload_err = await _check_node_overload()
+    if overload_err:
+        return overload_err
+
     limit_resp = await _enforce_node_rate_limit(request)
     if limit_resp:
         return limit_resp
@@ -982,6 +1047,16 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: Request, body: OpenAIChatCompletionRequest):
     """Chat completion — handle locally or route to best peer."""
+    # ── Gateway authentication ──
+    auth_err = await _verify_gateway_request(request)
+    if auth_err:
+        return auth_err
+
+    # ── Self-throttling ──
+    overload_err = await _check_node_overload()
+    if overload_err:
+        return overload_err
+
     limit_resp = await _enforce_node_rate_limit(request)
     if limit_resp:
         return limit_resp
