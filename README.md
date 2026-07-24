@@ -6,15 +6,27 @@ Run any open-source LLM on your hardware. Get a public API in 60 seconds.
 
 ## Quick Start
 
-### GPU Owner — Run a Node
+### Install (One Command)
 
 ```bash
-git clone https://github.com/machaao/llama-net.git
-cd llama-net
-pip install -r requirements-inference.txt
+# macOS / Linux
+curl -sSL https://llamanet.app/install.sh | sh
 
-# Start the node (no model needed — download via Web UI)
-sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+# Windows (PowerShell)
+irm https://llamanet.app/install.ps1 | iex
+```
+
+The installer:
+- Detects or installs Python 3.9+
+- Creates an isolated venv at `~/.llamanet/venv`
+- Installs LlamaNet and llama-cpp-python
+- Creates a `llamanet` CLI launcher and Desktop shortcut
+- Auto-joins the public network at **llamanet.app**
+
+Then run:
+
+```bash
+llamanet
 ```
 
 1. Open **http://localhost:8000** — the Model Manager opens automatically
@@ -25,12 +37,27 @@ sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
 You can also pre-load a model at startup:
 
 ```bash
-sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
-  --tunnel \
-  --bootstrap-peers https://llamanet.app
+llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
+```
+
+Or install via PyPI:
+
+```bash
+pip install llamanet
+llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
 ```
 
 Models can be switched at any time via the Web UI without restarting the node.
+
+### Uninstall
+
+```bash
+# macOS / Linux
+curl -sSL https://llamanet.app/uninstall.sh | sh
+
+# Windows (PowerShell)
+irm https://llamanet.app/uninstall.ps1 | iex
+```
 
 ### API Consumer — Use the Network
 
@@ -57,11 +84,10 @@ Get a free API key at [llamanet.app](https://llamanet.app).
 ```
 GPU Owner                          API Consumer
 ─────────                          ────────────
-sh start-app.sh run \               client = openai.OpenAI(
-  hf.co/user/Model:Q4_K_M \         base_url="https://llamanet.app/v1",
-  --tunnel \                         api_key="ln-xxx"
-  --bootstrap-peers \              )
-  https://llamanet.app             
+curl -sSL llamanet.app/ \           client = openai.OpenAI(
+  install.sh | sh                    base_url="https://llamanet.app/v1",
+llamanet run \                       api_key="ln-xxx"
+  hf.co/user/Model:Q4_K_M         )
        │                                │
        ▼                                ▼
 ┌─────────────────────────────────────────────┐
@@ -72,9 +98,9 @@ sh start-app.sh run \               client = openai.OpenAI(
 └─────────────────────────────────────────────┘
 ```
 
-1. **GPU owner** runs a model with `--tunnel --bootstrap-peers https://llamanet.app`
-2. Gets a Cloudflare tunnel URL (public, HTTPS) — **required for network participation**
-3. Registers with the gateway at `llamanet.app`
+1. **GPU owner** runs the one-liner installer → `llamanet` → node auto-joins `llamanet.app`
+2. Downloads a model via the Web UI Model Manager
+3. Node gets a Cloudflare tunnel URL (public, HTTPS) — **required for network participation**
 4. **API consumer** calls `llamanet.app/v1/chat/completions`
 5. Gateway routes to the best available node via tunnel URL
 
@@ -211,7 +237,7 @@ The URL persists across restarts.
 | `N_GPU_LAYERS` | `-1` | GPU layers (-1 = all) |
 | `N_CTX` | `4096` | Context window in tokens |
 | `N_BATCH` | `4096` | Batch size |
-| `BOOTSTRAP_PEERS` | — | Gateway URL (e.g. `https://llamanet.app`) |
+| `BOOTSTRAP_PEERS` | `https://llamanet.app` | Gateway URL (auto-set by installer) |
 | `PUBLIC_IP` | — | Override public IP detection |
 | `LLAMANET_TUNNEL_URL` | — | Override tunnel URL |
 
@@ -251,6 +277,14 @@ The URL persists across restarts.
 **Apple Silicon (M1/M2/M3/M4)** — full GPU acceleration via Metal, no extra steps:
 
 ```bash
+# One-liner install (recommended)
+curl -sSL https://llamanet.app/install.sh | sh
+llamanet
+```
+
+Or install from source:
+
+```bash
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
@@ -264,7 +298,7 @@ If you need to force it manually:
 
 ```bash
 export LLAMA_NO_METAL=1
-sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+llamanet
 ```
 
 You can also pass `--no-gpu` to the inference node directly:
@@ -275,7 +309,15 @@ python -m inference_node.server --no-gpu --tunnel --bootstrap-peers https://llam
 
 ### Linux
 
-Works on any Linux distro with Python 3.8+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
+Works on any Linux distro with Python 3.9+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
+
+```bash
+# One-liner install (recommended)
+curl -sSL https://llamanet.app/install.sh | sh
+llamanet
+```
+
+Or install from source:
 
 ```bash
 git clone https://github.com/machaao/llama-net.git
@@ -287,23 +329,25 @@ sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
 For CPU-only or non-NVIDIA setups:
 
 ```bash
-N_GPU_LAYERS=0 sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+N_GPU_LAYERS=0 llamanet
 ```
 
 ### Windows
 
-Works on Windows 10/11 with Python 3.8+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
+Works on Windows 10/11 with Python 3.9+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
+
+```powershell
+# One-liner install (recommended)
+irm https://llamanet.app/install.ps1 | iex
+llamanet
+```
+
+Or install from source:
 
 ```cmd
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
-start-app.bat run hf.co/user/Model:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
-```
-
-Or start without a model (download via Web UI):
-
-```cmd
 start-app.bat --tunnel --bootstrap-peers https://llamanet.app
 ```
 
@@ -324,12 +368,8 @@ start-app.bat --tunnel --bootstrap-peers https://llamanet.app
 Run a node on any VPS or cloud instance (AWS, GCP, Azure, Hetzner, etc.):
 
 ```bash
-git clone https://github.com/machaao/llama-net.git
-cd llama-net
-pip install -r requirements-inference.txt
-sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
-  --tunnel \
-  --bootstrap-peers https://llamanet.app
+curl -sSL https://llamanet.app/install.sh | sh
+llamanet run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
 ```
 
 **GPU instances:** Install NVIDIA drivers + CUDA toolkit before running. The node auto-detects GPU availability.
@@ -342,29 +382,26 @@ sh start-app.sh run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M \
 cloudflared tunnel login
 cloudflared tunnel create my-node
 cloudflared tunnel route dns my-node node.mydomain.com
-sh start-app.sh run hf.co/user/Model:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
+llamanet run hf.co/user/Model:Q4_K_M --tunnel
 ```
 
 ### Operating Your Own Rig
 
 For dedicated GPU machines (desktop, workstation, or server):
 
-1. **Clone and install:**
+1. **Install with one command:**
    ```bash
-   git clone https://github.com/machaao/llama-net.git
-   cd llama-net
-   pip install -r requirements-inference.txt
+   curl -sSL https://llamanet.app/install.sh | sh
    ```
 
 2. **Start with a model:**
    ```bash
-   sh start-app.sh run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M \
-     --tunnel --bootstrap-peers https://llamanet.app
+   llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
    ```
 
 3. **Or start empty and download via Web UI:**
    ```bash
-   sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+   llamanet
    ```
    Open `http://localhost:8000` → Model Manager → search → download → chat.
 
@@ -375,10 +412,11 @@ For dedicated GPU machines (desktop, workstation, or server):
 - Use `--gpu-layers -1` to offload all layers to GPU (default)
 - Use `--gpu-layers N` to split between GPU and CPU for large models
 - The node auto-generates a persistent ID stored in `~/.llamanet_node_id`
+- The node auto-joins the public network at `llamanet.app` (override with `--bootstrap-peers`)
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.9+
 - GGUF format models
 - 4GB+ RAM (depends on model size)
-- `cloudflared` (auto-installed by `start-app.sh` on macOS/Linux)
+- `cloudflared` (auto-installed by the installer and `start-app.sh` on macOS/Linux)
