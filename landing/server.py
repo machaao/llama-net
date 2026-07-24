@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from common.utils import get_logger
+from common.utils import get_logger, resolve_static_dir
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
 from landing.supabase_client import SupabaseManager
@@ -191,9 +191,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir):
+static_dir = resolve_static_dir()
+if static_dir:
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    logger.info(f"Static files: {static_dir}")
+else:
+    logger.warning("Static files directory not found — landing page will not be available")
 
 
 async def _enforce_rate_limit(request: Request, endpoint_type: str = "api"):

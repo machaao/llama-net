@@ -547,6 +547,17 @@ if health_check $DEFAULT_PORT; then
         prevent_sleep
     fi
 
+    # Open browser on local development (not container, not MACHAAO cloud)
+    if [ "$CONTAINER_MODE" = "false" ] && [ -z "$MACHAAO_APP_ID" ]; then
+        if [ "$(uname)" = "Darwin" ]; then
+            open "http://localhost:$DEFAULT_PORT" 2>/dev/null &
+        elif command -v xdg-open >/dev/null 2>&1; then
+            xdg-open "http://localhost:$DEFAULT_PORT" 2>/dev/null &
+        fi
+    fi
+
+    echo ""
+    echo "🌐 Web UI: http://localhost:$DEFAULT_PORT"
     echo "📊 Monitor network status: python -m tools.monitor"
     echo "🔍 Quick network check: python -m tools.quick_check"
     echo "🛑 Press Ctrl+C for graceful shutdown"

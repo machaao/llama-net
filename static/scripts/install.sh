@@ -5,6 +5,7 @@ set -e
 
 LLAMANET_HOME="${HOME}/.llamanet"
 VENV_DIR="${LLAMANET_HOME}/venv"
+SOURCE_DIR="${LLAMANET_HOME}/source"
 BIN_DIR="${HOME}/.local/bin"
 LAUNCH_SCRIPT="${BIN_DIR}/llamanet"
 DESKTOP_SHORTCUT="${HOME}/Desktop/LlamaNet.command"
@@ -154,32 +155,33 @@ pip install --upgrade pip setuptools wheel >/dev/null 2>&1
 # ── Step 6: Install LlamaNet ──
 info "Installing LlamaNet (this may take a few minutes)..."
 
-if [ -f "./pyproject.toml" ] && [ -d "./inference_node" ]; then
-    info "Installing from local repository..."
-    pip install -e . 2>/dev/null
-    pip install -r requirements-inference.txt 2>/dev/null || true
+if [ -d "$SOURCE_DIR/.git" ]; then
+    info "Updating existing source repository..."
+    cd "$SOURCE_DIR"
+    git pull --quiet 2>/dev/null || warn "Git pull failed — using existing source"
 else
-    info "Installing from GitHub..."
-    pip install "git+https://github.com/machaao/llama-net.git" || {
-        fail "Failed to install LlamaNet from GitHub. Check your internet connection."
-    }
-    ok "LlamaNet package installed"
-
-    info "Installing inference engine..."
-    pip install llama-cpp-python psutil pynvml tqdm huggingface_hub 2>/dev/null || {
-        warn "Pre-built wheel not available, building from source..."
-        pip install llama-cpp-python
-    }
+    info "Cloning LlamaNet repository..."
+    rm -rf "$SOURCE_DIR"
+    git clone --depth 1 https://github.com/machaao/llama-net.git "$SOURCE_DIR"
+    cd "$SOURCE_DIR"
 fi
+
+info "Installing from source (editable)..."
+pip install -e . 2>/dev/null
+pip install -r requirements-inference.txt 2>/dev/null || true
 
 # Verify
 if "$VENV_DIR/bin/python" -c "import inference_node" 2>/dev/null; then
     ok "LlamaNet verified"
 else
     warn "Package verification failed — attempting repair"
-    if [ -f "./pyproject.toml" ]; then
-        pip install -e .
-    fi
+    cd "$SOURCE_DIR" && pip install -e . 2>/dev/null
+fi
+
+if [ -f "$SOURCE_DIR/static/index.html" ]; then
+    ok "Web UI files found"
+else
+    warn "Web UI files missing — check $SOURCE_DIR/static/"
 fi
 
 # ── Step 7: Set Default Bootstrap Peers ──
@@ -201,6 +203,7 @@ cat > "$LAUNCH_SCRIPT" << LAUNCHER_EOF
 # LlamaNet Launcher
 LLAMANET_HOME="\${HOME}/.llamanet"
 VENV_DIR="\${LLAMANET_HOME}/venv"
+SOURCE_DIR="\${LLAMANET_HOME}/source"
 
 if [ ! -f "\$VENV_DIR/bin/activate" ]; then
     echo "LlamaNet venv not found. Re-run installer:"
@@ -231,19 +234,33 @@ fi
 
 if [ "\$LAST_CHECK" != "\$TODAY" ]; then
     echo "Checking for updates..."
-    pip install --upgrade "git+https://github.com/machaao/llama-net.git" 2>/dev/null
+    if [ -d "\$SOURCE_DIR/.git" ]; then
+        cd "\$SOURCE_DIR" && git pull --quiet 2>/dev/null
+        pip install -e . 2>/dev/null
+    else
+        pip install --upgrade "git+https://github.com/machaao/llama-net.git" 2>/dev/null
+    fi
     echo "\$TODAY" > "\$UPDATE_CHECK_FILE"
 fi
 
+# Delegate to start-app.sh for full command support (run, --tunnel, --no-gpu, etc.)
+if [ -f "\$SOURCE_DIR/start-app.sh" ]; then
+    cd "\$SOURCE_DIR"
+    exec sh start-app.sh "\$@"
+fi
+
+# Fallback: direct python invocation (if source directory missing)
+echo "⚠️  Source directory not found at \$SOURCE_DIR"
+echo "   Using fallback mode (limited command support)"
+echo ""
+
 if [ \$# -eq 0 ]; then
-    echo ""
     echo "Starting LlamaNet..."
     echo ""
 
     python -m inference_node.server --host 0.0.0.0 --port 8000 --bootstrap-peers "\$BOOTSTRAP_PEERS" &
     SERVER_PID=\$!
 
-    echo "Waiting for server..."
     READY=false
     for i in \$(seq 1 30); do
         if curl -s http://localhost:8000/health >/dev/null 2>&1; then
@@ -259,14 +276,15 @@ if [ \$# -eq 0 ]; then
         echo "  Network:   Connected to \$BOOTSTRAP_PEERS"
         echo "  API:       http://localhost:8000/v1/chat/completions"
         echo ""
-        echo "  Press Ctrl+C to stop"
-        echo ""
 
         if [ "\$(uname)" = "Darwin" ]; then
-            open "http://localhost:8000"
+            open "http://localhost:8000" 2>/dev/null &
         elif command -v xdg-open >/dev/null 2>&1; then
-            xdg-open "http://localhost:8000"
+            xdg-open "http://localhost:8000" 2>/dev/null &
         fi
+
+        echo "  Press Ctrl+C to stop"
+        echo ""
 
         wait \$SERVER_PID
     else
@@ -329,6 +347,7 @@ echo "  Your node will join the public network at llamanet.app"
 echo "  Use the Model Manager to download a GGUF model."
 echo ""
 echo "  Install path:  $LLAMANET_HOME"
+echo "  Source:        $SOURCE_DIR"
 echo "  Python:        $PYTHON_VERSION"
 echo "  Network:       $BOOTSTRAP_DEFAULT"
 echo ""

@@ -31,7 +31,7 @@ from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
 from inference_node.event_publisher import GatewayEventPublisher
 from inference_node.model_pool import ModelPool
-from common.utils import get_logger, get_host_ip, get_tunnel_url_file
+from common.utils import get_logger, get_host_ip, get_tunnel_url_file, resolve_static_dir
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
 
@@ -382,10 +382,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir):
+# Serve static files — resolve from multiple locations
+static_dir = resolve_static_dir()
+if static_dir:
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    logger.info(f"Static files: {static_dir}")
+else:
+    logger.warning("Static files directory not found — Web UI will not be available")
 
 async def _broadcast_current_node_metrics():
     """Broadcast metrics via SSE after each generation."""
@@ -426,8 +429,7 @@ async def _broadcast_current_node_metrics():
 @app.get("/")
 async def web_ui():
     """Serve the web UI"""
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-    index_path = os.path.join(static_dir, "index.html")
+    index_path = os.path.join(static_dir, "index.html") if static_dir else ""
     
     if os.path.exists(index_path):
         return FileResponse(index_path)

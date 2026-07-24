@@ -133,6 +133,29 @@ def get_tunnel_url_file() -> str:
     import tempfile
     return os.path.join(tempfile.gettempdir(), "llamanet_tunnel_url")
 
+def resolve_static_dir() -> str:
+    """Resolve static files directory, checking multiple locations.
+
+    Returns the absolute path to the static directory, or empty string if not found.
+    Handles: dev mode, editable install, pip install, install.sh clone, MACHAAO container.
+    """
+    candidates = [
+        # 1. Relative to this file (editable install from source tree)
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static"),
+        # 2. ~/.llamanet/source/static (install.sh cloned repo)
+        os.path.expanduser("~/.llamanet/source/static"),
+        # 3. Current working directory
+        os.path.join(os.getcwd(), "static"),
+        # 4. /app/static (MACHAAO container deployment)
+        "/app/static",
+    ]
+    for path in candidates:
+        abs_path = os.path.abspath(path)
+        if os.path.isdir(abs_path) and os.path.exists(os.path.join(abs_path, "index.html")):
+            return abs_path
+    return ""
+
+
 def normalize_stop_tokens(stop):
     """Normalize stop tokens to the format expected by llama-cpp-python"""
     if stop is None:
