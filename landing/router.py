@@ -339,6 +339,7 @@ class ModelRouter:
     async def _stream_response(self, resp, session, auth_key: str = ""):
         """Stream response chunks and track token usage from final chunk."""
         final_data = None
+        accumulated_content = ""
         try:
             async for chunk in resp.content.iter_any():
                 chunk_str = chunk.decode("utf-8", errors="replace")
@@ -349,6 +350,13 @@ class ModelRouter:
                             parsed = json.loads(line[6:])
                             if parsed.get("usage"):
                                 final_data = parsed
+                            # Accumulate content for token estimation
+                            choices = parsed.get("choices", [])
+                            for choice in choices:
+                                delta = choice.get("delta", {})
+                                content = delta.get("content")
+                                if content:
+                                    accumulated_content += content
                         except (json.JSONDecodeError, ValueError):
                             pass
                 yield chunk
@@ -357,8 +365,15 @@ class ModelRouter:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
             await session.close()
-            if final_data and auth_key:
-                await self._track_response_tokens(auth_key, final_data)
+            if auth_key:
+                if final_data:
+                    # Node provided usage data — use it directly
+                    await self._track_response_tokens(auth_key, final_data)
+                elif accumulated_content:
+                    # No usage field in stream — estimate tokens from content
+                    estimated_tokens = max(1, len(accumulated_content) // 4)
+                    estimated_data = {"usage": {"total_tokens": estimated_tokens, "prompt_tokens": 0, "completion_tokens": estimated_tokens}}
+                    await self._track_response_tokens(auth_key, estimated_data)
 
     async def _track_response_tokens(self, auth_key: str, data: dict):
         """Extract token usage from a response and record it."""
