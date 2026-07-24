@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
 -- Seed system user for public node registration (no auth required)
 INSERT INTO users (id, email, full_name)
 VALUES ('00000000-0000-0000-0000-000000000000', 'system@llamanet.app', 'LlamaNet System')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET last_login = now();
 
 -- 6. Add per-node bearer token column
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_token TEXT;
