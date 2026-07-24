@@ -694,16 +694,19 @@ class LlamaWrapper:
                                 }
 
                         else:
-                            # Non-reasoning model or reasoning disabled — yield directly
-                            yield {
-                                "text": content,
-                                "content": content,
-                                "accumulated_text": accumulated_text,
-                                "tokens_generated": total_tokens,
-                                "generation_time": time.time() - start_time,
-                                "finished": False,
-                                "reasoning_phase": False
-                            }
+                            # Non-reasoning model or reasoning disabled — strip markers, then yield
+                            cleaned = _strip_markers(content)
+                            if cleaned:
+                                accumulated_text += cleaned
+                                yield {
+                                    "text": cleaned,
+                                    "content": cleaned,
+                                    "accumulated_text": accumulated_text,
+                                    "tokens_generated": total_tokens,
+                                    "generation_time": time.time() - start_time,
+                                    "finished": False,
+                                    "reasoning_phase": False
+                                }
 
                         if choice.get('finish_reason') is not None:
                             # Handle end-of-stream for reasoning models
