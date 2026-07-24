@@ -140,7 +140,7 @@ async def _heartbeat_monitor_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sse_mgr, supabase_mgr, auth_mgr, router, registry, rate_limiter, quality_gate
+    global sse_mgr, supabase_mgr, auth_mgr, router, registry, rate_limiter, quality_gate, node_token_manager
     logger.info("Starting llamanet.app gateway...")
     try:
         supabase_mgr = SupabaseManager()
