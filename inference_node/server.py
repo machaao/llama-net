@@ -165,15 +165,10 @@ async def lifespan(app: FastAPI):
                     public_ip=config.public_ip,
                     model_pool=model_pool,
                 )
-                await gateway_client.register()
-                asyncio.create_task(gateway_client.heartbeat_loop())
-                asyncio.create_task(gateway_client.peer_refresh_loop())
 
-        # Schedule post-startup join event (only if already registered)
-        if gateway_client and gateway_client.registered:
-            asyncio.create_task(trigger_post_uvicorn_join())
-
-        # Watch for tunnel URL availability and register when ready
+        # Defer registration until tunnel URL is available and Uvicorn is serving.
+        # _wait_for_tunnel_and_register() handles: tunnel detection → register →
+        # heartbeat_loop → peer_refresh_loop → send_event("node_joined").
         if gateway_client:
             asyncio.create_task(_wait_for_tunnel_and_register())
 
