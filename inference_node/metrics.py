@@ -200,9 +200,16 @@ class SystemInfo:
             
         except ImportError:
             logger.debug("pynvml not available - install with: pip install pynvml")
-            # Fall through to Apple Silicon detection below
+        except Exception as e:
+            # Only log as debug for common "no NVIDIA GPU" scenarios
+            error_msg = str(e).lower()
+            if any(phrase in error_msg for phrase in ['nvml shared library not found', 'nvidia driver', 'no devices', 'nvml_error_uninitialized']):
+                logger.debug(f"No NVIDIA GPUs detected: {e}")
+            else:
+                logger.warning(f"Could not get GPU info: {e}")
 
         # ── Apple Silicon (macOS arm64) — Metal GPU ──
+        # This block is SEPARATE from the nvidia try/except above
         try:
             if platform.system() == "Darwin" and platform.machine() == "arm64":
                 import subprocess as _sub
@@ -221,16 +228,10 @@ class SystemInfo:
         except Exception as e:
             logger.debug(f"Apple Silicon detection failed: {e}")
 
-        except Exception as e:
-            # Only log as debug for common "no NVIDIA GPU" scenarios
-            error_msg = str(e).lower()
-            if any(phrase in error_msg for phrase in ['nvml shared library not found', 'nvidia driver', 'no devices', 'nvml_error_uninitialized']):
-                logger.debug(f"No NVIDIA GPUs detected: {e}")
-            else:
-                logger.warning(f"Could not get GPU info: {e}")
-            SystemInfo._gpu_info_cache = None
-            SystemInfo._cache_time = current_time
-            return None
+        # Nothing detected
+        SystemInfo._gpu_info_cache = None
+        SystemInfo._cache_time = current_time
+        return None
     
     @staticmethod
     def get_current_load() -> Dict[str, float]:

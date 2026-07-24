@@ -103,19 +103,20 @@ class GatewayClient:
 
                         # If quality gate rejected us, stop retrying permanently
                         if resp.status == 403:
+                            # Always set rejection flag on 403, even if JSON parse fails
+                            self._quality_rejected = True
                             try:
                                 body = json.loads(text)
-                                self._quality_rejected = True
-                                self._rejection_reason = body.get("reason", "unknown")
-                                logger.warning(
-                                    f"🚫 Node rejected by gateway quality gate: {self._rejection_reason}"
-                                )
-                                logger.warning(
-                                    f"   This node will NOT retry registration. "
-                                    f"Fix the issue or disable the quality gate on the gateway."
-                                )
+                                self._rejection_reason = body.get("reason", "quality gate rejection")
                             except Exception:
-                                pass
+                                self._rejection_reason = "HTTP 403 rejection"
+                            logger.warning(
+                                f"🚫 Node rejected by gateway quality gate: {self._rejection_reason}"
+                            )
+                            logger.warning(
+                                f"   This node will NOT retry registration. "
+                                f"Fix the issue or disable the quality gate on the gateway."
+                            )
                         return False
         except Exception as e:
             logger.warning(f"Could not register with gateway: {e}")
