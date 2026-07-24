@@ -236,47 +236,71 @@ async def trigger_post_uvicorn_join():
 
 
 async def _wait_for_tunnel_and_register():
-    """Wait for tunnel URL to become available, then register with gateway."""
+    """Wait for tunnel URL + Uvicorn readiness, then register with gateway.
+
+    This is the SOLE registration path. It waits for:
+      1. Tunnel URL to appear (from env, file, or cloudflared log)
+      2. Local /health endpoint to respond (Uvicorn is serving)
+      3. Then registers with gateway, sends join event, starts heartbeat/peer loops
+    """
     if not gateway_client:
         return
 
-    # If already registered, nothing to do
+    # If already registered (shouldn't happen now, but safety check)
     if gateway_client.registered:
         return
 
-    logger.info("⏳ Waiting for tunnel URL to become available...")
-    for i in range(60):  # Wait up to 60 seconds
+    logger.info("⏳ Waiting for tunnel URL and Uvicorn readiness before registering...")
+
+    # Phase 1: Wait for tunnel URL (up to 90s)
+    url = ""
+    for i in range(90):
         await asyncio.sleep(1)
-        url = _get_own_url()  # This will auto-sync to gateway_client if found
+        url = _get_own_url()
         if url:
             break
 
-    if not gateway_client.own_url:
-        logger.warning("⚠️ No tunnel URL found after 60s — node not registered with gateway")
+    if not url:
+        logger.warning("⚠️ No tunnel URL found after 90s — node not registered with gateway")
         return
 
-    # Register with gateway now that we have a URL
-    try:
-        registered = await gateway_client.register()
-        if registered:
-            logger.info(f"✅ Registered with gateway after tunnel ready: {gateway_client.own_url}")
-            # Send join event
-            await gateway_client.send_event("node_joined")
-            logger.info("✅ Join event sent to gateway")
-            # Start heartbeat and peer refresh if not already running
-            if not gateway_client.heartbeat_task or gateway_client.heartbeat_task.done():
-                asyncio.create_task(gateway_client.heartbeat_loop())
-            if not gateway_client.peer_refresh_task or gateway_client.peer_refresh_task.done():
-                asyncio.create_task(gateway_client.peer_refresh_loop())
-        elif gateway_client._quality_rejected:
-            logger.warning(
-                f"🚫 Gateway registration rejected by quality gate: "
-                f"{gateway_client._rejection_reason}"
-            )
-        else:
-            logger.warning("⚠️ Gateway registration failed even with tunnel URL")
-    except Exception as e:
-        logger.error(f"Failed to register with gateway: {e}")
+    # Phase 2: Wait for Uvicorn to be serving /health (up to 30s)
+    port = config.port if config else 8000
+    for i in range(30):
+        await asyncio.sleep(1)
+        try:
+            import aiohttp as _aiohttp
+            async with _aiohttp.ClientSession(
+                timeout=_aiohttp.ClientTimeout(total=2)
+            ) as session:
+                async with session.get(f"http://127.0.0.1:{port}/health") as resp:
+                    if resp.status == 200:
+                        logger.info("✅ Uvicorn is serving — proceeding with registration")
+                        break
+        except Exception:
+            pass
+    else:
+        logger.warning("⚠️ Uvicorn /health not ready after 30s — registering anyway")
+
+    # Phase 3: Register with gateway
+    registered = await gateway_client.register()
+    if registered:
+        logger.info(f"✅ Registered with gateway: {gateway_client.own_url}")
+        await gateway_client.send_event("node_joined")
+        logger.info("✅ Join event sent to gateway")
+        # Start background tasks (only after successful registration)
+        asyncio.create_task(gateway_client.heartbeat_loop())
+        asyncio.create_task(gateway_client.peer_refresh_loop())
+    elif gateway_client._quality_rejected:
+        logger.warning(
+            f"🚫 Gateway registration rejected by quality gate: "
+            f"{gateway_client._rejection_reason}"
+        )
+    else:
+        logger.warning("⚠️ Gateway registration failed — will retry via heartbeat")
+        # Start heartbeat loop anyway so it retries on next cycle
+        asyncio.create_task(gateway_client.heartbeat_loop())
+        asyncio.create_task(gateway_client.peer_refresh_loop())
 
 app = FastAPI(title="LlamaNet OpenAI-Compatible Inference Node", lifespan=lifespan)
 
