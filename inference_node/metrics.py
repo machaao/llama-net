@@ -177,7 +177,6 @@ class SystemInfo:
             if device_count == 0:
                 SystemInfo._gpu_info_cache = None
                 SystemInfo._cache_time = current_time
-                return None
             
             # Return info for all GPUs
             gpu_info = []
@@ -207,26 +206,6 @@ class SystemInfo:
                 logger.debug(f"No NVIDIA GPUs detected: {e}")
             else:
                 logger.warning(f"Could not get GPU info: {e}")
-
-        # ── Apple Silicon (macOS arm64) — Metal GPU ──
-        # This block is SEPARATE from the nvidia try/except above
-        try:
-            if platform.system() == "Darwin" and platform.machine() == "arm64":
-                import subprocess as _sub
-                result = _sub.run(
-                    ["sysctl", "-n", "machdep.cpu.brand_string"],
-                    capture_output=True, text=True, timeout=3,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    chip_name = result.stdout.strip()
-                    gpu_result = f"{chip_name} (Metal)"
-                else:
-                    gpu_result = "Apple Silicon (Metal)"
-                SystemInfo._gpu_info_cache = gpu_result
-                SystemInfo._cache_time = current_time
-                return gpu_result
-        except Exception as e:
-            logger.debug(f"Apple Silicon detection failed: {e}")
 
         # Nothing detected
         SystemInfo._gpu_info_cache = None
