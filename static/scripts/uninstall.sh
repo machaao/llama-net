@@ -25,9 +25,13 @@ case "$REPLY" in
 esac
 
 if [ -d "$LLAMANET_HOME" ]; then
+    SOURCE_DIR="${LLAMANET_HOME}/source"
+    if [ -d "$SOURCE_DIR" ]; then
+        printf "  Removing source repository: %s\n" "$SOURCE_DIR"
+    fi
     printf "  Removing %s...\n" "$LLAMANET_HOME"
     rm -rf "$LLAMANET_HOME"
-    printf "${GREEN}%s${NC}\n" "  Removed install directory"
+    printf "${GREEN}%s${NC}\n" "  Removed install directory (venv, source, config)"
 fi
 
 if [ -f "$LAUNCH_SCRIPT" ]; then

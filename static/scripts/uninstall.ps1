@@ -23,10 +23,14 @@ if ($confirm -ne "y" -and $confirm -ne "Y") {
     exit 0
 }
 
+$SourceDir = Join-Path $InstallDir "source"
+if (Test-Path $SourceDir) {
+    Write-Host "  Removing source repository: $SourceDir" -ForegroundColor DarkGray
+}
 if (Test-Path $InstallDir) {
     Write-Host "  Removing $InstallDir..." -ForegroundColor DarkGray
     Remove-Item -Recurse -Force $InstallDir
-    Write-Host "  Removed install directory" -ForegroundColor Green
+    Write-Host "  Removed install directory (venv, source, config)" -ForegroundColor Green
 }
 
 $desktopLnk = Join-Path $DesktopDir "LlamaNet.lnk"

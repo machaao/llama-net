@@ -21,6 +21,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $VenvDir       = Join-Path $InstallDir "venv"
+$SourceDir     = Join-Path $InstallDir "source"
 $BinDir        = Join-Path $InstallDir "bin"
 $LaunchScript  = Join-Path $BinDir "llamanet.cmd"
 $DesktopDir    = [Environment]::GetFolderPath("Desktop")
@@ -246,26 +247,22 @@ $pip = Join-Path $VenvDir "Scripts\pip.exe"
 # ── Step 6: Install LlamaNet ──
 Write-Step "Installing LlamaNet (this may take a few minutes)..."
 
-if ($Developer -and (Test-Path ".\pyproject.toml") -and (Test-Path ".\inference_node")) {
-    & $pip install -e "."
-    & $pip install -r requirements-inference.txt
+if (Test-Path (Join-Path $SourceDir ".git")) {
+    Write-Host "  Updating existing source repository..." -ForegroundColor DarkGray
+    Push-Location $SourceDir
+    git pull --quiet 2>$null
+    Pop-Location
 } else {
-    Write-Host "  Installing from GitHub..." -ForegroundColor DarkGray
-    try {
-        & $pip install "git+https://github.com/machaao/llama-net.git"
-    } catch {
-        Write-Fail "Failed to install LlamaNet from GitHub. Check your internet connection."
-    }
-    Write-Ok "LlamaNet package installed"
-
-    Write-Host "  Installing inference engine..." -ForegroundColor DarkGray
-    try {
-        & $pip install llama-cpp-python psutil pynvml tqdm huggingface_hub
-    } catch {
-        Write-Warn "Pre-built wheel not available, building from source..."
-        & $pip install llama-cpp-python --verbose
-    }
+    Write-Host "  Cloning LlamaNet repository..." -ForegroundColor DarkGray
+    if (Test-Path $SourceDir) { Remove-Item -Recurse -Force $SourceDir }
+    git clone --depth 1 https://github.com/machaao/llama-net.git $SourceDir
 }
+
+Write-Host "  Installing from source (editable)..." -ForegroundColor DarkGray
+Push-Location $SourceDir
+& $pip install -e . 2>$null
+& $pip install -r requirements-inference.txt 2>$null
+Pop-Location
 
 $venvPython = Join-Path $VenvDir "Scripts\python.exe"
 try {
@@ -273,7 +270,16 @@ try {
     Write-Ok "LlamaNet verified"
 } catch {
     Write-Warn "Verification failed — attempting repair"
+    Push-Location $SourceDir
     & $pip install -e . 2>$null
+    Pop-Location
+}
+
+$indexHtml = Join-Path $SourceDir "static\index.html"
+if (Test-Path $indexHtml) {
+    Write-Ok "Web UI files found"
+} else {
+    Write-Warn "Web UI files missing — check $SourceDir\static\"
 }
 
 # ── Step 7: Set Default Bootstrap Peers ──
@@ -296,6 +302,7 @@ setlocal enabledelayedexpansion
 
 set "LLAMANET_HOME=%LOCALAPPDATA%\LlamaNet"
 set "VENV_DIR=%LLAMANET_HOME%\venv"
+set "SOURCE_DIR=%LLAMANET_HOME%\source"
 
 if not exist "%VENV_DIR%\Scripts\activate.bat" (
     echo LlamaNet venv not found. Re-run installer:
@@ -319,9 +326,29 @@ if exist "%UPDATE_CHECK%" (
 )
 if not "%TODAY%"=="%LAST_CHECK%" (
     echo Checking for updates...
-    pip install --upgrade "git+https://github.com/machaao/llama-net.git" 2>nul
+    if exist "%SOURCE_DIR%\.git" (
+        pushd "%SOURCE_DIR%"
+        git pull --quiet 2>nul
+        pip install -e . 2>nul
+        popd
+    ) else (
+        pip install --upgrade "git+https://github.com/machaao/llama-net.git" 2>nul
+    )
     echo %TODAY%>"%UPDATE_CHECK%"
 )
+
+REM Delegate to start-app.bat for full command support (run, --tunnel, --no-gpu, etc.)
+if exist "%SOURCE_DIR%\start-app.bat" (
+    pushd "%SOURCE_DIR%"
+    call start-app.bat %*
+    popd
+    goto :EOF
+)
+
+REM Fallback: direct python invocation (if source directory missing)
+echo WARNING: Source directory not found at %SOURCE_DIR%
+echo          Using fallback mode (limited command support)
+echo.
 
 if "%~1"=="" goto :LAUNCH
 python -m inference_node.server %*
@@ -424,6 +451,7 @@ Write-Host "  Your node will join the public network at llamanet.app" -Foregroun
 Write-Host "  Use the Model Manager to download a GGUF model." -ForegroundColor White
 Write-Host ""
 Write-Host "  Install path:  $InstallDir" -ForegroundColor DarkGray
+Write-Host "  Source:        $SourceDir" -ForegroundColor DarkGray
 Write-Host "  Python:        $($python.Version)" -ForegroundColor DarkGray
 Write-Host "  Network:       $BootstrapPeers" -ForegroundColor DarkGray
 Write-Host ""
