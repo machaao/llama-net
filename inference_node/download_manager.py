@@ -182,7 +182,7 @@ class DownloadManager:
                 task.status = DownloadStatus.DOWNLOADING
                 await self._broadcast_progress(task, "downloading")
 
-                file_path = await self._download_with_progress(task, hf_url)
+                file_path = await self._download_with_progress(task, hf_url, filename=filename)
 
                 if file_path and not self._cancel_flags.get(task.download_id):
                     task.status = DownloadStatus.COMPLETED
@@ -207,8 +207,17 @@ class DownloadManager:
         finally:
             self.download_history[task.download_id] = task
 
-    async def _download_with_progress(self, task: DownloadTask, hf_url: str) -> Optional[str]:
-        """Download model with non-blocking progress using aiohttp"""
+    async def _download_with_progress(self, task: DownloadTask, hf_url: str, filename: str = None) -> Optional[str]:
+        """Download model with non-blocking progress using aiohttp.
+
+        Args:
+            task: Download task with progress tracking.
+            hf_url: Hugging Face URL (e.g. user/model:Q4_K_M).
+            filename: Pre-resolved GGUF filename.  When provided (the normal
+                      path from _execute_download) the blocking HuggingFace
+                      API call is skipped entirely, keeping the event loop
+                      free for SSE progress events.
+        """
         import aiohttp
         import re
 
@@ -220,7 +229,15 @@ class DownloadManager:
                 quantization = tag
                 tag = None
 
-            filename = self.downloader.find_gguf_file(repo_id, tag, quantization)
+            if not filename:
+                # Only hit the HuggingFace API when filename wasn't
+                # pre-resolved (rare).  Run in executor to avoid
+                # blocking the event loop with requests.get().
+                loop = asyncio.get_event_loop()
+                filename = await loop.run_in_executor(
+                    None, self.downloader.find_gguf_file,
+                    repo_id, tag, quantization,
+                )
 
             local_path = self.downloader.get_local_model_path(
                 repo_id, filename, tag, quantization
