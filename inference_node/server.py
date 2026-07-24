@@ -435,6 +435,13 @@ async def _verify_gateway_request(request: Request):
     if path not in ("/v1/chat/completions", "/v1/completions"):
         return None
 
+    # Allow localhost and loopback connections (direct access or Cloudflare tunnel proxy)
+    client_host = ""
+    if request.client:
+        client_host = request.client.host
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return None
+
     auth_header = request.headers.get("Authorization", "")
     is_valid, reason = verify_node_request(auth_header)
 
