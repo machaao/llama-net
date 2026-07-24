@@ -90,18 +90,18 @@ class SupabaseManager:
 
             result = self.client.table("token_usage").select("*").eq(
                 "key_hash", key_hash
-            ).eq("date", today).execute()
+            ).eq("usage_date", today).execute()
 
             if result.data:
                 current = result.data[0]
                 self.client.table("token_usage").update({
                     "tokens_consumed": current["tokens_consumed"] + tokens,
                     "requests_count": current["requests_count"] + 1,
-                }).eq("key_hash", key_hash).eq("date", today).execute()
+                }).eq("key_hash", key_hash).eq("usage_date", today).execute()
             else:
                 self.client.table("token_usage").insert({
                     "key_hash": key_hash,
-                    "date": today,
+                    "usage_date": today,
                     "tokens_consumed": tokens,
                     "requests_count": 1,
                 }).execute()
@@ -115,7 +115,7 @@ class SupabaseManager:
             today = date.today().isoformat()
             result = self.client.table("token_usage").select("*").eq(
                 "key_hash", key_hash
-            ).eq("date", today).execute()
+            ).eq("usage_date", today).execute()
             if result.data:
                 return result.data[0]
             return {"key_hash": key_hash, "date": today, "tokens_consumed": 0, "requests_count": 0}
