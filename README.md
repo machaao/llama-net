@@ -1,7 +1,6 @@
 > Your Mac is idle 18 hours a day. Let it do something useful.
 
 ![GitHub Stars](https://img.shields.io/github/stars/machaao/llama-net?style=social)
-![GitHub Downloads](https://img.shields.io/github/downloads/machaao/llama-net/total)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa)](https://github.com/sponsors/machaao)
 
@@ -9,11 +8,19 @@
 
 **Turn your idle Mac or GPU into a free public AI API.**
 
-You use your Mac maybe 6 hours a day. The other 18 hours it sits there — screen off, fans idle, GPU doing nothing. Meanwhile you're paying $20/month for an AI API, or your friends are asking to borrow your ChatGPT login.
+Your Mac is asleep 18 hours a day.
 
-What if your Mac just *handled it*?
+Why not let it serve AI while you're away?
 
-That's LlamaNet. One command, 60 seconds, and your machine becomes a free AI API that anyone can use — with an OpenAI-compatible endpoint, a public URL, and zero config.
+LlamaNet turns any idle Mac or GPU into a public OpenAI-compatible API.
+
+One command.
+60 seconds.
+Zero config.
+
+Get a public URL.
+Run your own models.
+Let friends, apps, or AI agents use your machine.
 
 ```
 curl -sSL https://llamanet.app/install.sh | sh
