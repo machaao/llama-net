@@ -441,9 +441,21 @@ For dedicated GPU machines (desktop, workstation, or server):
 - The node auto-generates a persistent ID stored in `~/.llamanet_node_id`
 - The node auto-joins the public network at `llamanet.app` (override with `--bootstrap-peers`)
 
+## Built On
+
+LlamaNet is built on top of these open-source projects:
+
+- **[llama.cpp](https://github.com/ggml-org/llama.cpp)** — Fast LLM inference in C/C++ with Apple Metal, CUDA, and CPU support. The core engine that runs all GGUF models.
+- **[llama-cpp-python](https://github.com/abetlen/llama-cpp-python)** — Python bindings for llama.cpp with OpenAI-compatible API support.
+- **[FastAPI](https://fastapi.tiangolo.com/)** — High-performance Python web framework for the API server.
+- **[Cloudflare Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)** — Automatic public HTTPS URLs for every node.
+- **[Supabase](https://supabase.com/)** — Backend for gateway authentication, node registry, and API keys.
+- **[Hugging Face](https://huggingface.co/)** — Model discovery and GGUF file hosting.
+
 ## Requirements
 
 - Python 3.9+
 - GGUF format models
 - 4GB+ RAM (depends on model size)
 - `cloudflared` (auto-installed by the installer and `start-app.sh` on macOS/Linux)
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) — C/C++ inference engine that powers all GGUF model execution via [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)

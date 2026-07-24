@@ -220,6 +220,7 @@
                 <span class="badge bg-light text-dark"><i class="fas fa-exchange-alt"></i> OpenAI Compatible</span>
                 <span class="badge bg-light text-dark"><i class="fas fa-globe"></i> Free Public URLs</span>
                 <span class="badge bg-light text-dark"><i class="fas fa-bolt"></i> 60 Second Setup</span>
+                <span class="badge bg-light text-dark"><i class="fas fa-cogs"></i> Powered by llama.cpp</span>
             </div>
         </div>
     </section>
@@ -304,7 +305,7 @@
         <div class="container">
             <h2 class="text-center mb-5">How It Works</h2>
             <div class="row g-4">
-                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">1</div><h5>Clone &amp; Run</h5><p class="text-muted"><code>./start-app.sh --tunnel</code></p></div></div>
+                <div class="col-md-3"><div class="step-card text-center"><div class="step-number">1</div><h5>Install &amp; Run</h5><p class="text-muted"><code>curl -sSL https://llamanet.app/install.sh | sh</code></p></div></div>
                 <div class="col-md-3"><div class="step-card text-center"><div class="step-number">2</div><h5>Download a Model</h5><p class="text-muted">Search &amp; download via the built-in Web UI</p></div></div>
                 <div class="col-md-3"><div class="step-card text-center"><div class="step-number">3</div><h5>Get API Key</h5><p class="text-muted">Sign in with Google at llamanet.app</p></div></div>
                 <div class="col-md-3"><div class="step-card text-center"><div class="step-number">4</div><h5>Use the API</h5><p class="text-muted">OpenAI-compatible, auto-routed</p></div></div>
@@ -644,7 +645,8 @@ N_GPU_LAYERS=0 llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M<
 
     <footer class="py-4 bg-dark text-white">
         <div class="container text-center">
-            <p class="mb-2">Made with ❤️ using <a href="https://machai.live" class="text-info">MACH-AI</a></p>
+            <p class="mb-1">Made with ❤️ using <a href="https://machai.live" class="text-info">MACH-AI</a></p>
+            <p class="mb-0 small opacity-75">Powered by <a href="https://github.com/ggml-org/llama.cpp" class="text-info" target="_blank">llama.cpp</a> · <a href="https://github.com/abetlen/llama-cpp-python" class="text-info" target="_blank">llama-cpp-python</a> · <a href="https://fastapi.tiangolo.com/" class="text-info" target="_blank">FastAPI</a></p>
         </div>
     </footer>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
