@@ -263,10 +263,9 @@ class DashboardApp {
                     messages: [{ role: 'user', content: prompt }],
                     max_tokens: maxTokens,
                     temperature: temperature,
-                    stream: false
+                    stream: true
                 })
             });
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
             if (!resp.ok) {
                 const errData = await resp.json().catch(() => ({}));
                 const errMsg = errData.error?.message || errData.detail || `HTTP ${resp.status}`;
@@ -276,20 +275,61 @@ class DashboardApp {
                 }
                 return;
             }
-            const data = await resp.json();
-            const content = data.choices?.[0]?.message?.content || 'No response content';
-            responseText.textContent = content;
-            if (typeof marked !== 'undefined') {
-                responseText.innerHTML = marked.parse(content);
+
+            let accumulatedText = '';
+            let reasoningText = '';
+            let responseId = '';
+            let nodeInfo = null;
+
+            for await (const chunk of this._parseSSEStream(resp)) {
+                if (chunk.choices && chunk.choices.length > 0) {
+                    const delta = chunk.choices[0].delta || {};
+                    if (delta.reasoning_content) {
+                        reasoningText += delta.reasoning_content;
+                    }
+                    if (delta.content) {
+                        accumulatedText += delta.content;
+                    }
+                }
+                if (chunk.id) responseId = chunk.id;
+                if (chunk.node_info) nodeInfo = chunk.node_info;
+
+                // Render accumulated content with markdown
+                let html = '';
+                if (reasoningText) {
+                    html += this._renderReasoningBlock(reasoningText);
+                }
+                if (accumulatedText) {
+                    html += `<div class="markdown-content">${this._renderMarkdown(accumulatedText)}</div>`;
+                } else if (!reasoningText) {
+                    html = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> Thinking...</span>';
+                }
+                responseText.innerHTML = html;
+                this._highlightCodeBlocks(responseText);
+                responseDiv.scrollTop = responseDiv.scrollHeight;
             }
-            const usage = data.usage || {};
-            const nodeInfo = data.node_info;
-            let metaParts = [`⏱️ ${elapsed}s`];
-            if (usage.total_tokens) metaParts.push(`${usage.total_tokens} tokens`);
-            if (usage.completion_tokens) metaParts.push(`${usage.completion_tokens} generated`);
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            // Final render with markdown
+            let finalHtml = '';
+            if (reasoningText) {
+                finalHtml += this._renderReasoningBlock(reasoningText);
+            }
+            if (accumulatedText) {
+                finalHtml += `<div class="markdown-content">${this._renderMarkdown(accumulatedText)}</div>`;
+            }
+            if (finalHtml) responseText.innerHTML = finalHtml;
+            this._highlightCodeBlocks(responseText);
+
+            const metaParts = [`⏱️ ${elapsed}s`];
+            const estimatedTokens = Math.ceil(accumulatedText.split(' ').length * 1.3);
+            metaParts.push(`~${estimatedTokens} tokens`);
+            if (responseId) metaParts.push(`ID: ${responseId.substring(0, 8)}...`);
             if (nodeInfo) metaParts.push(`via ${nodeInfo.node_id?.substring(0, 8)}...`);
             responseMeta.textContent = metaParts.join(' · ');
         } catch (e) {
+            if (e.name === 'AbortError') return;
             responseText.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${this.escapeHtml(e.message)}</span>`;
         } finally {
             sendBtn.disabled = false;
@@ -302,6 +342,70 @@ class DashboardApp {
         document.getElementById('live-response-text').innerHTML = '';
         document.getElementById('live-response-meta').textContent = '';
     }
+
+    // ── Reusable Streaming Utilities ──────────────────────────────
+
+    async *_parseSSEStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('data: ')) continue;
+                    const data = trimmed.slice(6);
+                    if (data === '[DONE]') return;
+                    try {
+                        yield JSON.parse(data);
+                    } catch (e) {
+                        // Skip unparseable chunks
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+    }
+
+    _renderMarkdown(text) {
+        if (!text || typeof text !== 'string') return '';
+        try {
+            const sanitized = text
+                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+                .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+                .replace(/javascript:/gi, '');
+            return marked.parse(sanitized);
+        } catch (e) {
+            return this.escapeHtml(text);
+        }
+    }
+
+    _highlightCodeBlocks(element) {
+        if (typeof hljs !== 'undefined') {
+            element.querySelectorAll('pre code').forEach(block => {
+                hljs.highlightElement(block);
+            });
+        }
+    }
+
+    _renderReasoningBlock(text) {
+        const escaped = this.escapeHtml(text);
+        return `<div class="reasoning-block" style="border:1px solid rgba(13,110,253,.2);border-radius:.5rem;background:rgba(13,110,253,.03);margin-bottom:.75rem;overflow:hidden;">
+            <div class="reasoning-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.querySelector('i:first-child').className=this.nextElementSibling.style.display==='none'?'fas fa-chevron-right':'fas fa-chevron-down';" style="display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;cursor:pointer;font-size:.8rem;font-weight:500;color:#0d6efd;">
+                <i class="fas fa-chevron-right" style="font-size:.65rem;width:1rem;text-align:center;"></i>
+                <i class="fas fa-brain"></i> Thinking...
+            </div>
+            <div class="reasoning-content" style="display:none;padding:.5rem .75rem .75rem;font-size:.82rem;color:#6c757d;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;border-top:1px solid rgba(13,110,253,.1);max-height:300px;overflow-y:auto;">${escaped}</div>
+        </div>`;
+    }
+
     copyExample(button) {
         const pre = button.closest('.code-block').querySelector('pre code');
         this.copyToClipboard(pre.textContent, 'Copied!');
