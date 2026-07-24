@@ -27,13 +27,25 @@ $DesktopDir    = [Environment]::GetFolderPath("Desktop")
 $StartMenuDir  = Join-Path ([Environment]::GetFolderPath("StartMenu")) "Programs\LlamaNet"
 $MinPythonMinor = 9
 
-function Write-Step  { param($msg) Write-Host "`n  $msg" -ForegroundColor Cyan }
-function Write-Ok    { param($msg) Write-Host "  $msg" -ForegroundColor Green }
-function Write-Warn  { param($msg) Write-Host "  $msg" -ForegroundColor Yellow }
-function Write-Fail  {
-    param($msg)
-    Write-Host "  $msg" -ForegroundColor Red
-    throw $msg
+function Write-Step {
+    param([string]$Message)
+    Write-Host "`n  $Message" -ForegroundColor Cyan
+}
+
+function Write-Ok {
+    param([string]$Message)
+    Write-Host "  $Message" -ForegroundColor Green
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "  $Message" -ForegroundColor Yellow
+}
+
+function Write-Fail {
+    param([string]$Message)
+    Write-Host "  $Message" -ForegroundColor Red
+    throw $Message
 }
 
 Write-Host ""
@@ -47,23 +59,54 @@ $osVersion = [System.Environment]::OSVersion.Version
 $arch = $env:PROCESSOR_ARCHITECTURE
 Write-Ok "Windows $($osVersion.Major).$($osVersion.Minor) ($arch)"
 
-$freeGB = 100
-try {
-    $localAppDataQualifier = Split-Path $env:LOCALAPPDATA -Qualifier -ErrorAction SilentlyContinue
-    $driveLetter = if ($localAppDataQualifier) { $localAppDataQualifier.TrimEnd(':') } else { $env:SystemDrive.TrimEnd(':') }
-    $driveLetter = [string]$driveLetter
+$freeGB = 100.0
+$driveLetter = $env:SystemDrive.TrimEnd(':')
 
-    $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='${driveLetter}:'" -ErrorAction Stop
-    if ($disk -and $disk.FreeSpace) {
-        $freeGB = [math]::Round([double]$disk.FreeSpace / 1GB, 1)
-    }
-} catch {
-    try {
-        $driveInfo = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.Name -eq "${driveLetter}:\" -and $_.IsReady } | Select-Object -First 1
-        if ($driveInfo) {
-            $freeGB = [math]::Round([double]$driveInfo.AvailableFreeSpace / 1GB, 1)
+try {
+    if ($env:LOCALAPPDATA) {
+        $localAppDataQualifier = Split-Path `
+            -Path $env:LOCALAPPDATA `
+            -Qualifier `
+            -ErrorAction SilentlyContinue
+
+        if ($localAppDataQualifier) {
+            $driveLetter = $localAppDataQualifier.TrimEnd(':', '\')
         }
-    } catch {
+    }
+
+    $disk = Get-CimInstance `
+        -ClassName Win32_LogicalDisk `
+        -Filter "DeviceID='$($driveLetter):'" `
+        -ErrorAction Stop
+
+    if ($null -ne $disk -and $null -ne $disk.FreeSpace) {
+        $freeGB = [math]::Round(
+            ([double]$disk.FreeSpace / [double](1GB)),
+            1
+        )
+    }
+}
+catch {
+    try {
+        $driveRoot = "$($driveLetter):\"
+
+        $driveInfo = [System.IO.DriveInfo]::GetDrives() |
+            Where-Object {
+                $_.Name -eq $driveRoot -and $_.IsReady
+            } |
+            Select-Object -First 1
+
+        if ($null -ne $driveInfo) {
+            $freeGB = [math]::Round(
+                ([double]$driveInfo.AvailableFreeSpace / [double](1GB)),
+                1
+            )
+        }
+        else {
+            Write-Warn "Could not detect free disk space — assuming sufficient"
+        }
+    }
+    catch {
         Write-Warn "Could not detect free disk space — assuming sufficient"
     }
 }
