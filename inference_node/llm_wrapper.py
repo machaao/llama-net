@@ -609,95 +609,92 @@ class LlamaWrapper:
         reasoning_buffer = ""
         content_buffer = ""
         in_reasoning_phase = True
-        message_marker_found = False
-        channel_marker_found = False
-        
-        # Helper to strip channel markers
-        def _strip_channel_markers(text: str) -> str:
-            """Remove channel markers from text"""
-            cleaned = text
-            # Remove <|channel>thought, <channel|>, <|channel|>, etc.
-            cleaned = re.sub(r'<\|?channel\|?[>a-zA-Z]*', '', cleaned)
+
+        def _strip_markers(text: str) -> str:
+            """Strip channel markers and special tokens from text using regex."""
+            if not text:
+                return text
+            cleaned = re.sub(r'<\|?channel\|?[>a-zA-Z]*', '', text)
             cleaned = re.sub(r'</?\|?channel\|?>', '', cleaned)
             cleaned = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', cleaned)
             cleaned = re.sub(r'<[a-zA-Z_]+\|>', '', cleaned)
-            # Remove other special tokens
             for token in ["<|start|>", "<|end|>", "<|message|>"]:
                 cleaned = cleaned.replace(token, "")
-            return cleaned.strip()
-        
+            return cleaned
+
         try:
             for chunk in stream:
                 if 'choices' in chunk and len(chunk['choices']) > 0:
                     choice = chunk['choices'][0]
                     delta = choice.get('delta', {})
-                    
+
                     if 'content' in delta and delta['content']:
                         content = delta['content']
                         total_tokens += 1
-                        
+
                         # Record TTFT on first content token
                         if first_token_time is None:
                             first_token_time = time.time()
                             self.metrics_manager.record_ttft(first_token_time - start_time)
-                        
+
                         accumulated_text += content
-                        
-                        # Check if we're entering a channel marker
-                        if '<|channel' in content or '<channel|' in content:
-                            channel_marker_found = True
-                            # Don't yield this content
-                            continue
-                        
-                        # Skip content while inside channel marker
-                        if channel_marker_found:
-                            if '>' in content:
-                                channel_marker_found = False
-                            continue
-                        
-                        # Check for message marker
-                        if "<|message|>" in accumulated_text and not message_marker_found:
-                            message_marker_found = True
-                            in_reasoning_phase = False
-                            
-                            reasoning_part, content_part = self._separate_reasoning_and_content(accumulated_text)
-                            
-                            if reasoning_part:
+
+                        # Detect reasoning→content transition via <|message|> boundary
+                        if in_reasoning_phase and self.supports_reasoning and reasoning:
+                            if "<|message|>" in accumulated_text:
+                                # Split at the marker boundary
+                                parts = accumulated_text.split("<|message|>", 1)
+                                reasoning_text = parts[0]
+                                remaining = parts[1] if len(parts) > 1 else ""
+
+                                # Yield cleaned reasoning
+                                cleaned_reasoning = self._clean_reasoning_content(reasoning_text)
+                                if cleaned_reasoning:
+                                    yield {
+                                        "reasoning_content": cleaned_reasoning,
+                                        "tokens_generated": total_tokens,
+                                        "generation_time": time.time() - start_time,
+                                        "finished": False,
+                                        "reasoning_phase": True
+                                    }
+
+                                # Switch to content phase
+                                in_reasoning_phase = False
+
+                                # Yield any content after the marker
+                                cleaned_content = _strip_markers(remaining)
+                                if cleaned_content:
+                                    content_buffer = cleaned_content
+                                    yield {
+                                        "text": cleaned_content,
+                                        "content": cleaned_content,
+                                        "accumulated_text": content_buffer,
+                                        "tokens_generated": total_tokens,
+                                        "generation_time": time.time() - start_time,
+                                        "finished": False,
+                                        "reasoning_phase": False
+                                    }
+                            else:
+                                # Still in reasoning phase — accumulate silently
+                                reasoning_buffer += content
+
+                        elif not in_reasoning_phase:
+                            # Content phase — strip markers and yield
+                            cleaned = _strip_markers(content)
+                            if cleaned:
+                                content_buffer += cleaned
                                 yield {
-                                    "reasoning_content": reasoning_part,
-                                    "tokens_generated": total_tokens,
-                                    "generation_time": time.time() - start_time,
-                                    "finished": False,
-                                    "reasoning_phase": True
-                                }
-                            
-                            if content_part:
-                                content_buffer = content_part
-                                yield {
-                                    "text": content_part,
-                                    "content": content_part,
-                                    "accumulated_text": content_part,
+                                    "text": cleaned,
+                                    "content": cleaned,
+                                    "accumulated_text": content_buffer,
                                     "tokens_generated": total_tokens,
                                     "generation_time": time.time() - start_time,
                                     "finished": False,
                                     "reasoning_phase": False
                                 }
-                        
-                        elif not in_reasoning_phase:
-                            content_buffer += content
-                            yield {
-                                "text": content,
-                                "content": content,
-                                "accumulated_text": content_buffer,
-                                "tokens_generated": total_tokens,
-                                "generation_time": time.time() - start_time,
-                                "finished": False,
-                                "reasoning_phase": False
-                            }
-                        
-                        elif in_reasoning_phase and self.supports_reasoning and reasoning:
-                            reasoning_buffer += content
+
                         else:
+                            # Non-reasoning model or reasoning disabled — yield directly
                             yield {
                                 "text": content,
                                 "content": content,
@@ -707,8 +704,9 @@ class LlamaWrapper:
                                 "finished": False,
                                 "reasoning_phase": False
                             }
-                        
+
                         if choice.get('finish_reason') is not None:
+                            # Handle end-of-stream for reasoning models
                             if in_reasoning_phase and self.supports_reasoning and reasoning and reasoning_buffer:
                                 cleaned_reasoning = self._clean_reasoning_content(reasoning_buffer)
                                 if cleaned_reasoning:
@@ -719,7 +717,7 @@ class LlamaWrapper:
                                         "finished": False,
                                         "reasoning_phase": True
                                     }
-                            
+
                             yield {
                                 "text": "",
                                 "tokens_generated": total_tokens,
@@ -728,7 +726,7 @@ class LlamaWrapper:
                                 "reasoning_phase": False
                             }
                             break
-                        
+
         finally:
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)
