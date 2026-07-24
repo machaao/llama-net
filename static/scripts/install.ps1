@@ -185,15 +185,11 @@ if ($Developer -and (Test-Path ".\pyproject.toml") -and (Test-Path ".\inference_
     & $pip install -e "."
     & $pip install -r requirements-inference.txt
 } else {
-    $installed = $false
+    Write-Host "  Installing from GitHub..." -ForegroundColor DarkGray
     try {
-        & $pip install "llamanet" 2>$null
-        $installed = $true
-    } catch {}
-
-    if (-not $installed) {
-        Write-Warn "PyPI install failed — trying from GitHub..."
         & $pip install "git+https://github.com/machaao/llama-net.git"
+    } catch {
+        Write-Fail "Failed to install LlamaNet from GitHub. Check your internet connection."
     }
     Write-Ok "LlamaNet package installed"
 
@@ -258,7 +254,7 @@ if exist "%UPDATE_CHECK%" (
 )
 if not "%TODAY%"=="%LAST_CHECK%" (
     echo Checking for updates...
-    pip install --upgrade llamanet 2>nul
+    pip install --upgrade "git+https://github.com/machaao/llama-net.git" 2>nul
     echo %TODAY%>"%UPDATE_CHECK%"
 )
 

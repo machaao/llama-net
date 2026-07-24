@@ -158,12 +158,11 @@ if [ -f "./pyproject.toml" ] && [ -d "./inference_node" ]; then
     pip install -e . 2>/dev/null
     pip install -r requirements-inference.txt 2>/dev/null || true
 else
-    if pip install "llamanet" 2>/dev/null; then
-        ok "LlamaNet package installed"
-    else
-        warn "PyPI install failed — trying direct from GitHub..."
-        pip install "git+https://github.com/machaao/llama-net.git"
-    fi
+    info "Installing from GitHub..."
+    pip install "git+https://github.com/machaao/llama-net.git" || {
+        fail "Failed to install LlamaNet from GitHub. Check your internet connection."
+    }
+    ok "LlamaNet package installed"
 
     info "Installing inference engine..."
     pip install llama-cpp-python psutil pynvml tqdm huggingface_hub 2>/dev/null || {
@@ -231,7 +230,7 @@ fi
 
 if [ "\$LAST_CHECK" != "\$TODAY" ]; then
     echo "Checking for updates..."
-    pip install --upgrade llamanet 2>/dev/null
+    pip install --upgrade "git+https://github.com/machaao/llama-net.git" 2>/dev/null
     echo "\$TODAY" > "\$UPDATE_CHECK_FILE"
 fi
 
