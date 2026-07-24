@@ -43,8 +43,8 @@ $osVersion = [System.Environment]::OSVersion.Version
 $arch = $env:PROCESSOR_ARCHITECTURE
 Write-Ok "Windows $($osVersion.Major).$($osVersion.Minor) ($arch)"
 
-$drive = (Get-Item $env:LOCALAPPDATA).PSDrive
-$freeGB = [math]::Round((Get-PSDrive $drive.Name).Free / 1GB, 1)
+$driveLetter = (Split-Path $env:LOCALAPPDATA -Qualifier).TrimEnd(':')
+$freeGB = [math]::Round((Get-PSDrive $driveLetter).Free / 1GB, 1)
 if ($freeGB -lt 2) {
     Write-Fail "Insufficient disk space: ${freeGB}GB free (need 2GB+)"
 }
