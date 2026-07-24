@@ -133,6 +133,10 @@ class LlamaNetUI {
 
         // Restore selected model from localStorage
         this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
+
+        // Request cancellation state
+        this._currentAbortController = null;
+        this._requestCancelled = false;
         
         this.init();
     }
@@ -2149,6 +2153,7 @@ class LlamaNetUI {
                 this.addMessageToChat('system', 'Failed to get response from the network');
             }
         } catch (error) {
+            if (error.name === 'AbortError') return;
             console.error('Error sending message:', error);
             this.addMessageToChat('system', `Error: ${error.message}`);
             this.showError(`Failed to send message: ${error.message}`);
@@ -2196,10 +2201,14 @@ class LlamaNetUI {
             target_model: modelToUse  // Ensure pool routing uses the selected model
         };
 
+        this._currentAbortController = new AbortController();
+        this._requestCancelled = false;
+
         if (streamingEnabled) {
             return await this.sendOpenAIStreamingMessage(requestBody);
         } else {
             const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+                signal: this._currentAbortController.signal,
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -2237,7 +2246,8 @@ class LlamaNetUI {
                 responseId: '',
                 totalTokens: 0,
                 messageDiv: null,
-                bubbleDiv: null
+                bubbleDiv: null,
+                nodeInfo: null
             };
             
             // Initialize UI
@@ -2250,8 +2260,8 @@ class LlamaNetUI {
                 ['error', (error) => this.handleOpenAIError(error, streamState, reject)]
             ]);
             
-            // Start streaming with functional approach
-            this.processOpenAIStream(requestBody, handlers);
+            // Start streaming with functional approach, passing abort signal
+            this.processOpenAIStream(requestBody, handlers, this._currentAbortController?.signal);
         });
     }
 
@@ -2310,6 +2320,17 @@ class LlamaNetUI {
         if (cursor) {
             cursor.remove();
         }
+
+        // Show [stopped] indicator if request was cancelled
+        if (this._requestCancelled) {
+            const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
+            if (textContainer) {
+                const stoppedSpan = document.createElement('span');
+                stoppedSpan.className = 'text-muted fst-italic';
+                stoppedSpan.textContent = ' [stopped]';
+                textContainer.appendChild(stoppedSpan);
+            }
+        }
         
         // Estimate tokens (rough approximation)
         streamState.totalTokens = Math.ceil(streamState.accumulatedText.split(' ').length * 1.3);
@@ -2366,15 +2387,18 @@ class LlamaNetUI {
         reject(error);
     }
 
-    async processOpenAIStream(requestBody, handlers) {
+    async processOpenAIStream(requestBody, handlers, signal) {
         try {
-            const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+            const fetchOptions = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify(requestBody)
-            });
+            };
+            if (signal) fetchOptions.signal = signal;
+
+            const response = await fetch(`${this.baseUrl}/v1/chat/completions`, fetchOptions);
 
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -2387,6 +2411,10 @@ class LlamaNetUI {
             await this.processStreamChunks(streamProcessor, handlers);
             
         } catch (error) {
+            if (error.name === 'AbortError') {
+                handlers.get('complete')();
+                return;
+            }
             console.error('OpenAI streaming error:', error);
             handlers.get('error')(error);
         }
@@ -2446,6 +2474,10 @@ class LlamaNetUI {
             completeHandler();
             
         } catch (error) {
+            if (error.name === 'AbortError') {
+                completeHandler();
+                return;
+            }
             handlers.get('error')(error);
         }
     }
@@ -2544,13 +2576,24 @@ class LlamaNetUI {
     }
     
     toggleSendButton(enabled) {
-        const button = document.getElementById('send-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const stopBtn = document.getElementById('stop-btn');
         if (enabled) {
-            button.disabled = false;
-            button.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+            sendBtn.classList.remove('d-none');
+            sendBtn.disabled = false;
+            if (stopBtn) stopBtn.classList.add('d-none');
+            this._requestCancelled = false;
         } else {
-            button.disabled = true;
-            button.innerHTML = '<div class="loading-spinner"></div> Sending...';
+            sendBtn.classList.add('d-none');
+            if (stopBtn) stopBtn.classList.remove('d-none');
+        }
+    }
+
+    cancelCurrentRequest() {
+        this._requestCancelled = true;
+        if (this._currentAbortController) {
+            this._currentAbortController.abort();
+            this._currentAbortController = null;
         }
     }
     
@@ -3669,6 +3712,10 @@ function dismissWakeWarning() {
     const banner = document.getElementById('wake-warning-banner');
     if (banner) banner.style.display = 'none';
     if (llamaNetUI) llamaNetUI._wakeWarningDismissed = true;
+}
+
+function cancelCurrentRequest() {
+    if (llamaNetUI) llamaNetUI.cancelCurrentRequest();
 }
 
 function refreshNodeInfo(nodeId) {

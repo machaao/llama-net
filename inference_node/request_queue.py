@@ -226,6 +226,8 @@ class RequestQueueManager:
                     continue
                 if request.status == RequestStatus.TIMED_OUT:
                     continue
+                if request.future.done():
+                    continue
                 await self._process_request(request)
             except asyncio.CancelledError:
                 logger.info("Request queue worker cancelled")
@@ -237,6 +239,8 @@ class RequestQueueManager:
 
     async def _process_request(self, request: QueuedRequest):
         """Process a single request with timeout protection"""
+        if request.future.done():
+            return
         self.processing_request = request
         request.status = RequestStatus.PROCESSING
         request.started_at = time.time()
