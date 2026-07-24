@@ -268,6 +268,11 @@ async def _wait_for_tunnel_and_register():
                 asyncio.create_task(gateway_client.heartbeat_loop())
             if not gateway_client.peer_refresh_task or gateway_client.peer_refresh_task.done():
                 asyncio.create_task(gateway_client.peer_refresh_loop())
+        elif gateway_client._quality_rejected:
+            logger.warning(
+                f"🚫 Gateway registration rejected by quality gate: "
+                f"{gateway_client._rejection_reason}"
+            )
         else:
             logger.warning("⚠️ Gateway registration failed even with tunnel URL")
     except Exception as e:

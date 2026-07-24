@@ -200,9 +200,27 @@ class SystemInfo:
             
         except ImportError:
             logger.debug("pynvml not available - install with: pip install pynvml")
-            SystemInfo._gpu_info_cache = None
-            SystemInfo._cache_time = current_time
-            return None
+            # Fall through to Apple Silicon detection below
+
+        # ── Apple Silicon (macOS arm64) — Metal GPU ──
+        try:
+            if platform.system() == "Darwin" and platform.machine() == "arm64":
+                import subprocess as _sub
+                result = _sub.run(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    chip_name = result.stdout.strip()
+                    gpu_result = f"{chip_name} (Metal)"
+                else:
+                    gpu_result = "Apple Silicon (Metal)"
+                SystemInfo._gpu_info_cache = gpu_result
+                SystemInfo._cache_time = current_time
+                return gpu_result
+        except Exception as e:
+            logger.debug(f"Apple Silicon detection failed: {e}")
+
         except Exception as e:
             # Only log as debug for common "no NVIDIA GPU" scenarios
             error_msg = str(e).lower()

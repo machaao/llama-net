@@ -11,6 +11,7 @@ One HTTP client to rule them all:
 
 import asyncio
 import hashlib
+import json
 import os
 import time
 from typing import Dict, Any, Optional, List
@@ -55,6 +56,10 @@ class GatewayClient:
         self._peers_updated_at: float = 0
         self._rr_index: Dict[str, int] = {}
 
+        # Quality gate rejection tracking
+        self._quality_rejected: bool = False
+        self._rejection_reason: str = ""
+
     # ─── lifecycle ───────────────────────────────────────────────
 
     async def register(self) -> bool:
@@ -95,6 +100,22 @@ class GatewayClient:
                     else:
                         text = await resp.text()
                         logger.warning(f"Registration failed ({resp.status}): {text}")
+
+                        # If quality gate rejected us, stop retrying permanently
+                        if resp.status == 403:
+                            try:
+                                body = json.loads(text)
+                                self._quality_rejected = True
+                                self._rejection_reason = body.get("reason", "unknown")
+                                logger.warning(
+                                    f"🚫 Node rejected by gateway quality gate: {self._rejection_reason}"
+                                )
+                                logger.warning(
+                                    f"   This node will NOT retry registration. "
+                                    f"Fix the issue or disable the quality gate on the gateway."
+                                )
+                            except Exception:
+                                pass
                         return False
         except Exception as e:
             logger.warning(f"Could not register with gateway: {e}")
@@ -187,9 +208,15 @@ class GatewayClient:
 
                 # Try to register if we have a URL but aren't registered
                 if self.own_url and not self.registered:
-                    await self.register()
-                    if self.registered:
-                        await self.send_event("node_joined")
+                    if self._quality_rejected:
+                        logger.debug(
+                            f"Skipping registration — rejected by quality gate: "
+                            f"{self._rejection_reason}"
+                        )
+                    else:
+                        await self.register()
+                        if self.registered:
+                            await self.send_event("node_joined")
 
                 # Send heartbeat only if registered
                 if self.registered:
