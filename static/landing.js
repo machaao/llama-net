@@ -105,6 +105,11 @@ class LandingApp {
                 break;
             case 'heartbeat':
                 break;
+            case 'stats_update':
+                if (data.stats) {
+                    this.updateStatsDisplay(data.stats);
+                }
+                break;
         }
     }
     debouncedRefresh() {
