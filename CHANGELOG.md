@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- add contribution templates, security policy, and readme badges (.github/FUNDING.yml, .github/ISSUE_TEMPLATE/bug_report.md, .github/ISSUE_TEMPLATE/feature_request.md, +4 more) [via commit]
 - add SEO meta tags, structured data, robots.txt, sitemap.xml, and FAQ section (landing/server.py, static/landing.css, static/landing.html, +2 more) [via commit]
 - add --help and --no-tunnel flags, enable tunnel by default for local development (start-app.bat, start-app.sh, static/scripts/install.ps1, +1 more) [via commit]
 - add resolve_static_dir helper, update servers, installer, and launcher (common/utils.py, inference_node/server.py, landing/server.py, +2 more) [via commit]
