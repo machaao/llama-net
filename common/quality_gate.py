@@ -110,6 +110,8 @@ class NodeQualityGate:
         """Send a minimal inference request to the node's tunnel URL.
 
         Measures TTFT, latency, and TPS from the actual response.
+        Retries on transient errors (530, 502, 503, connection errors)
+        to handle Cloudflare tunnel propagation delays.
         Returns ProbeResult with success=True/False.
         """
         if not self.enabled:
@@ -127,67 +129,100 @@ class NodeQualityGate:
             "stream": False,
         }
 
-        start_time = time.time()
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.probe_timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    probe_url,
-                    json=body,
-                    headers={"Content-Type": "application/json"},
-                ) as resp:
-                    latency = time.time() - start_time
+        # Transient HTTP status codes that indicate tunnel/startup issues
+        TRANSIENT_HTTP_CODES = {502, 503, 504, 530}
+        max_attempts = 3
+        attempt_delay = 3  # seconds between retries
 
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        return ProbeResult(
-                            success=False,
-                            latency=latency,
-                            error=f"HTTP {resp.status}: {error_text[:200]}",
+        for attempt in range(max_attempts):
+            start_time = time.time()
+            try:
+                timeout = aiohttp.ClientTimeout(total=self.probe_timeout)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        probe_url,
+                        json=body,
+                        headers={"Content-Type": "application/json"},
+                    ) as resp:
+                        latency = time.time() - start_time
+
+                        if resp.status != 200:
+                            error_text = await resp.text()
+
+                            # Retry on transient errors
+                            if resp.status in TRANSIENT_HTTP_CODES and attempt < max_attempts - 1:
+                                logger.info(
+                                    f"Probe attempt {attempt + 1}/{max_attempts} got HTTP {resp.status} "
+                                    f"(transient) — retrying in {attempt_delay}s"
+                                )
+                                await asyncio.sleep(attempt_delay)
+                                continue
+
+                            return ProbeResult(
+                                success=False,
+                                latency=latency,
+                                error=f"HTTP {resp.status}: {error_text[:200]}",
+                            )
+
+                        data = await resp.json()
+                        completion_tokens = (
+                            data.get("usage", {}).get("completion_tokens", 0)
+                        )
+                        # For non-streaming, TTFT ≈ total latency
+                        ttft = latency
+                        tps = completion_tokens / latency if latency > 0 else 0
+
+                        logger.info(
+                            f"Probe OK: ttft={ttft:.2f}s, latency={latency:.2f}s, "
+                            f"tps={tps:.1f}, tokens={completion_tokens}"
                         )
 
-                    data = await resp.json()
-                    completion_tokens = (
-                        data.get("usage", {}).get("completion_tokens", 0)
-                    )
-                    # For non-streaming, TTFT ≈ total latency
-                    ttft = latency
-                    tps = completion_tokens / latency if latency > 0 else 0
+                        return ProbeResult(
+                            ttft=ttft,
+                            latency=latency,
+                            tps=tps,
+                            completion_tokens=completion_tokens,
+                            success=True,
+                        )
 
+            except asyncio.TimeoutError:
+                latency = time.time() - start_time
+                if attempt < max_attempts - 1:
                     logger.info(
-                        f"Probe OK: ttft={ttft:.2f}s, latency={latency:.2f}s, "
-                        f"tps={tps:.1f}, tokens={completion_tokens}"
+                        f"Probe attempt {attempt + 1}/{max_attempts} timed out "
+                        f"— retrying in {attempt_delay}s"
                     )
-
-                    return ProbeResult(
-                        ttft=ttft,
-                        latency=latency,
-                        tps=tps,
-                        completion_tokens=completion_tokens,
-                        success=True,
+                    await asyncio.sleep(attempt_delay)
+                    continue
+                return ProbeResult(
+                    success=False,
+                    latency=latency,
+                    error=f"probe timeout after {self.probe_timeout}s",
+                )
+            except aiohttp.ClientConnectionError as e:
+                latency = time.time() - start_time
+                if attempt < max_attempts - 1:
+                    logger.info(
+                        f"Probe attempt {attempt + 1}/{max_attempts} connection error: "
+                        f"{str(e)[:80]} — retrying in {attempt_delay}s"
                     )
+                    await asyncio.sleep(attempt_delay)
+                    continue
+                return ProbeResult(
+                    success=False,
+                    latency=latency,
+                    error=f"connection error: {str(e)[:200]}",
+                )
+            except Exception as e:
+                latency = time.time() - start_time
+                return ProbeResult(
+                    success=False,
+                    latency=latency,
+                    error=f"probe error: {str(e)[:200]}",
+                )
 
-        except asyncio.TimeoutError:
-            latency = time.time() - start_time
-            return ProbeResult(
-                success=False,
-                latency=latency,
-                error=f"probe timeout after {self.probe_timeout}s",
-            )
-        except aiohttp.ClientConnectionError as e:
-            latency = time.time() - start_time
-            return ProbeResult(
-                success=False,
-                latency=latency,
-                error=f"connection error: {str(e)[:200]}",
-            )
-        except Exception as e:
-            latency = time.time() - start_time
-            return ProbeResult(
-                success=False,
-                latency=latency,
-                error=f"probe error: {str(e)[:200]}",
-            )
+        # Should not reach here, but just in case
+        return ProbeResult(success=False, error="probe failed after all attempts")
 
     # ── Probe Evaluation ─────────────────────────────────────────
 

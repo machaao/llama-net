@@ -101,22 +101,37 @@ class GatewayClient:
                         text = await resp.text()
                         logger.warning(f"Registration failed ({resp.status}): {text}")
 
-                        # If quality gate rejected us, stop retrying permanently
+                        # If quality gate rejected us, check if it's permanent or transient
                         if resp.status == 403:
-                            # Always set rejection flag on 403, even if JSON parse fails
-                            self._quality_rejected = True
                             try:
                                 body = json.loads(text)
-                                self._rejection_reason = body.get("reason", "quality gate rejection")
+                                failed_check = body.get("failed_check", "")
+                                reason = body.get("reason", "quality gate rejection")
+
+                                if failed_check == "hardware":
+                                    # Hardware rejection is permanent — stop retrying
+                                    self._quality_rejected = True
+                                    self._rejection_reason = reason
+                                    logger.warning(
+                                        f"🚫 Node permanently rejected by hardware gate: {reason}"
+                                    )
+                                    logger.warning(
+                                        f"   This node will NOT retry registration. "
+                                        f"Fix the hardware issue or disable the quality gate."
+                                    )
+                                else:
+                                    # Probe failure is transient — log but keep retrying
+                                    logger.warning(
+                                        f"⚠️ Node rejected by probe gate (transient): {reason}"
+                                    )
+                                    logger.warning(
+                                        f"   Will retry registration on next heartbeat."
+                                    )
                             except Exception:
-                                self._rejection_reason = "HTTP 403 rejection"
-                            logger.warning(
-                                f"🚫 Node rejected by gateway quality gate: {self._rejection_reason}"
-                            )
-                            logger.warning(
-                                f"   This node will NOT retry registration. "
-                                f"Fix the issue or disable the quality gate on the gateway."
-                            )
+                                # Cannot parse response — treat as transient
+                                logger.warning(
+                                    f"⚠️ Quality gate rejection (unparseable) — will retry"
+                                )
                         return False
         except Exception as e:
             logger.warning(f"Could not register with gateway: {e}")
