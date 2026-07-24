@@ -1025,7 +1025,8 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                     ):
                         yield {
                             "text": chunk.get("text", ""),
-                            "reasoning": chunk.get("reasoning", ""),
+                            "reasoning": chunk.get("reasoning", "") or chunk.get("reasoning_content", ""),
+                            "reasoning_content": chunk.get("reasoning_content", ""),
                             "finished": chunk.get("finished", False)
                         }
                         
@@ -1187,7 +1188,8 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                             break
                         yield {
                             "text": chunk.get("text", ""),
-                            "reasoning": chunk.get("reasoning", ""),
+                            "reasoning": chunk.get("reasoning", "") or chunk.get("reasoning_content", ""),
+                            "reasoning_content": chunk.get("reasoning_content", ""),
                             "finished": chunk.get("finished", False)
                         }
                         

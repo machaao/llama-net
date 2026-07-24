@@ -133,6 +133,7 @@ class LlamaNetUI {
 
         // Restore selected model from localStorage
         this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
+        this.reasoningEnabled = localStorage.getItem('llamanet_reasoning') !== 'false';
 
         // Request cancellation state
         this._currentAbortController = null;
@@ -144,6 +145,16 @@ class LlamaNetUI {
     async init() {
         // Load system prompt from localStorage
         this.loadSystemPrompt();
+
+        // Restore reasoning toggle
+        const reasoningCb = document.getElementById('enable-reasoning');
+        if (reasoningCb) {
+            reasoningCb.checked = this.reasoningEnabled;
+            reasoningCb.addEventListener('change', () => {
+                this.reasoningEnabled = reasoningCb.checked;
+                localStorage.setItem('llamanet_reasoning', String(this.reasoningEnabled));
+            });
+        }
         
         // Start ONLY SSE-based network monitoring using unified SSE manager
         this.startUnifiedSSENetworkMonitoring();
@@ -2198,7 +2209,8 @@ class LlamaNetUI {
             temperature: temperature,
             stream: streamingEnabled,
             strategy: strategy,
-            target_model: modelToUse  // Ensure pool routing uses the selected model
+            target_model: modelToUse,
+            reasoning: this.reasoningEnabled
         };
 
         this._currentAbortController = new AbortController();
@@ -2290,27 +2302,69 @@ class LlamaNetUI {
     }
 
     handleOpenAIToken(data, streamState) {
+        // Handle reasoning content
+        if (data.reasoning_content) {
+            streamState.reasoningText = (streamState.reasoningText || '') + data.reasoning_content;
+            const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
+            if (textContainer) {
+                textContainer.innerHTML = this.renderReasoningBlock(streamState.reasoningText, false);
+            }
+            document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+        }
+
+        // Handle regular content
         if (data.content) {
             streamState.accumulatedText += data.content;
             const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
             if (textContainer) {
-                // Render accumulated markdown content
                 const renderedContent = this.markdownRenderer.render(streamState.accumulatedText);
-                textContainer.innerHTML = `<div class="markdown-content streaming-markdown">${renderedContent}</div>`;
-                
-                // Highlight any new code blocks
+                let html = '';
+                if (streamState.reasoningText) {
+                    html += this.renderReasoningBlock(streamState.reasoningText, false);
+                }
+                html += `<div class="markdown-content streaming-markdown">${renderedContent}</div>`;
+                textContainer.innerHTML = html;
                 this.highlightCodeBlocks(textContainer);
             }
             document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
         }
-        
+
         if (data.id) {
             streamState.responseId = data.id;
         }
-        
+
         // Capture node info from any chunk that contains it
         if (data.node_info) {
             streamState.nodeInfo = data.node_info;
+        }
+    }
+
+    renderReasoningBlock(text, expanded = false) {
+        const escapedText = this.escapeHtml(text);
+        const displayStyle = expanded ? 'block' : 'none';
+        const chevronIcon = expanded ? 'fa-chevron-down' : 'fa-chevron-right';
+        return `
+            <div class="reasoning-block">
+                <div class="reasoning-header" onclick="llamaNetUI.toggleReasoningBlock(this)">
+                    <i class="fas ${chevronIcon} reasoning-chevron"></i>
+                    <i class="fas fa-brain"></i> Thinking...
+                </div>
+                <div class="reasoning-content" style="display: ${displayStyle};">${escapedText}</div>
+            </div>
+        `;
+    }
+
+    toggleReasoningBlock(headerEl) {
+        const block = headerEl.closest('.reasoning-block');
+        const content = block.querySelector('.reasoning-content');
+        const chevron = block.querySelector('.reasoning-chevron');
+        const isExpanded = content.style.display !== 'none';
+        if (isExpanded) {
+            content.style.display = 'none';
+            chevron.className = 'fas fa-chevron-right reasoning-chevron';
+        } else {
+            content.style.display = 'block';
+            chevron.className = 'fas fa-chevron-down reasoning-chevron';
         }
     }
 
@@ -2365,9 +2419,10 @@ class LlamaNetUI {
                 id: streamState.responseId,
                 tokens: streamState.totalTokens,
                 api: 'Streaming',
-                node_info: streamState.nodeInfo
+                node_info: streamState.nodeInfo,
+                reasoning: streamState.reasoningText || null
             },
-            isStreaming: true // Flag to indicate this was handled by streaming
+            isStreaming: true
         });
     }
 
@@ -2492,6 +2547,7 @@ class LlamaNetUI {
                 
                 return {
                     content: delta.content || '',
+                    reasoning_content: delta.reasoning_content || '',
                     role: delta.role || null,
                     id: chunk.id || '',
                     finished: choice.finish_reason !== null,
@@ -2540,9 +2596,14 @@ class LlamaNetUI {
         if (role === 'assistant') {
             // Render markdown for assistant responses
             renderedContent = this.markdownRenderer.render(content);
+            let reasoningHtml = '';
+            if (metadata && metadata.reasoning) {
+                reasoningHtml = this.renderReasoningBlock(metadata.reasoning, false);
+            }
             messageDiv.innerHTML = `
                 <div class="message-bubble">
                     <i class="${roleIcon} me-2"></i>
+                    ${reasoningHtml}
                     <div class="markdown-content">${renderedContent}</div>
                 </div>
                 ${metadataHtml}

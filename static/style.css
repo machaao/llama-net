@@ -1605,4 +1605,51 @@ pre {
     font-size: 0.8rem;
     white-space: nowrap;
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* REASONING / THINKING BLOCK                             */
+/* ═══════════════════════════════════════════════════════ */
+
+.reasoning-block {
+    margin-bottom: 0.75rem;
+    border: 1px solid rgba(13, 110, 253, 0.2);
+    border-radius: 0.5rem;
+    background-color: rgba(13, 110, 253, 0.03);
+    overflow: hidden;
+}
+
+.reasoning-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--primary-color);
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.reasoning-header:hover {
+    background-color: rgba(13, 110, 253, 0.06);
+}
+
+.reasoning-chevron {
+    font-size: 0.65rem;
+    transition: transform 0.2s ease;
+    width: 1rem;
+    text-align: center;
+}
+
+.reasoning-content {
+    padding: 0.5rem 0.75rem 0.75rem;
+    font-size: 0.82rem;
+    color: #6c757d;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border-top: 1px solid rgba(13, 110, 253, 0.1);
+    max-height: 300px;
+    overflow-y: auto;
 }
