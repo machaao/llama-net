@@ -1,7 +1,7 @@
 # LlamaNet - Full inference node dependencies
 -r requirements.txt
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-llama-cpp-python>=0.2.20
+llama-cpp-python==0.3.34
 psutil>=5.8.0,<6.0.0
 pynvml>=11.4.1
 tqdm>=4.64.0
