@@ -30,7 +30,11 @@ $MinPythonMinor = 9
 function Write-Step  { param($msg) Write-Host "`n  $msg" -ForegroundColor Cyan }
 function Write-Ok    { param($msg) Write-Host "  $msg" -ForegroundColor Green }
 function Write-Warn  { param($msg) Write-Host "  $msg" -ForegroundColor Yellow }
-function Write-Fail  { param($msg) Write-Host "  $msg" -ForegroundColor Red; exit 1 }
+function Write-Fail  {
+    param($msg)
+    Write-Host "  $msg" -ForegroundColor Red
+    throw $msg
+}
 
 Write-Host ""
 Write-Host "  LlamaNet Installer for Windows" -ForegroundColor White
@@ -43,16 +47,23 @@ $osVersion = [System.Environment]::OSVersion.Version
 $arch = $env:PROCESSOR_ARCHITECTURE
 Write-Ok "Windows $($osVersion.Major).$($osVersion.Minor) ($arch)"
 
-$localAppDataQualifier = Split-Path $env:LOCALAPPDATA -Qualifier -ErrorAction SilentlyContinue
-$driveLetter = if ($localAppDataQualifier) { $localAppDataQualifier.TrimEnd(':') } else { $env:SystemDrive.TrimEnd(':') }
+$freeGB = 100
 try {
-    $freeGB = [math]::Round((Get-PSDrive -Name $driveLetter -ErrorAction Stop).Free / 1GB, 1)
+    $localAppDataQualifier = Split-Path $env:LOCALAPPDATA -Qualifier -ErrorAction SilentlyContinue
+    $driveLetter = if ($localAppDataQualifier) { $localAppDataQualifier.TrimEnd(':') } else { $env:SystemDrive.TrimEnd(':') }
+    $driveLetter = [string]$driveLetter
+
+    $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='${driveLetter}:'" -ErrorAction Stop
+    if ($disk -and $disk.FreeSpace) {
+        $freeGB = [math]::Round([double]$disk.FreeSpace / 1GB, 1)
+    }
 } catch {
     try {
-        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='${driveLetter}:'" -ErrorAction Stop
-        $freeGB = [math]::Round($disk.FreeSpace / 1GB, 1)
+        $driveInfo = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.Name -eq "${driveLetter}:\" -and $_.IsReady } | Select-Object -First 1
+        if ($driveInfo) {
+            $freeGB = [math]::Round([double]$driveInfo.AvailableFreeSpace / 1GB, 1)
+        }
     } catch {
-        $freeGB = 100
         Write-Warn "Could not detect free disk space — assuming sufficient"
     }
 }
