@@ -37,6 +37,43 @@ from common.request_validator import RequestValidator, ValidationError
 
 logger = get_logger(__name__)
 
+
+async def _run_native_probe(llm_instance):
+    """Run a native local inference to measure real TTFT/latency/TPS.
+
+    Called once after model loads, before attempting gateway registration.
+    Uses the local model directly — no tunnel, no network, no Cloudflare.
+    """
+    try:
+        start_time = time.time()
+        result = await llm_instance.generate_chat_safe(
+            messages=[{"role": "user", "content": "Say hi"}],
+            max_tokens=10,
+            temperature=0.7,
+            reasoning=False,
+        )
+        latency = time.time() - start_time
+        ttft = latency  # Non-streaming → TTFT ≈ total latency
+        tokens = result.get("tokens_generated", 0)
+        tps = tokens / latency if latency > 0 else 0
+
+        probe_metrics = {
+            "ttft": round(ttft, 3),
+            "latency": round(latency, 3),
+            "tps": round(tps, 2),
+            "completion_tokens": tokens,
+            "probe_success": True,
+        }
+        logger.info(
+            f"🔬 Native probe: ttft={ttft:.3f}s, latency={latency:.3f}s, "
+            f"tps={tps:.1f}, tokens={tokens}"
+        )
+        return probe_metrics
+    except Exception as e:
+        logger.warning(f"Native probe failed: {e}")
+        return {"probe_success": False, "error": str(e)}
+
+
 # Global variables
 config = None
 llm = None
@@ -140,6 +177,9 @@ async def lifespan(app: FastAPI):
             if pool_history:
                 logger.info(f"Pool history: {len(pool_history)} models previously used")
 
+            # Run native probe to measure local inference performance
+            probe_metrics = await _run_native_probe(llm)
+
             # Per-generation metrics broadcast
             _main_loop = asyncio.get_event_loop()
             llm.metrics_manager._event_loop = _main_loop
@@ -165,6 +205,7 @@ async def lifespan(app: FastAPI):
                     public_ip=config.public_ip,
                     model_pool=model_pool,
                 )
+                gateway_client.probe_metrics = probe_metrics
 
         # Defer registration until tunnel URL is available and Uvicorn is serving.
         # _wait_for_tunnel_and_register() handles: tunnel detection → register →
@@ -1811,8 +1852,12 @@ async def select_model(request: Request):
                 new_slot = model_pool.load_model(model_path, model_name)
                 llm = new_slot.llm
 
+                # Run native probe after model loads
+                probe_metrics = await _run_native_probe(llm)
+
                 if gateway_client:
                     gateway_client.model_name = model_name
+                    gateway_client.probe_metrics = probe_metrics
 
                 try:
                     heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
@@ -1832,6 +1877,7 @@ async def select_model(request: Request):
                             public_ip=config.public_ip,
                             model_pool=model_pool,
                         )
+                        gateway_client_local.probe_metrics = probe_metrics
                         await gateway_client_local.register()
                         asyncio.create_task(gateway_client_local.heartbeat_loop())
                         asyncio.create_task(gateway_client_local.peer_refresh_loop())
@@ -1870,8 +1916,12 @@ async def select_model(request: Request):
                 config.model_name = model_name
                 config.model_path = model_path
 
+                # Run native probe after model loads
+                probe_metrics = await _run_native_probe(llm)
+
                 if gateway_client:
                     gateway_client.model_name = model_name
+                    gateway_client.probe_metrics = probe_metrics
                     asyncio.create_task(gateway_client.send_event("node_updated"))
 
                 config.save_active_model(model_path, model_name)
@@ -1973,9 +2023,14 @@ async def select_model(request: Request):
                 logger.warning("Not all requests drained - proceeding anyway")
 
             llm.reload_model(model_path)
+
+            # Run native probe after model loads
+            probe_metrics = await _run_native_probe(llm)
+
             if gateway_client:
                 gateway_client.model_name = config.model_name
                 gateway_client.own_url = gateway_client.tunnel_url
+                gateway_client.probe_metrics = probe_metrics
                 asyncio.create_task(gateway_client.send_event("node_updated"))
 
             config.save_active_model(model_path, config.model_name)

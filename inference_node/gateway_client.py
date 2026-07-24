@@ -60,6 +60,9 @@ class GatewayClient:
         self._quality_rejected: bool = False
         self._rejection_reason: str = ""
 
+        # Self-reported native probe metrics (set after model loads)
+        self.probe_metrics: Dict[str, Any] = {}
+
     # ─── lifecycle ───────────────────────────────────────────────
 
     async def register(self) -> bool:
@@ -89,6 +92,7 @@ class GatewayClient:
                         "ip": self.public_ip,
                         "port": self.port,
                         "metrics": metrics,
+                        "probe_metrics": self.probe_metrics,
                         "platform": self._get_platform_string(),
                         "gpu": self._get_gpu_info(),
                     },
@@ -341,6 +345,7 @@ class GatewayClient:
                     if self.model_pool else []
                 ),
                 "metrics": metrics,
+                "probe_metrics": self.probe_metrics,
                 "platform": self._get_platform_string(),
                 "gpu": self._get_gpu_info(),
                 **(extra_data or {}),
