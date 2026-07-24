@@ -143,6 +143,26 @@ class SystemInfo:
             current_time - SystemInfo._cache_time < SystemInfo._cache_ttl):
             return SystemInfo._gpu_info_cache
         
+        # ── Apple Silicon (macOS arm64) — Metal GPU ──
+        # Check FIRST to avoid pynvml false-negative on macOS
+        try:
+            if platform.system() == "Darwin" and platform.machine() == "arm64":
+                import subprocess as _sub
+                result = _sub.run(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    capture_output=True, text=True, timeout=3,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    chip_name = result.stdout.strip()
+                    gpu_result = f"{chip_name} (Metal)"
+                else:
+                    gpu_result = "Apple Silicon (Metal)"
+                SystemInfo._gpu_info_cache = gpu_result
+                SystemInfo._cache_time = current_time
+                return gpu_result
+        except Exception as e:
+            logger.debug(f"Apple Silicon detection failed: {e}")
+
         try:
             # First check if we have NVIDIA GPUs using nvidia-smi (most reliable)
             import subprocess
