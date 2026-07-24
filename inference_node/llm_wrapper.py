@@ -327,17 +327,29 @@ class LlamaWrapper:
     
     def _clean_reasoning_content(self, reasoning_text: str) -> str:
         """Clean up reasoning content by removing special tokens"""
+        import re
+        
         if not reasoning_text:
             return ""
         
-        # Remove common special tokens from reasoning
-        tokens_to_remove = [
-            "<|start|>", "<|end|>", "<|channel|>", "assistant", "final"
-        ]
-        
         cleaned = reasoning_text
+        
+        # Remove all channel markers with flexible patterns
+        # Matches: <|channel|>, <|channel>thought, <channel|>, etc.
+        cleaned = re.sub(r'<\|?channel\|?[>a-zA-Z]*', '', cleaned)
+        cleaned = re.sub(r'</?\|?channel\|?>', '', cleaned)
+        
+        # Remove other special tokens
+        tokens_to_remove = [
+            "<|start|>", "<|end|>", "<|message|>",
+            "assistantfinal", "assistant", "final"
+        ]
         for token in tokens_to_remove:
             cleaned = cleaned.replace(token, "")
+        
+        # Clean markers like <|channel>thought with content after
+        cleaned = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', cleaned)
+        cleaned = re.sub(r'<[a-zA-Z_]+\|>', '', cleaned)
         
         # Clean up extra whitespace and newlines
         cleaned = " ".join(cleaned.split())
@@ -497,11 +509,12 @@ class LlamaWrapper:
                      repeat_penalty: float = 1.1,
                      reasoning: bool = True) -> Dict[str, Any]:
         """Generate chat completion with reasoning content separation"""
+        import re
+        
         self.metrics_manager.record_request_start()
         start_time = time.time()
         
         try:
-            # Use create_chat_completion for proper template handling
             output = self.llm.create_chat_completion(
                 messages=self._format_messages(messages),
                 max_tokens=max_tokens,
@@ -514,11 +527,9 @@ class LlamaWrapper:
             
             generation_time = time.time() - start_time
             
-            # Record TTFT and latency for non-streaming (TTFT ≈ latency for non-streaming)
             self.metrics_manager.record_ttft(generation_time)
             self.metrics_manager.record_latency(generation_time)
             
-            # Extract response with reasoning separation
             response_content = ""
             reasoning_content = ""
             tokens_generated = 0
@@ -528,7 +539,12 @@ class LlamaWrapper:
                 if 'message' in choice and 'content' in choice['message']:
                     full_response = choice['message']['content']
                     
-                    # Separate reasoning from content if reasoning is enabled
+                    # Strip channel markers from response
+                    full_response = re.sub(r'<\|?channel\|?[>a-zA-Z]*', '', full_response)
+                    full_response = re.sub(r'</?\|?channel\|?>', '', full_response)
+                    full_response = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', full_response)
+                    full_response = re.sub(r'<[a-zA-Z_]+\|>', '', full_response)
+                    
                     if self.supports_reasoning and reasoning:
                         reasoning_content, response_content = self._separate_reasoning_and_content(full_response)
                     else:
@@ -546,7 +562,6 @@ class LlamaWrapper:
                 "generation_time": generation_time
             }
             
-            # Add reasoning content if available
             if reasoning_content:
                 result["reasoning"] = reasoning_content
                 result["reasoning_content"] = reasoning_content
@@ -568,9 +583,11 @@ class LlamaWrapper:
                            repeat_penalty: float = 1.1,
                            reasoning: bool = True) -> Generator[Dict[str, Any], None, None]:
         """Generate streaming chat completion with reasoning content separation"""
+        import re
+        
         self.metrics_manager.record_request_start()
         start_time = time.time()
-        first_token_time = None  # Track TTFT for streaming
+        first_token_time = None
         
         # Prepare stop tokens
         stop_tokens = normalize_stop_tokens(stop)
@@ -593,6 +610,21 @@ class LlamaWrapper:
         content_buffer = ""
         in_reasoning_phase = True
         message_marker_found = False
+        channel_marker_found = False
+        
+        # Helper to strip channel markers
+        def _strip_channel_markers(text: str) -> str:
+            """Remove channel markers from text"""
+            cleaned = text
+            # Remove <|channel>thought, <channel|>, <|channel|>, etc.
+            cleaned = re.sub(r'<\|?channel\|?[>a-zA-Z]*', '', cleaned)
+            cleaned = re.sub(r'</?\|?channel\|?>', '', cleaned)
+            cleaned = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', cleaned)
+            cleaned = re.sub(r'<[a-zA-Z_]+\|>', '', cleaned)
+            # Remove other special tokens
+            for token in ["<|start|>", "<|end|>", "<|message|>"]:
+                cleaned = cleaned.replace(token, "")
+            return cleaned.strip()
         
         try:
             for chunk in stream:
@@ -611,15 +643,25 @@ class LlamaWrapper:
                         
                         accumulated_text += content
                         
+                        # Check if we're entering a channel marker
+                        if '<|channel' in content or '<channel|' in content:
+                            channel_marker_found = True
+                            # Don't yield this content
+                            continue
+                        
+                        # Skip content while inside channel marker
+                        if channel_marker_found:
+                            if '>' in content:
+                                channel_marker_found = False
+                            continue
+                        
                         # Check for message marker
-                        if self.supports_reasoning and reasoning and "<|message|>" in accumulated_text and not message_marker_found:
+                        if "<|message|>" in accumulated_text and not message_marker_found:
                             message_marker_found = True
                             in_reasoning_phase = False
                             
-                            # Split the accumulated text at the marker
                             reasoning_part, content_part = self._separate_reasoning_and_content(accumulated_text)
                             
-                            # Send reasoning content if we have it
                             if reasoning_part:
                                 yield {
                                     "reasoning_content": reasoning_part,
@@ -629,7 +671,6 @@ class LlamaWrapper:
                                     "reasoning_phase": True
                                 }
                             
-                            # Send content part if we have it
                             if content_part:
                                 content_buffer = content_part
                                 yield {
@@ -643,7 +684,6 @@ class LlamaWrapper:
                                 }
                         
                         elif not in_reasoning_phase:
-                            # We're in content phase, send content normally
                             content_buffer += content
                             yield {
                                 "text": content,
@@ -656,12 +696,8 @@ class LlamaWrapper:
                             }
                         
                         elif in_reasoning_phase and self.supports_reasoning and reasoning:
-                            # We're still in reasoning phase, buffer the content
                             reasoning_buffer += content
-                            # Don't yield reasoning chunks individually to avoid UI clutter
-                        
                         else:
-                            # No reasoning support or reasoning disabled, send as regular content
                             yield {
                                 "text": content,
                                 "content": content,
@@ -673,7 +709,6 @@ class LlamaWrapper:
                             }
                         
                         if choice.get('finish_reason') is not None:
-                            # Handle case where we finish in reasoning phase without finding marker
                             if in_reasoning_phase and self.supports_reasoning and reasoning and reasoning_buffer:
                                 cleaned_reasoning = self._clean_reasoning_content(reasoning_buffer)
                                 if cleaned_reasoning:
@@ -685,7 +720,6 @@ class LlamaWrapper:
                                         "reasoning_phase": True
                                     }
                             
-                            # Send final chunk
                             yield {
                                 "text": "",
                                 "tokens_generated": total_tokens,
@@ -694,7 +728,7 @@ class LlamaWrapper:
                                 "reasoning_phase": False
                             }
                             break
-                            
+                        
         finally:
             final_time = time.time() - start_time
             self.metrics_manager.record_request_end(total_tokens, final_time)
