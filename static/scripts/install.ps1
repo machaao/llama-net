@@ -45,7 +45,17 @@ Write-Ok "Windows $($osVersion.Major).$($osVersion.Minor) ($arch)"
 
 $localAppDataQualifier = Split-Path $env:LOCALAPPDATA -Qualifier -ErrorAction SilentlyContinue
 $driveLetter = if ($localAppDataQualifier) { $localAppDataQualifier.TrimEnd(':') } else { $env:SystemDrive.TrimEnd(':') }
-$freeGB = [math]::Round((Get-PSDrive $driveLetter).Free / 1GB, 1)
+try {
+    $freeGB = [math]::Round((Get-PSDrive -Name $driveLetter -ErrorAction Stop).Free / 1GB, 1)
+} catch {
+    try {
+        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='${driveLetter}:'" -ErrorAction Stop
+        $freeGB = [math]::Round($disk.FreeSpace / 1GB, 1)
+    } catch {
+        $freeGB = 100
+        Write-Warn "Could not detect free disk space — assuming sufficient"
+    }
+}
 if ($freeGB -lt 2) {
     Write-Fail "Insufficient disk space: ${freeGB}GB free (need 2GB+)"
 }
