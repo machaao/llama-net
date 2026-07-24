@@ -30,7 +30,7 @@ $MinPythonMinor = 9
 function Write-Step  { param($msg) Write-Host "`n  $msg" -ForegroundColor Cyan }
 function Write-Ok    { param($msg) Write-Host "  $msg" -ForegroundColor Green }
 function Write-Warn  { param($msg) Write-Host "  $msg" -ForegroundColor Yellow }
-function Write-Fail  { param($msg) { Write-Host "  $msg" -ForegroundColor Red; exit 1 } }
+function Write-Fail  { param($msg) Write-Host "  $msg" -ForegroundColor Red; exit 1 }
 
 Write-Host ""
 Write-Host "  LlamaNet Installer for Windows" -ForegroundColor White
@@ -43,7 +43,8 @@ $osVersion = [System.Environment]::OSVersion.Version
 $arch = $env:PROCESSOR_ARCHITECTURE
 Write-Ok "Windows $($osVersion.Major).$($osVersion.Minor) ($arch)"
 
-$driveLetter = (Split-Path $env:LOCALAPPDATA -Qualifier).TrimEnd(':')
+$localAppDataQualifier = Split-Path $env:LOCALAPPDATA -Qualifier -ErrorAction SilentlyContinue
+$driveLetter = if ($localAppDataQualifier) { $localAppDataQualifier.TrimEnd(':') } else { $env:SystemDrive.TrimEnd(':') }
 $freeGB = [math]::Round((Get-PSDrive $driveLetter).Free / 1GB, 1)
 if ($freeGB -lt 2) {
     Write-Fail "Insufficient disk space: ${freeGB}GB free (need 2GB+)"
