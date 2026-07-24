@@ -171,7 +171,11 @@ fi
 DEFAULT_HOST="${HOST:-0.0.0.0}"
 DEFAULT_PORT="${PORT:-8000}"
 DEFAULT_NODE_ID="${NODE_ID:-}"
-DEFAULT_BOOTSTRAP_NODES="${BOOTSTRAP_NODES:-}"
+DEFAULT_BOOTSTRAP_PEERS="${BOOTSTRAP_PEERS:-${BOOTSTRAP_NODES:-}}"
+# Default to public LlamaNet gateway when no peers specified
+if [ -z "$DEFAULT_BOOTSTRAP_PEERS" ] && [ -z "$MACHAAO_APP_ID" ]; then
+    DEFAULT_BOOTSTRAP_PEERS="https://llamanet.app"
+fi
 DEFAULT_PUBLIC_IP="${PUBLIC_IP:-}"
 
 # ── Intel Mac Metal Compatibility ──
