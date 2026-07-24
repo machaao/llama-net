@@ -1606,6 +1606,17 @@ pre {
     white-space: nowrap;
 }
 
+/* Reasoning toggle disabled state */
+.form-check-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.form-check-input:disabled + .form-check-label {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* ═══════════════════════════════════════════════════════ */
 /* REASONING / THINKING BLOCK                             */
 /* ═══════════════════════════════════════════════════════ */

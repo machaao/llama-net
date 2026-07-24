@@ -398,6 +398,7 @@ async def list_models():
                     model_dict["detected_format"] = template_info.get("detected_format", "unknown")
                     model_dict["supports_chat"] = template_info.get("supports_chat", False)
                     model_dict["template_auto_detected"] = template_info.get("template_auto_detected", False)
+                    model_dict["supports_reasoning"] = getattr(slot.llm, 'supports_reasoning', False)
                 except Exception as e:
                     logger.warning(f"Could not get chat format info for {slot.model_name}: {e}")
             # Mark which model is currently active
@@ -417,6 +418,7 @@ async def list_models():
             model_dict["detected_format"] = template_info.get("detected_format", "unknown")
             model_dict["supports_chat"] = template_info.get("supports_chat", False)
             model_dict["template_auto_detected"] = template_info.get("template_auto_detected", False)
+            model_dict["supports_reasoning"] = getattr(llm, 'supports_reasoning', False)
         except Exception as e:
             logger.warning(f"Could not get chat format info: {e}")
         model_dict["is_active"] = True

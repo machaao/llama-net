@@ -179,6 +179,7 @@ class LlamaNetUI {
         if (this.selectedModel) {
             setTimeout(() => {
                 this.updateChatInterface(this.selectedModel);
+                this.updateReasoningForModel(this.detectReasoningModel(this.selectedModel));
                 const selectedGroup = document.querySelector(`[data-model="${this.selectedModel}"]`);
                 if (selectedGroup) {
                     selectedGroup.classList.add('selected-model');
@@ -439,6 +440,7 @@ class LlamaNetUI {
                     path: slot.model_path,
                     source: 'pool',
                     is_active: slot.is_active,
+                    supports_reasoning: this.detectReasoningModel(slot.model_name),
                 });
             });
         }
@@ -450,6 +452,7 @@ class LlamaNetUI {
                     path: '',
                     source: 'network',
                     is_active: false,
+                    supports_reasoning: this.detectReasoningModel(node.model),
                 });
             }
         });
@@ -467,6 +470,7 @@ class LlamaNetUI {
             opt.value = name;
             opt.dataset.source = info.source;
             opt.dataset.path = info.path || '';
+            opt.dataset.reasoning = info.supports_reasoning ? 'true' : 'false';
             if (info.source === 'pool') {
                 opt.textContent = (info.is_active ? '\u26a1 ' : '\u2705 ') + name + ' (local)';
             } else {
@@ -484,6 +488,13 @@ class LlamaNetUI {
         }
 
         this.selectedModel = select.value;
+
+        // Auto-update reasoning toggle for the newly selected model
+        const selectedOpt = select.selectedOptions[0];
+        if (selectedOpt) {
+            const supportsReasoning = selectedOpt.dataset.reasoning === 'true';
+            this.updateReasoningForModel(supportsReasoning);
+        }
     }
 
     onChatModelSelect(selectEl) {
@@ -491,10 +502,12 @@ class LlamaNetUI {
         const modelName = selectEl.value;
         const source = selectEl.selectedOptions[0]?.dataset.source;
         const modelPath = selectEl.selectedOptions[0]?.dataset.path || '';
+        const supportsReasoning = selectEl.selectedOptions[0]?.dataset.reasoning === 'true';
 
         this.selectedModel = modelName;
         localStorage.setItem('llamanet_selected_model', modelName);
         this.updateChatInterface(modelName);
+        this.updateReasoningForModel(supportsReasoning);
 
         if (source === 'pool' && modelPath) {
             this.switchPoolModel(modelName, modelPath);
@@ -1717,11 +1730,47 @@ class LlamaNetUI {
         }
     }
     
+    /**
+     * Determine if a model supports reasoning based on name patterns.
+     * Mirrors the backend detect_reasoning_model() logic.
+     */
+    detectReasoningModel(modelName) {
+        if (!modelName) return false;
+        const name = modelName.toLowerCase();
+        const patterns = [
+            'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning',
+            'reasoning', 'r1-', '-r1', 'think', 'cot', 'gpt-oss'
+        ];
+        return patterns.some(p => name.includes(p));
+    }
+
+    /**
+     * Update the reasoning toggle based on model capability.
+     */
+    updateReasoningForModel(supportsReasoning) {
+        const reasoningCb = document.getElementById('enable-reasoning');
+        if (!reasoningCb) return;
+
+        // Use authoritative backend data if available, otherwise client-side detection
+        if (supportsReasoning) {
+            reasoningCb.disabled = false;
+            reasoningCb.checked = this.reasoningEnabled;
+            reasoningCb.closest('.form-check')?.setAttribute('title', 'Enable reasoning for this model');
+        } else {
+            reasoningCb.disabled = true;
+            reasoningCb.checked = false;
+            reasoningCb.closest('.form-check')?.setAttribute('title', 'This model does not support reasoning');
+        }
+    }
+
     async selectModel(modelId) {
         try {
             // Update the current model selection
             this.selectedModel = modelId;
-            
+
+            // Update reasoning toggle for the selected model
+            this.updateReasoningForModel(this.detectReasoningModel(modelId));
+
             // Sync the chat model selector dropdown
             const chatSelect = document.getElementById('chat-model-select');
             if (chatSelect) {
