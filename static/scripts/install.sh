@@ -140,8 +140,9 @@ if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/activate" ]; then
     fi
 fi
 
-if [ ! -d "$VENV_DIR" ]; then
+if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/activate" ]; then
     info "Creating virtual environment..."
+    rm -rf "$VENV_DIR"
     "$PYTHON_CMD" -m venv "$VENV_DIR"
     ok "Virtual environment created"
 fi
