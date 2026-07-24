@@ -150,6 +150,7 @@ LlamaNet supports loading multiple models simultaneously in a pool with automati
 | **Tiny** | Phi-4 Mini | ~1.5 GB | 8 GB | Quick tasks, edge devices, fast iteration |
 | **Fast** | Qwen 4B | ~2.5 GB | 8 GB | Daily driver — fast responses, solid quality |
 | **Standard** | Ministral 3 8B | ~4.5 GB | 16 GB | Best all-round balance of speed and quality |
+| **Versatile** | Gemma 3 12B | ~7 GB | 24 GB | General-purpose, multilingual, strong reasoning |
 | **Coding** | Qwen 14B | ~8 GB | 32 GB | Code generation, technical tasks |
 | **Premium** | GPT-OSS 20B | ~12 GB | 32 GB | High-quality general-purpose inference |
 | **High Quality** | Qwen 35B-A3B | ~20 GB | 48 GB | Expert-level reasoning, long-form generation |
@@ -161,11 +162,11 @@ LlamaNet supports loading multiple models simultaneously in a pool with automati
 |---------------|-------------------|-------|
 | Mac M1/M2 8GB | Tiny, Fast | Use Q4_K_M quantization |
 | Mac M1/M2 Pro 16GB | Tiny → Standard | Standard tier runs great on Pro chips |
-| Mac M3/M4 Pro 18GB+ | Tiny → Coding | 18GB unified memory handles up to 14B models |
+| Mac M3/M4 Pro 18GB+ | Tiny → Versatile | Gemma 3 12B runs well on Pro chips |
 | Mac M2/M3 Max 32GB+ | All tiers | Max chips handle even the largest models |
 | Mac M2 Ultra 64GB+ | All tiers | No compromises — run anything |
 | NVIDIA 8GB VRAM | Tiny, Fast | RTX 3070, 4060, etc. |
-| NVIDIA 12GB VRAM | Tiny → Standard | RTX 3060 12GB, 4070 |
+| NVIDIA 12GB VRAM | Tiny → Versatile | RTX 3060 12GB, 4070 |
 | NVIDIA 24GB VRAM | Tiny → Premium | RTX 3090, 4090 |
 | NVIDIA 48GB+ VRAM | All tiers | A6000, A100, multi-GPU setups |
 
