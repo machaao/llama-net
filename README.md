@@ -1,15 +1,35 @@
-> Turn your Mac or GPU rig into a free public AI API in 60 seconds. OpenAI-compatible. No Docker.
+> Your Mac is idle 18 hours a day. Let it do something useful.
 
 ![GitHub Stars](https://img.shields.io/github/stars/machaao/llama-net?style=social)
 ![GitHub Downloads](https://img.shields.io/github/downloads/machaao/llama-net/total)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa)](https://github.com/sponsors/machaao)
 
-# LlamaNet: Share Your GPU With The World
+# LlamaNet
 
-Run any open-source LLM on your hardware. Get a public API in 60 seconds.
+**Turn your idle Mac or GPU into a free public AI API.**
+
+You use your Mac maybe 6 hours a day. The other 18 hours it sits there — screen off, fans idle, GPU doing nothing. Meanwhile you're paying $20/month for an AI API, or your friends are asking to borrow your ChatGPT login.
+
+What if your Mac just *handled it*?
+
+That's LlamaNet. One command, 60 seconds, and your machine becomes a free AI API that anyone can use — with an OpenAI-compatible endpoint, a public URL, and zero config.
+
+```
+curl -sSL https://llamanet.app/install.sh | sh
+llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
+```
+
+That's it. Your Mac is now an AI server.
 
 ![LlamaNet](./static/images/screenshot-v2.png)
+
+## Why?
+
+- **Your hardware is underutilized.** Apple Silicon has a Neural Engine, 16-core GPU, and unified memory — and most of the time it's rendering Finder windows.
+- **AI APIs are expensive.** GPT-4 costs $30/M tokens. You can run an equivalent model on your Mac for the cost of electricity.
+- **Open-source models are good enough.** Mistral, Qwen, Llama, Gemma — they run locally, they're fast, and they're free.
+- **Sharing is the hard part.** LlamaNet handles that: tunnels, routing, discovery, load balancing. You just run the model.
 
 ## Quick Start
 
@@ -89,14 +109,13 @@ Get a free API key at [llamanet.app](https://llamanet.app).
 ## How It Works
 
 ```
-GPU Owner                          API Consumer
-─────────                          ────────────
-curl -sSL llamanet.app/ \           client = openai.OpenAI(
-  install.sh | sh                    base_url="https://llamanet.app/v1",
-llamanet run \                       api_key="ln-xxx"
-  hf.co/user/Model:Q4_K_M         )
-       │                                │
-       ▼                                ▼
+You                                  Your friend
+───                                  ───────────
+llamanet run \                        client = openai.OpenAI(
+  hf.co/user/Model:Q4_K_M             base_url="https://llamanet.app/v1",
+                                       api_key="ln-xxx"
+       │                             )
+       ▼                                 │
 ┌─────────────────────────────────────────────┐
 │           llamanet.app (Gateway)             │
 │                                              │
@@ -105,11 +124,11 @@ llamanet run \                       api_key="ln-xxx"
 └─────────────────────────────────────────────┘
 ```
 
-1. **GPU owner** runs the one-liner installer → `llamanet` → node auto-joins `llamanet.app`
-2. Downloads a model via the Web UI Model Manager
-3. Node gets a Cloudflare tunnel URL (public, HTTPS) — **required for network participation**
-4. **API consumer** calls `llamanet.app/v1/chat/completions`
-5. Gateway routes to the best available node via tunnel URL
+1. **You** run the one-liner installer → `llamanet` → node auto-joins `llamanet.app`
+2. You download a model via the Web UI Model Manager
+3. Your node gets a Cloudflare tunnel URL (public, HTTPS) — **zero config**
+4. **Anyone** calls `llamanet.app/v1/chat/completions` with an API key
+5. Gateway routes to the best available node
 
 No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 
