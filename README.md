@@ -1,3 +1,10 @@
+> Turn your Mac or GPU rig into a free public AI API in 60 seconds. OpenAI-compatible. No Docker.
+
+![GitHub Stars](https://img.shields.io/github/stars/machaao/llama-net?style=social)
+![GitHub Downloads](https://img.shields.io/github/downloads/machaao/llama-net/total)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa)](https://github.com/sponsors/machaao)
+
 # LlamaNet: Share Your GPU With The World
 
 Run any open-source LLM on your hardware. Get a public API in 60 seconds.

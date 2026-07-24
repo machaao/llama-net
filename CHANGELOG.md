@@ -201,4 +201,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - handle Supabase OAuth redirect hash fragment in landing page (landing/server.py, static/auth-callback.html, static/landing.js) [via commit]
-- use Supabase to persist cumulative token tracking (landing/supabase_client.py) [via commit]
+- use Supabase to persist cumulative token tracking (landing/supabase_client.py) [via commit]# Changelog
+
+All notable changes to LlamaNet will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## [0.1.0] - 2026-07-24
+
+### Added
+- **One-liner install** for macOS, Linux, and Windows
+- **OpenAI-compatible API** (`/v1/chat/completions`, `/v1/completions`, `/v1/models`)
+- **Built-in Web UI** with Model Manager, Chat Interface, and Network Dashboard
+- **Cloudflare tunnel support** — automatic public HTTPS URLs with zero config
+- **Multi-model pool** with capacity-based LRU eviction
+- **Hot-reload** — switch models without restarting your node
+- **Reasoning model support** — DeepSeek-R1, Qwen reasoning models with streaming reasoning content
+- **Gateway routing** — central gateway at `llamanet.app` with automatic node discovery and load balancing
+- **Real-time network monitoring** via Server-Sent Events (SSE)
+- **GPU auto-detection** — NVIDIA (CUDA), Apple Silicon (Metal), CPU fallback
+- **Quality gate** — configurable hardware and performance thresholds for network admission
+- **No-model mode** — start your node instantly, download models later via the Web UI
+- **Hugging Face model search** — search, browse, and download GGUF models directly from the Web UI
+- **Rate limiting** — per-key, per-IP, and global rate limits to prevent abuse
+- **Intel Mac compatibility** — auto-detects Intel Macs and disables Metal for CPU-only mode
+- **Dashboard** — manage API keys, view registered nodes, and test the live API
+- **Google OAuth** — sign in with Google to get a free API key
