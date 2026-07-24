@@ -34,6 +34,43 @@ exit /b 1
 :python_found
 echo Using Python: %PYTHON_CMD%
 
+REM ── Handle --help ──
+if "%~1"=="--help" goto :show_help
+if "%~1"=="-h" goto :show_help
+if "%~1"=="help" goto :show_help
+goto :skip_help
+
+:show_help
+echo.
+echo   LlamaNet — Distributed AI Inference Network
+echo   ────────────────────────────────────────────
+echo.
+echo   Usage:
+echo     llamanet                                  Start (no-model mode)
+echo     llamanet run ^<hf-url^> [OPTIONS]           Download and run a model
+echo.
+echo   Options:
+echo     --bootstrap-peers URL Gateway URL (default: https://llamanet.app)
+echo     --port PORT           HTTP API port (default: 8000)
+echo     --host HOST           Bind address (default: 0.0.0.0)
+echo     --ctx-size N          Context window in tokens (default: 4096)
+echo     --gpu-layers N        GPU layers (-1 = all)
+echo     --no-gpu              Disable GPU acceleration
+echo     --node-id ID          Custom node identifier
+echo     --verbose             Enable verbose logging
+echo     --help                Show this help
+echo.
+echo   Examples:
+echo     llamanet
+echo     start-app.bat run hf.co/user/Model:Q4_K_M
+echo     start-app.bat --no-gpu --port 8080
+echo.
+echo   Web UI opens automatically at http://localhost:8000
+echo.
+exit /b 0
+
+:skip_help
+
 REM ── Landing/Gateway Mode ──
 if "%LLAMANET_MODE%"=="landing" (
     echo Starting llamanet.app gateway...

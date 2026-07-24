@@ -337,6 +337,33 @@ if not "%TODAY%"=="%LAST_CHECK%" (
     echo %TODAY%>"%UPDATE_CHECK%"
 )
 
+REM Handle --help
+if "%~1"=="--help" goto :launcher_help
+if "%~1"=="-h" goto :launcher_help
+if "%~1"=="help" goto :launcher_help
+goto :launcher_skip_help
+
+:launcher_help
+echo.
+echo   LlamaNet — Distributed AI Inference Network
+echo   ────────────────────────────────────────────
+echo.
+echo   Usage:
+echo     llamanet                                  Start (no-model mode)
+echo     llamanet run ^<hf-url^> [OPTIONS]           Download and run a model
+echo.
+echo   Options:
+echo     --bootstrap-peers URL Gateway URL
+echo     --port PORT           HTTP API port (default: 8000)
+echo     --no-gpu              Disable GPU acceleration
+echo     --help                Show this help
+echo.
+echo   Web UI: http://localhost:8000
+echo.
+exit /b 0
+
+:launcher_skip_help
+
 REM Delegate to start-app.bat for full command support (run, --tunnel, --no-gpu, etc.)
 if exist "%SOURCE_DIR%\start-app.bat" (
     pushd "%SOURCE_DIR%"

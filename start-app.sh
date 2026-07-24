@@ -26,6 +26,43 @@ else
     exit 1
 fi
 
+# ── Handle --help ──
+case "${1:-}" in
+    --help|-h|help)
+        echo ""
+        echo "  LlamaNet — Distributed AI Inference Network"
+        echo "  ────────────────────────────────────────────"
+        echo ""
+        echo "  Usage:"
+        echo "    llamanet                                  Start (no-model mode)"
+        echo "    llamanet run <hf-url> [OPTIONS]           Download and run a model"
+        echo ""
+        echo "  Options:"
+        echo "    --tunnel              Enable Cloudflare tunnel (default)"
+        echo "    --no-tunnel           Disable Cloudflare tunnel"
+        echo "    --bootstrap-peers URL Gateway URL (default: https://llamanet.app)"
+        echo "    --port PORT           HTTP API port (default: 8000)"
+        echo "    --host HOST           Bind address (default: 0.0.0.0)"
+        echo "    --ctx-size N          Context window in tokens (default: 4096)"
+        echo "    --batch-size N        Batch size in tokens (default: 4096)"
+        echo "    --gpu-layers N        GPU layers (-1 = all)"
+        echo "    --no-gpu              Disable GPU acceleration"
+        echo "    --node-id ID          Custom node identifier"
+        echo "    --public-ip IP        Override public IP detection"
+        echo "    --verbose             Enable verbose logging"
+        echo "    --help                Show this help"
+        echo ""
+        echo "  Examples:"
+        echo "    llamanet"
+        echo "    llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M"
+        echo "    llamanet run hf.co/user/Model:Q4_K_M --no-tunnel"
+        echo ""
+        echo "  Web UI opens automatically at http://localhost:8000"
+        echo ""
+        exit 0
+        ;;
+esac
+
 # ── Landing/Gateway Mode Detection ──
 if [ "$LLAMANET_MODE" = "landing" ]; then
     echo "🌐 Starting llamanet.app gateway..."
@@ -60,7 +97,12 @@ else
 fi
 
 # ── Cloudflare Tunnel Support ──
-ENABLE_TUNNEL=false
+# Default: enable tunnel for local development (required for network participation)
+if [ "$CONTAINER_MODE" = "true" ]; then
+    ENABLE_TUNNEL=false
+else
+    ENABLE_TUNNEL=true
+fi
 TUNNEL_PID=""
 TUNNEL_URL=""
 SLEEP_PID=""
@@ -70,6 +112,7 @@ BOOTSTRAP_PEERS_VALUE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --tunnel) ENABLE_TUNNEL=true ;;
+        --no-tunnel) ENABLE_TUNNEL=false ;;
         --bootstrap-peers)
             shift
             BOOTSTRAP_PEERS_VALUE="$1"

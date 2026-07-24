@@ -243,6 +243,29 @@ if [ "\$LAST_CHECK" != "\$TODAY" ]; then
     echo "\$TODAY" > "\$UPDATE_CHECK_FILE"
 fi
 
+# Handle --help
+if [ "\$1" = "--help" ] || [ "\$1" = "-h" ] || [ "\$1" = "help" ]; then
+    echo ""
+    echo "  LlamaNet — Distributed AI Inference Network"
+    echo "  ────────────────────────────────────────────"
+    echo ""
+    echo "  Usage:"
+    echo "    llamanet                                  Start (no-model mode)"
+    echo "    llamanet run <hf-url> [OPTIONS]           Download and run a model"
+    echo ""
+    echo "  Options:"
+    echo "    --tunnel              Enable Cloudflare tunnel (default)"
+    echo "    --no-tunnel           Disable Cloudflare tunnel"
+    echo "    --bootstrap-peers URL Gateway URL"
+    echo "    --port PORT           HTTP API port (default: 8000)"
+    echo "    --no-gpu              Disable GPU acceleration"
+    echo "    --help                Show this help"
+    echo ""
+    echo "  Web UI: http://localhost:8000"
+    echo ""
+    exit 0
+fi
+
 # Delegate to start-app.sh for full command support (run, --tunnel, --no-gpu, etc.)
 if [ -f "\$SOURCE_DIR/start-app.sh" ]; then
     cd "\$SOURCE_DIR"
