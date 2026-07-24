@@ -308,5 +308,12 @@ class LandingApp {
     copyToClipboard(text, message) { navigator.clipboard.writeText(text).then(() => this.showToast(message)).catch(() => { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); this.showToast(message); }); }
     showToast(message) { const toast = document.createElement('div'); toast.className = 'alert alert-success position-fixed'; toast.style.cssText = 'top:20px;right:20px;z-index:9999;min-width:250px;'; toast.innerHTML = `<i class="fas fa-check-circle"></i> ${this.escapeHtml(message)}`; document.body.appendChild(toast); setTimeout(() => toast.remove(), 2000); }
     escapeHtml(text) { const div = document.createElement('div'); div.textContent = text || ''; return div.innerHTML; }
+    copyInstallCommand(platform) {
+        const cmdEl = document.getElementById(platform === 'mac' ? 'cmd-mac' : 'cmd-win');
+        if (!cmdEl) return;
+        const code = cmdEl.querySelector('code');
+        if (!code) return;
+        this.copyToClipboard(code.textContent, 'Install command copied!');
+    }
 }
 const app = new LandingApp();

@@ -293,6 +293,58 @@ async def dashboard_page():
     return JSONResponse({"error": "Dashboard not found"})
 
 
+@app.get("/install.sh")
+async def install_mac_linux():
+    """Serve macOS/Linux installer script"""
+    script_path = os.path.join(static_dir, "scripts", "install.sh")
+    if os.path.exists(script_path):
+        return FileResponse(
+            script_path,
+            media_type="application/x-sh",
+            headers={"Content-Disposition": "inline; filename=install.sh"},
+        )
+    return JSONResponse(status_code=404, content={"error": "Installer not found"})
+
+
+@app.get("/install.ps1")
+async def install_windows():
+    """Serve Windows PowerShell installer script"""
+    script_path = os.path.join(static_dir, "scripts", "install.ps1")
+    if os.path.exists(script_path):
+        return FileResponse(
+            script_path,
+            media_type="text/plain",
+            headers={"Content-Disposition": "inline; filename=install.ps1"},
+        )
+    return JSONResponse(status_code=404, content={"error": "Installer not found"})
+
+
+@app.get("/uninstall.sh")
+async def uninstall_mac_linux():
+    """Serve macOS/Linux uninstaller script"""
+    script_path = os.path.join(static_dir, "scripts", "uninstall.sh")
+    if os.path.exists(script_path):
+        return FileResponse(
+            script_path,
+            media_type="application/x-sh",
+            headers={"Content-Disposition": "inline; filename=uninstall.sh"},
+        )
+    return JSONResponse(status_code=404, content={"error": "Uninstaller not found"})
+
+
+@app.get("/uninstall.ps1")
+async def uninstall_windows():
+    """Serve Windows PowerShell uninstaller script"""
+    script_path = os.path.join(static_dir, "scripts", "uninstall.ps1")
+    if os.path.exists(script_path):
+        return FileResponse(
+            script_path,
+            media_type="text/plain",
+            headers={"Content-Disposition": "inline; filename=uninstall.ps1"},
+        )
+    return JSONResponse(status_code=404, content={"error": "Uninstaller not found"})
+
+
 @app.get("/auth/google")
 async def auth_google(request: Request):
     from urllib.parse import quote

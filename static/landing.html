@@ -44,6 +44,49 @@
             </div>
         </div>
     </section>
+    <section class="download-section py-4">
+        <div class="container">
+            <div class="row justify-content-center g-3">
+                <div class="col-md-5">
+                    <div class="download-card">
+                        <div class="download-card-header">
+                            <i class="fab fa-apple fa-lg"></i>
+                            <span>macOS / Linux</span>
+                        </div>
+                        <div class="download-card-body">
+                            <div class="download-command" id="cmd-mac">
+                                <code>curl -sSL https://llamanet.app/install.sh | sh</code>
+                            </div>
+                            <button class="btn btn-sm btn-copy-download" onclick="app.copyInstallCommand('mac')">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-5">
+                    <div class="download-card">
+                        <div class="download-card-header">
+                            <i class="fab fa-windows fa-lg"></i>
+                            <span>Windows</span>
+                        </div>
+                        <div class="download-card-body">
+                            <div class="download-command" id="cmd-win">
+                                <code>irm https://llamanet.app/install.ps1 | iex</code>
+                            </div>
+                            <button class="btn btn-sm btn-copy-download" onclick="app.copyInstallCommand('win')">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <p class="text-center text-muted mt-2 download-footnote">
+                <i class="fas fa-info-circle"></i>
+                Requires Python 3.9+. Auto-installed if missing.
+                Or install via PyPI: <code>pip install llamanet</code>
+            </p>
+        </div>
+    </section>
     <section class="stats-bar py-3">
         <div class="container">
             <div class="row text-center">
