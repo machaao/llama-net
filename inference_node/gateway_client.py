@@ -263,7 +263,7 @@ class GatewayClient:
             except Exception as e:
                 logger.debug(f"Heartbeat error: {e}")
 
-            await asyncio.sleep(10)
+            await asyncio.sleep(30)  # Reduced from 10s to 30s — less gateway load, still 3× redundancy before stale
 
     async def peer_refresh_loop(self):
         """Refresh cached peer list every 30 seconds."""

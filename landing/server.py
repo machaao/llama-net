@@ -98,7 +98,7 @@ async def _periodic_stats_broadcast():
 
 async def _heartbeat_monitor_loop():
     """Monitor heartbeat timestamps and detect stale nodes — reads from Supabase"""
-    STALE_THRESHOLD = 45
+    STALE_THRESHOLD = 90  # 30s heartbeat × 3 misses = 90s before marking stale
     while True:
         try:
             await asyncio.sleep(5)

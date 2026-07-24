@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 class HeartbeatManager:
     """Manages node health monitoring and heartbeat signals"""
     
-    def __init__(self, node_id: str, metrics_callback: Callable[[], Dict[str, Any]], interval: int = 10, pool_status_callback: Callable = None):
+    def __init__(self, node_id: str, metrics_callback: Callable[[], Dict[str, Any]], interval: int = 30, pool_status_callback: Callable = None):
         self.node_id = node_id
         self.metrics_callback = metrics_callback
         self.interval = interval
@@ -87,7 +87,7 @@ class HeartbeatManager:
         """Check if the node is healthy based on recent heartbeats"""
         if self.last_heartbeat == 0:
             return False
-        return time.time() - self.last_heartbeat < (self.interval * 3)  # Allow 3 missed heartbeats
+        return time.time() - self.last_heartbeat < (self.interval * 3)  # Allow 3 missed heartbeats (90s for 30s interval)
         
     def get_health_status(self) -> Dict[str, Any]:
         """Get detailed health status"""
