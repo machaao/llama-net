@@ -72,11 +72,13 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
 
 -- Seed system user for public node registration (no auth required)
-INSERT INTO users (id, email, full_name)
-SELECT '00000000-0000-0000-0000-000000000000', 'system@llamanet.app', 'LlamaNet System'
-WHERE NOT EXISTS (
-    SELECT 1 FROM users WHERE id = '00000000-0000-0000-0000-000000000000'
-);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM users WHERE id = '00000000-0000-0000-0000-000000000000') THEN
+        INSERT INTO users (id, email, full_name)
+        VALUES ('00000000-0000-0000-0000-000000000000', 'system@llamanet.app', 'LlamaNet System');
+    END IF;
+END $$;
 
 -- 6. Add per-node bearer token column
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_token TEXT;
