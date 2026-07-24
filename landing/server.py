@@ -17,6 +17,7 @@ from landing.supabase_client import SupabaseManager
 from landing.auth import AuthManager
 from landing.node_registry import NodeRegistry, CloudflareClient, model_name_to_slug
 from landing.router import ModelRouter
+from common.quality_gate import NodeQualityGate
 
 logger = get_logger(__name__)
 
@@ -58,6 +59,7 @@ router = None
 registry = None
 sse_mgr = None
 rate_limiter = None
+quality_gate = None
 
 
 def _sanitize_node(node: dict) -> dict:
@@ -136,7 +138,7 @@ async def _heartbeat_monitor_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global sse_mgr, supabase_mgr, auth_mgr, router, registry, rate_limiter
+    global sse_mgr, supabase_mgr, auth_mgr, router, registry, rate_limiter, quality_gate
     logger.info("Starting llamanet.app gateway...")
     try:
         supabase_mgr = SupabaseManager()
@@ -152,6 +154,11 @@ async def lifespan(app: FastAPI):
             burst_rps=10, node_publish_rph=30,
             sse_per_ip=5, sse_global=200,
         )
+        quality_gate = NodeQualityGate()
+        if quality_gate.enabled:
+            logger.info(f"🔒 Quality gate active: {quality_gate.get_config_summary()}")
+        else:
+            logger.info("Quality gate disabled (set LLAMANET_REQUIRE_GPU=true to enable)")
         if cf_client.is_configured:
             logger.info("Cloudflare tunnel provisioning enabled")
         else:
@@ -558,9 +565,28 @@ async def publish_node(request: Request):
         RequestValidator.validate_node_registration(body)
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
+        tunnel_url = body.get("tunnel_url", "")
+
+        # ── Quality Gate: Hardware Check ──
+        hw_passed, hw_reason = quality_gate.evaluate_hardware(
+            platform=body.get("platform", ""),
+            gpu_info=body.get("gpu", ""),
+            tunnel_url=tunnel_url,
+            url=body.get("url", ""),
+        )
+        if not hw_passed:
+            logger.info(f"❌ Node {node_hash} rejected by hardware gate: {hw_reason}")
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "success": False,
+                    "error": "Node does not meet network quality requirements",
+                    "reason": hw_reason,
+                    "failed_check": "hardware",
+                },
+            )
         model_name = body.get("model", "unknown")
         model_slug = model_name_to_slug(model_name)
-        tunnel_url = body.get("tunnel_url", "")
 
         # Accept pool models list
         models_list = body.get("models", [model_name])
@@ -595,6 +621,41 @@ async def publish_node(request: Request):
             ip=body.get("ip", ""), port=body.get("port", 8000),
             gpu_info=body.get("gpu", ""), metrics=reg_metrics,
         )
+
+        # ── Quality Gate: Inference Probe ──
+        if quality_gate.enabled:
+            effective_url = tunnel_url or body.get("url", "")
+            probe = await quality_gate.probe_node(effective_url, model_name)
+            probe_passed, probe_reason = quality_gate.evaluate_probe(probe)
+
+            if not probe_passed:
+                logger.info(
+                    f"❌ Node {node_hash} rejected by probe gate: {probe_reason} "
+                    f"(ttft={probe.ttft:.2f}, latency={probe.latency:.2f}, tps={probe.tps:.1f})"
+                )
+                supabase_mgr.deregister_node(node_hash)
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "success": False,
+                        "error": "Node does not meet performance requirements",
+                        "reason": probe_reason,
+                        "failed_check": "probe",
+                        "probe": {
+                            "ttft": round(probe.ttft, 2),
+                            "latency": round(probe.latency, 2),
+                            "tps": round(probe.tps, 2),
+                            "completion_tokens": probe.completion_tokens,
+                        },
+                    },
+                )
+
+            # Persist probe metrics so the node has real TTFT/latency from day 1
+            supabase_mgr.update_node_metrics(node_hash, {
+                "ttft": probe.ttft,
+                "latency": probe.latency,
+                "tps": probe.tps,
+            })
 
         # Broadcast SSE event
         if sse_mgr:
@@ -675,6 +736,25 @@ async def publish_node_event(request: Request):
         model_slug = model_name_to_slug(model_name)
 
         if event_type == "node_joined":
+            # ── Quality Gate: Hardware Check ──
+            hw_passed, hw_reason = quality_gate.evaluate_hardware(
+                platform=body.get("platform", ""),
+                gpu_info=body.get("gpu", ""),
+                tunnel_url=body.get("url", ""),
+                url=body.get("url", ""),
+            )
+            if not hw_passed:
+                logger.info(f"❌ Node {node_hash} rejected by hardware gate (event): {hw_reason}")
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "success": False,
+                        "error": "Node does not meet network quality requirements",
+                        "reason": hw_reason,
+                        "failed_check": "hardware",
+                    },
+                )
+
             system_user_id = "00000000-0000-0000-0000-000000000000"
             try:
                 existing_user = supabase_mgr.get_user(system_user_id)
@@ -691,6 +771,39 @@ async def publish_node_event(request: Request):
                 port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
                 metrics=body.get("metrics", {})
             )
+
+            # ── Quality Gate: Inference Probe ──
+            if quality_gate.enabled:
+                event_url = body.get("url", "")
+                probe = await quality_gate.probe_node(event_url, model_name)
+                probe_passed, probe_reason = quality_gate.evaluate_probe(probe)
+
+                if not probe_passed:
+                    logger.info(
+                        f"❌ Node {node_hash} rejected by probe gate (event): {probe_reason}"
+                    )
+                    supabase_mgr.deregister_node(node_hash)
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "success": False,
+                            "error": "Node does not meet performance requirements",
+                            "reason": probe_reason,
+                            "failed_check": "probe",
+                            "probe": {
+                                "ttft": round(probe.ttft, 2),
+                                "latency": round(probe.latency, 2),
+                                "tps": round(probe.tps, 2),
+                                "completion_tokens": probe.completion_tokens,
+                            },
+                        },
+                    )
+
+                supabase_mgr.update_node_metrics(node_hash, {
+                    "ttft": probe.ttft,
+                    "latency": probe.latency,
+                    "tps": probe.tps,
+                })
 
             event_pool_models = body.get("metrics", {}).get("pool_models", [])
 

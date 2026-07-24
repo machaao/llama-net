@@ -84,6 +84,8 @@ class GatewayClient:
                         "ip": self.public_ip,
                         "port": self.port,
                         "metrics": metrics,
+                        "platform": self._get_platform_string(),
+                        "gpu": self._get_gpu_info(),
                     },
                 ) as resp:
                     if resp.status == 200:
@@ -296,6 +298,8 @@ class GatewayClient:
                     if self.model_pool else []
                 ),
                 "metrics": metrics,
+                "platform": self._get_platform_string(),
+                "gpu": self._get_gpu_info(),
                 **(extra_data or {}),
             }
 
@@ -369,6 +373,21 @@ class GatewayClient:
             metrics['pool'] = self.model_pool.get_network_info()
 
         return metrics
+
+    @staticmethod
+    def _get_platform_string() -> str:
+        """Get OS-architecture string for quality gate hardware detection."""
+        import platform as p
+        return f"{p.system()}-{p.machine()}"
+
+    @staticmethod
+    def _get_gpu_info() -> str:
+        """Get GPU description string via SystemInfo."""
+        try:
+            from inference_node.metrics import SystemInfo
+            return SystemInfo.get_gpu_info() or ""
+        except Exception:
+            return ""
 
     @staticmethod
     def _detect_tunnel_url() -> str:
