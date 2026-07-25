@@ -72,6 +72,46 @@ def _read_value(f, value_type: int) -> Any:
         raise ValueError(f"Unknown GGUF value type: {value_type}")
 
 
+def _skip_array_elements(f, arr_type: int, count: int):
+    """Skip array elements by type without allocating."""
+    if arr_type in (GGUF_TYPE_UINT8, GGUF_TYPE_INT8, GGUF_TYPE_BOOL):
+        f.read(count)
+    elif arr_type in (GGUF_TYPE_UINT16, GGUF_TYPE_INT16):
+        f.read(count * 2)
+    elif arr_type in (GGUF_TYPE_UINT32, GGUF_TYPE_INT32, GGUF_TYPE_FLOAT32):
+        f.read(count * 4)
+    elif arr_type in (GGUF_TYPE_UINT64, GGUF_TYPE_INT64, GGUF_TYPE_FLOAT64):
+        f.read(count * 8)
+    elif arr_type == GGUF_TYPE_STRING:
+        for _ in range(count):
+            length = struct.unpack('<Q', f.read(8))[0]
+            f.read(length)
+    elif arr_type == GGUF_TYPE_ARRAY:
+        for _ in range(count):
+            inner_type = struct.unpack('<I', f.read(4))[0]
+            inner_len = struct.unpack('<Q', f.read(8))[0]
+            _skip_array_elements(f, inner_type, inner_len)
+
+
+def _skip_value(f, value_type: int):
+    """Skip a single GGUF value without parsing or allocating."""
+    if value_type in (GGUF_TYPE_UINT8, GGUF_TYPE_INT8, GGUF_TYPE_BOOL):
+        f.read(1)
+    elif value_type in (GGUF_TYPE_UINT16, GGUF_TYPE_INT16):
+        f.read(2)
+    elif value_type in (GGUF_TYPE_UINT32, GGUF_TYPE_INT32, GGUF_TYPE_FLOAT32):
+        f.read(4)
+    elif value_type in (GGUF_TYPE_UINT64, GGUF_TYPE_INT64, GGUF_TYPE_FLOAT64):
+        f.read(8)
+    elif value_type == GGUF_TYPE_STRING:
+        length = struct.unpack('<Q', f.read(8))[0]
+        f.read(length)
+    elif value_type == GGUF_TYPE_ARRAY:
+        arr_type = struct.unpack('<I', f.read(4))[0]
+        arr_len = struct.unpack('<Q', f.read(8))[0]
+        _skip_array_elements(f, arr_type, arr_len)
+
+
 def read_gguf_metadata(filepath: str) -> Dict[str, Any]:
     """Read all metadata key-value pairs from a GGUF file header."""
     metadata: Dict[str, Any] = {}
@@ -102,83 +142,151 @@ def read_gguf_metadata(filepath: str) -> Dict[str, Any]:
 
 
 def get_model_context_length(filepath: str) -> Optional[int]:
-    """Get the model's trained context length from GGUF metadata."""
+    """Get the model's trained context length, stopping early.
+
+    Unlike read_gguf_metadata(), this only parses the keys we need
+    and skips everything else — including the 250K tokenizer string
+    arrays that would otherwise OOM or timeout.
+    """
     try:
-        meta = read_gguf_metadata(filepath)
+        with open(filepath, 'rb') as f:
+            magic = struct.unpack('<I', f.read(4))[0]
+            if magic != GGUF_MAGIC:
+                return None
 
-        # Try standard key first
-        ctx = meta.get("general.context_length")
+            version = struct.unpack('<I', f.read(4))[0]
+            if version == 1:
+                f.read(4)  # tensor_count
+                kv_count = struct.unpack('<I', f.read(4))[0]
+            elif version in (2, 3):
+                f.read(8)  # tensor_count
+                kv_count = struct.unpack('<Q', f.read(8))[0]
+            else:
+                return None
 
-        # Fallback: try architecture-specific key (some tools use this)
-        if ctx is None:
-            arch = meta.get("general.architecture", "")
-            if arch:
-                ctx = meta.get(f"{arch}.context_length")
+            arch = None
+            ctx = None
 
-        if ctx is not None:
-            ctx = int(ctx)
-            if ctx > 0:
+            for _ in range(kv_count):
+                key = _read_string(f)
+                value_type = struct.unpack('<I', f.read(4))[0]
+
+                if key == "general.context_length":
+                    ctx = int(_read_value(f, value_type))
+                elif key == "general.architecture":
+                    arch = str(_read_value(f, value_type))
+                elif arch and key == f"{arch}.context_length":
+                    ctx = int(_read_value(f, value_type))
+                else:
+                    _skip_value(f, value_type)
+
+                # Early exit once we have both
+                if ctx is not None and arch is not None:
+                    if ctx > 0:
+                        logger.info(f"GGUF context_length: {ctx} (arch: {arch})")
+                        return ctx
+
+            # Got through all keys
+            if ctx is not None and ctx > 0:
+                logger.info(f"GGUF context_length: {ctx}")
                 return ctx
 
-        # Debug: log available keys so we can diagnose missing context_length
-        logger.debug(f"No context_length found. Available keys: {sorted(meta.keys())}")
+            logger.debug(f"No context_length found in GGUF metadata")
+            return None
+
     except Exception as e:
         logger.debug(f"Could not read context length from {filepath}: {e}")
-    return None
+        return None
 
 
 def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
-    """Get architecture info needed for memory estimation."""
+    """Get architecture info needed for memory estimation.
+
+    Uses targeted parsing to avoid loading massive tokenizer arrays
+    into memory (250K+ strings in some models).
+    """
     try:
-        meta = read_gguf_metadata(filepath)
-        arch = meta.get("general.architecture", "unknown")
+        with open(filepath, 'rb') as f:
+            magic = struct.unpack('<I', f.read(4))[0]
+            if magic != GGUF_MAGIC:
+                return {"architecture": "unknown", "context_length": 0, "n_layers": 0, "n_embd": 0, "n_head": 0}
 
-        info = {
-            "architecture": arch,
-            "context_length": int(
-                meta.get("general.context_length", 0)
-                or meta.get(f"{arch}.context_length", 0)
-            ),
-            "n_layers": 0,
-            "n_embd": 0,
-            "n_head": 0,
-        }
+            version = struct.unpack('<I', f.read(4))[0]
+            if version == 1:
+                f.read(4)  # tensor_count
+                kv_count = struct.unpack('<I', f.read(4))[0]
+            elif version in (2, 3):
+                f.read(8)  # tensor_count
+                kv_count = struct.unpack('<Q', f.read(8))[0]
+            else:
+                return {"architecture": "unknown", "context_length": 0, "n_layers": 0, "n_embd": 0, "n_head": 0}
 
-        # Architecture-specific keys use the arch name as prefix
-        prefix_map = {
-            "llama": "llama",
-            "mistral": "llama",
-            "gptoss": "gptoss",
-            "qwen2": "qwen2",
-            "phi3": "phi3",
-            "gemma": "gemma",
-            "gemma2": "gemma2",
-            "deepseek2": "deepseek2",
-            "command-r": "command-r",
-        }
-        prefix = prefix_map.get(arch, arch)
+            arch = None
+            ctx_length = 0
+            n_layers = 0
+            n_embd = 0
+            n_head = 0
 
-        # Try architecture-specific keys first, then fall back to common patterns
-        layer_keys = [f"{prefix}.block_count", f"{prefix}.layer_count"]
-        embd_keys = [f"{prefix}.embedding_length", f"{prefix}.hidden_size"]
-        head_keys = [f"{prefix}.attention.head_count", f"{prefix}.num_attention_heads"]
+            # Keys we're looking for — build dynamically once we know the arch
+            needed_keys = {"general.architecture", "general.context_length"}
 
-        for k in layer_keys:
-            if k in meta:
-                info["n_layers"] = int(meta[k])
-                break
+            for _ in range(kv_count):
+                key = _read_string(f)
+                value_type = struct.unpack('<I', f.read(4))[0]
 
-        for k in embd_keys:
-            if k in meta:
-                info["n_embd"] = int(meta[k])
-                break
+                if key in needed_keys:
+                    value = _read_value(f, value_type)
+                    if key == "general.architecture":
+                        arch = str(value)
+                        # Now that we know arch, add arch-specific keys to the set
+                        prefix_map = {
+                            "llama": "llama", "mistral": "llama", "gptoss": "gptoss",
+                            "qwen2": "qwen2", "qwen3": "qwen3", "qwen35": "qwen35",
+                            "phi3": "phi3", "gemma": "gemma", "gemma2": "gemma2",
+                            "deepseek2": "deepseek2", "command-r": "command-r",
+                        }
+                        prefix = prefix_map.get(arch, arch)
+                        needed_keys.update([
+                            f"{prefix}.context_length",
+                            f"{prefix}.block_count", f"{prefix}.layer_count",
+                            f"{prefix}.embedding_length", f"{prefix}.hidden_size",
+                            f"{prefix}.attention.head_count", f"{prefix}.num_attention_heads",
+                        ])
+                    elif key == "general.context_length":
+                        ctx_length = int(value)
+                elif arch:
+                    # Check arch-specific keys
+                    prefix_map = {
+                        "llama": "llama", "mistral": "llama", "gptoss": "gptoss",
+                        "qwen2": "qwen2", "qwen3": "qwen3", "qwen35": "qwen35",
+                        "phi3": "phi3", "gemma": "gemma", "gemma2": "gemma2",
+                        "deepseek2": "deepseek2", "command-r": "command-r",
+                    }
+                    prefix = prefix_map.get(arch, arch)
+                    layer_keys = {f"{prefix}.block_count", f"{prefix}.layer_count"}
+                    embd_keys = {f"{prefix}.embedding_length", f"{prefix}.hidden_size"}
+                    head_keys = {f"{prefix}.attention.head_count", f"{prefix}.num_attention_heads"}
 
-        for k in head_keys:
-            if k in meta:
-                info["n_head"] = int(meta[k])
-                break
+                    if key == f"{prefix}.context_length" and ctx_length == 0:
+                        ctx_length = int(_read_value(f, value_type))
+                    elif key in layer_keys and n_layers == 0:
+                        n_layers = int(_read_value(f, value_type))
+                    elif key in embd_keys and n_embd == 0:
+                        n_embd = int(_read_value(f, value_type))
+                    elif key in head_keys and n_head == 0:
+                        n_head = int(_read_value(f, value_type))
+                    else:
+                        _skip_value(f, value_type)
+                else:
+                    _skip_value(f, value_type)
 
-        return info
+            return {
+                "architecture": arch or "unknown",
+                "context_length": ctx_length,
+                "n_layers": n_layers,
+                "n_embd": n_embd,
+                "n_head": n_head,
+            }
 
     except Exception as e:
         logger.debug(f"Could not read architecture info from {filepath}: {e}")
