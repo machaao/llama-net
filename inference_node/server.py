@@ -1600,7 +1600,7 @@ async def status():
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not initialized")
     metrics = llm.get_metrics()
-    return {**metrics, "node_id": config.node_id, "model_name": config.model_name, "timestamp": time.time()}
+    return {**metrics, "node_id": config.node_id, "model_name": config.model_name, "context_length": _get_active_context_length(), "timestamp": time.time()}
 
 @app.get("/info")
 async def info():
