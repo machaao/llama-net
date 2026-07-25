@@ -38,57 +38,36 @@ def get_arch_prefix(arch: str) -> str:
 
 
 def _read_metadata(filepath: str) -> Dict[str, Any]:
-    """Read GGUF metadata using the official GGUFReader.
+    """Read GGUF metadata using the official GGUFReader API.
 
-    Handles all GGUF types (strings, scalars, arrays) including
-    massive tokenizer arrays (250K+ strings) without issues.
-
-    Uses getattr() for field attributes to handle different
-    GGUFReader API versions gracefully.
+    Uses field.contents() which is the correct method to extract
+    actual Python values from ReaderField objects.
     """
     from gguf.gguf_reader import GGUFReader
 
     reader = GGUFReader(filepath)
     metadata: Dict[str, Any] = {}
 
-    for name, field in reader.fields.items():
+    for field in reader.fields:
         try:
-            data = getattr(field, 'data', None)
-
-            if data is None:
+            # Skip tokenizer arrays (131K+ entries) — we don't need them
+            # and they're expensive to convert via contents()
+            if field.name.startswith("tokenizer.ggml.") and field.name not in (
+                "tokenizer.ggml.model",
+                "tokenizer.ggml.pre",
+            ):
                 continue
 
-            # String fields stored as uint8 byte arrays
-            if hasattr(data, 'dtype') and data.dtype == 'uint8' and data.ndim == 1:
-                metadata[name] = bytes(data).decode('utf-8', errors='replace')
-            # Scalar fields (may be numpy.bytes_, numpy.str_, int, float)
-            elif hasattr(data, '__len__') and len(data) == 1:
-                val = data[0]
-                if isinstance(val, bytes):
-                    metadata[name] = val.decode('utf-8', errors='replace')
-                elif hasattr(val, 'item'):
-                    metadata[name] = val.item()
-                else:
-                    metadata[name] = val
-            # Array fields
-            elif hasattr(data, '__len__') and len(data) > 1:
-                first = data[0]
-                if isinstance(first, bytes):
-                    metadata[name] = [
-                        x.decode('utf-8', errors='replace') if isinstance(x, bytes)
-                        else (x.item() if hasattr(x, 'item') else x)
-                        for x in data
-                    ]
-                else:
-                    metadata[name] = [
-                        x.item() if hasattr(x, 'item') else x for x in data
-                    ]
-            else:
-                # Fallback — try direct use
-                metadata[name] = data
+            # Skip internal GGUF reader fields
+            if field.name.startswith("GGUF."):
+                continue
+
+            value = field.contents()
+            if value is not None:
+                metadata[field.name] = value
 
         except Exception as e:
-            logger.debug(f"Could not read GGUF field '{name}': {e}")
+            logger.debug(f"Could not read GGUF field '{field.name}': {e}")
 
     return metadata
 
