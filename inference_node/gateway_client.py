@@ -270,6 +270,7 @@ class GatewayClient:
                                 "url": self.own_url,
                                 "metrics": metrics,
                                 "models": self._get_models_with_context(),
+                                "ctx_length": self._get_active_context_length_value(),
                             },
                         ) as resp:
                             if resp.status != 200:
