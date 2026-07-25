@@ -116,6 +116,107 @@ class ModelPool:
         except Exception:
             return 20.0
 
+    @staticmethod
+    def _get_vram_context_cap() -> int:
+        """Ollama's VRAM-based context window cap.
+
+        Returns the maximum context size based on available GPU/VRAM:
+            < 24 GiB  →  4,096 tokens
+            24-48 GiB → 32,768 tokens
+            > 48 GiB  → 262,144 tokens
+        """
+        available_gib = 0.0
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            available_gib = mem.free / (1024 ** 3)
+            pynvml.nvmlShutdown()
+            logger.info(f"NVIDIA GPU VRAM: {available_gib:.1f} GiB free")
+        except Exception:
+            try:
+                import psutil
+                available_gib = psutil.virtual_memory().available / (1024 ** 3)
+            except Exception:
+                available_gib = 16.0
+
+        if available_gib > 48:
+            return 262144
+        elif available_gib >= 24:
+            return 32768
+        else:
+            return 4096
+
+    def _detect_optimal_context(self, model_path: str, cache_type_k: str) -> int:
+        """Detect optimal context size for a specific model.
+
+        Uses the same Ollama VRAM-tier strategy as InferenceConfig._auto_detect_context_size()
+        but operates on a standalone model path rather than root config state.
+        """
+        try:
+            native_ctx = get_model_context_length(model_path)
+            if not native_ctx or native_ctx <= 0:
+                logger.info(f"No context_length in GGUF for {os.path.basename(model_path)}, using root config")
+                return self.config.n_ctx
+
+            vram_cap = self._get_vram_context_cap()
+            effective_ctx = min(native_ctx, vram_cap)
+
+            arch_info = get_model_architecture_info(model_path)
+            n_layers = arch_info.get("n_layers", 32)
+            n_embd = arch_info.get("n_embd", 4096)
+            n_head = arch_info.get("n_head", 32)
+            n_kv_heads = arch_info.get("n_kv_heads", 0)
+
+            kv_gb = estimate_kv_cache_gb(
+                n_layers=n_layers, n_embd=n_embd, n_ctx=effective_ctx,
+                cache_type=cache_type_k, n_head=n_head, n_kv_heads=n_kv_heads,
+            )
+
+            try:
+                import psutil
+                available_gb = psutil.virtual_memory().available / (1024 ** 3)
+                usable_gb = available_gb * 0.70
+            except Exception:
+                usable_gb = 20.0
+
+            try:
+                model_gb = os.path.getsize(model_path) / (1024 ** 3)
+            except OSError:
+                model_gb = self.DEFAULT_MODEL_SIZE_GB
+
+            total_needed = model_gb + kv_gb + 0.5
+
+            if total_needed <= usable_gb:
+                logger.info(
+                    f"✅ Auto-detected context for {os.path.basename(model_path)}: "
+                    f"{effective_ctx} tokens (native={native_ctx}, VRAM cap={vram_cap}, "
+                    f"KV: {kv_gb:.1f} GB, total: {total_needed:.1f}/{usable_gb:.1f} GB)"
+                )
+                return effective_ctx
+            else:
+                if n_layers > 0 and n_embd > 0:
+                    bytes_per_elem = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5625}.get(cache_type_k, 2.0)
+                    head_dim = n_embd // n_head if n_head > 0 else 128
+                    effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
+                    budget_gb = usable_gb - model_gb - 0.5
+                    max_ctx = int((budget_gb * (1024 ** 3)) / (2 * n_layers * head_dim * effective_heads * bytes_per_elem))
+                    clamped = 1
+                    while clamped * 2 <= max_ctx:
+                        clamped *= 2
+                    clamped = max(4096, min(clamped, effective_ctx))
+                    logger.warning(
+                        f"⚠️ Context {effective_ctx} requires {total_needed:.1f} GB "
+                        f"but only {usable_gb:.1f} GB usable. Clamped to {clamped} tokens."
+                    )
+                    return clamped
+                return 4096
+
+        except Exception as e:
+            logger.warning(f"Context auto-detection failed for {model_path}: {e}")
+            return self.config.n_ctx
+
     def register(self, model_path: str, llm, model_name: str = "") -> ModelSlot:
         if not model_name:
             model_name = os.path.basename(model_path)
@@ -205,7 +306,7 @@ class ModelPool:
         model_config.host = self.config.host
         model_config.port = self.config.port
         model_config.node_id = self.config.node_id
-        model_config.n_ctx = self.config.n_ctx
+        model_config.n_ctx = self._detect_optimal_context(model_path, model_config.cache_type_k)
         model_config.n_batch = self.config.n_batch
         model_config.n_gpu_layers = self.config.n_gpu_layers
         model_config.verbose = self.config.verbose
