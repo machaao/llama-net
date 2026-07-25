@@ -479,6 +479,8 @@ async def node_heartbeat(request: Request):
         return limit_resp
     body = await request.json()
     node_hash = body.get("node_hash") or body.get("node_id", "")
+
+    logger.debug(f"📨 Heartbeat received: node={node_hash[:16]}...")
     if len(node_hash) > 12:
         node_hash = hashlib.sha256(node_hash.encode()).hexdigest()[:12]
     metrics = body.get("metrics", {})
@@ -575,6 +577,13 @@ async def node_heartbeat(request: Request):
                 })
         except Exception:
             pass
+
+    logger.debug(
+        f"💓 Heartbeat: node={node_hash} "
+        f"load={metrics.get('load', 0):.2f} tps={metrics.get('tps', 0):.1f} "
+        f"pool_size={len(pool_models)} "
+        f"broadcast={'yes' if should_broadcast else 'no'}"
+    )
 
     return {"success": await registry.heartbeat(node_hash, metrics)}
 
@@ -786,6 +795,12 @@ async def publish_node_event(request: Request):
         event_type = body.get("event_type", "")
         node_id = body.get("node_id", "")
 
+        logger.info(
+            f"📨 Node event: type={event_type} node={node_id[:16]}... "
+            f"model={body.get('model', '?')} "
+            f"pool_size={len(body.get('models', []))}"
+        )
+
         if not node_id or not event_type:
             return JSONResponse(status_code=400, content={"error": "node_id and event_type required"})
         if len(node_id) > 200:
@@ -801,6 +816,7 @@ async def publish_node_event(request: Request):
         model_slug = model_name_to_slug(model_name)
 
         if event_type == "node_joined":
+            ctx_length = body.get("ctx_length", 0)
             # ── Quality Gate: Hardware Check ──
             hw_passed, hw_reason = quality_gate.evaluate_hardware(
                 platform=body.get("platform", ""),
@@ -835,7 +851,19 @@ async def publish_node_event(request: Request):
                 model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
                 port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
                 metrics=body.get("metrics", {}),
-                ctx_length=body.get("ctx_length", 0),
+                ctx_length=ctx_length,
+            )
+
+            logger.info(
+                f"🟢 NODE JOINED: {node_hash} model={model_name} "
+                f"url={body.get('url', '')[:60]} "
+                f"ctx={ctx_length} "
+                f"pool={[m.get('name', m) if isinstance(m, dict) else m for m in normalized_models]} "
+                f"load={body.get('metrics', {}).get('load', 0):.2f} "
+                f"tps={body.get('metrics', {}).get('tps', 0):.1f} "
+                f"ttft={body.get('metrics', {}).get('ttft', 'N/A')} "
+                f"latency={body.get('metrics', {}).get('latency', 'N/A')} "
+                f"gpu={body.get('gpu', '')[:40]}"
             )
 
             # Upsert node_models for pool models
@@ -904,6 +932,11 @@ async def publish_node_event(request: Request):
         elif event_type == "node_left":
             supabase_mgr.deregister_node(node_hash)
 
+            logger.info(
+                f"🔴 NODE LEFT: {node_hash} model={model_name} "
+                f"reason={body.get('reason', 'node_event')}"
+            )
+
             if sse_mgr:
                 await sse_mgr.broadcast("node_left", {
                     "node_hash": node_hash, "model_name": model_name,
@@ -926,6 +959,19 @@ async def publish_node_event(request: Request):
                 except Exception as e:
                     logger.error(f"URL update in node_updated failed: {e}")
 
+            # Extract metrics early for logging
+            event_metrics = body.get("metrics", {})
+            event_ctx_length = body.get("ctx_length", 0)
+
+            logger.info(
+                f"🔄 NODE UPDATED: {node_hash} model={model_name} "
+                f"pool={[m.get('name', '?') for m in (event_metrics.get('pool_models', []) or body.get('models', []))]} "
+                f"load={event_metrics.get('load', 0):.2f} "
+                f"tps={event_metrics.get('tps', 0):.1f} "
+                f"ttft={event_metrics.get('ttft', 'N/A')} "
+                f"total_tokens={event_metrics.get('total_tokens', 0)}"
+            )
+
             # Update model name if it changed (hot-reload)
             new_model = body.get("model", "")
             if new_model and new_model != "unknown":
@@ -940,7 +986,10 @@ async def publish_node_event(request: Request):
                     }).eq("node_hash", node_hash).eq("status", "active").execute()
                     model_name = new_model
                     model_slug = new_slug
-                    logger.info(f"📡 Node {node_hash} model changed → {new_model}")
+                    logger.info(
+                        f"📡 Node {node_hash} model changed → {new_model} "
+                        f"(pool={[m.get('name', '?') for m in body.get('metrics', {}).get('pool_models', [])]})"
+                    )
 
             # Extract metrics and ctx_length from event payload
             event_metrics = body.get("metrics", {})
@@ -1041,11 +1090,19 @@ async def publish_node_event(request: Request):
                     "peer_model": body.get("peer_model", "unknown"),
                     "discovered_by": node_id
                 })
-            logger.info(f"📡 Peer discovered via event: {body.get('peer_node_id', '')[:8]}...")
+            logger.info(
+                f"🔵 PEER DISCOVERED: {body.get('peer_node_id', '')[:16]}... "
+                f"model={body.get('peer_model', 'unknown')} "
+                f"by={node_id[:16]}..."
+            )
+
+        logger.info(
+            f"✅ Event processed: type={event_type} node={node_hash} model={model_name}"
+        )
 
         return {"success": True, "event_type": event_type, "node_hash": node_hash}
     except Exception as e:
-        logger.error(f"Error in publish_node_event: {e}")
+        logger.error(f"Error in publish_node_event (type={body.get('event_type', '?') if 'body' in dir() else '?'}): {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
