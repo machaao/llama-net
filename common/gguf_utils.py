@@ -3,10 +3,21 @@ GGUF metadata reader using the official gguf package.
 Leverages GGUFReader from llama-cpp-python's dependency tree — no extra installs needed.
 """
 
+import os
 from typing import Dict, Any, Optional
 from common.utils import get_logger
 
 logger = get_logger(__name__)
+
+# In-memory cache for GGUF metadata, keyed by absolute filepath.
+# Model files are immutable after download, so no invalidation is needed.
+_METADATA_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _cache_key(filepath: str) -> str:
+    """Return absolute path for use as cache key."""
+    return os.path.abspath(filepath)
+
 
 # KV cache bytes per element by quantization type
 KV_CACHE_BYTES_PER_ELEMENT = {
@@ -40,9 +51,13 @@ def get_arch_prefix(arch: str) -> str:
 def _read_metadata(filepath: str) -> Dict[str, Any]:
     """Read GGUF metadata using the official GGUFReader API.
 
-    Uses field.contents() which is the correct method to extract
-    actual Python values from ReaderField objects.
+    Results are cached in memory by absolute filepath. Model files
+    are immutable after download, so the cache never expires.
     """
+    key = _cache_key(filepath)
+    if key in _METADATA_CACHE:
+        return _METADATA_CACHE[key]
+
     from gguf.gguf_reader import GGUFReader
 
     reader = GGUFReader(filepath)
@@ -72,6 +87,8 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
         except Exception as e:
             logger.debug(f"Could not read GGUF field '{field.name}': {e}")
 
+    _METADATA_CACHE[key] = metadata
+    logger.debug(f"Cached GGUF metadata for {os.path.basename(filepath)} ({len(metadata)} fields)")
     return metadata
 
 
