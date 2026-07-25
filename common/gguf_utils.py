@@ -217,7 +217,7 @@ def get_model_context_length(filepath: str) -> Optional[int]:
             return None
 
     except Exception as e:
-        logger.debug(f"Could not read context length from {filepath}: {e}")
+        logger.warning(f"Could not read context length from {filepath}: {e}")
         return None
 
 
