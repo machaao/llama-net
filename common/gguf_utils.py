@@ -51,17 +51,11 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
     reader = GGUFReader(filepath)
     metadata: Dict[str, Any] = {}
 
-    for field in reader.fields:
+    for name, field in reader.fields.items():
         try:
-            # Handle both dict-style and object-style fields
-            if isinstance(field, str):
-                continue
+            data = getattr(field, 'data', None)
 
-            name = getattr(field, 'name', None) or getattr(field, 'key', None)
-            data = getattr(field, 'data', None) or getattr(field, 'value', None)
-
-            if name is None or data is None:
-                logger.debug(f"Skipping field with missing name/data: {type(field)}")
+            if data is None:
                 continue
 
             if hasattr(data, 'dtype') and data.dtype == 'uint8' and data.ndim == 1:
