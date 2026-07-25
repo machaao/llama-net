@@ -241,11 +241,25 @@ class SupabaseManager:
                 except Exception:
                     pass
                 self.upsert_node_models(node_hash, pool_models, active_slug)
-                # Update primary model ctx_length if available
-                if pool_models:
-                    primary = pool_models[0] if isinstance(pool_models[0], dict) else None
-                    if primary:
-                        update_data["ctx_length"] = primary.get("ctx_length", 0)
+                # Update primary model ctx_length from active model in pool
+                primary = next(
+                    (m for m in pool_models if isinstance(m, dict) and m.get("model_name") == active_slug),
+                    None
+                )
+                if not primary:
+                    primary = next(
+                        (m for m in pool_models if isinstance(m, dict) and m.get("name") == active_slug),
+                        None
+                    )
+                if primary:
+                    update_data["ctx_length"] = primary.get("ctx_length", 0)
+                elif pool_models:
+                    # Fallback: use first model's ctx_length
+                    update_data["ctx_length"] = pool_models[0].get("ctx_length", 0) if isinstance(pool_models[0], dict) else 0
+
+            # Also accept ctx_length directly from metrics (for event payload)
+            if "ctx_length" in metrics and isinstance(metrics["ctx_length"], int):
+                update_data["ctx_length"] = metrics["ctx_length"]
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
             return len(result.data) > 0

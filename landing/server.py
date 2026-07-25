@@ -495,6 +495,10 @@ async def node_heartbeat(request: Request):
                 pool_models.append({"name": m, "ctx_length": 0})
         metrics["pool_models"] = pool_models
         metrics["pool_size"] = len(pool_models)
+        # Pass ctx_length from the active model (first in pool or separate field)
+        active_ctx = body.get("ctx_length", 0)
+        if active_ctx > 0:
+            metrics["ctx_length"] = active_ctx
         # Upsert node_models junction table
         try:
             supabase_mgr.upsert_node_models(node_hash, pool_models)
@@ -938,6 +942,11 @@ async def publish_node_event(request: Request):
                     model_slug = new_slug
                     logger.info(f"📡 Node {node_hash} model changed → {new_model}")
 
+            # Extract ctx_length from event payload
+            event_ctx_length = body.get("ctx_length", 0)
+            if event_ctx_length > 0:
+                event_metrics["ctx_length"] = event_ctx_length
+
             # Extract pool_models from multiple possible locations
             event_metrics = body.get("metrics", {})
             raw_pool_models = (
@@ -946,6 +955,10 @@ async def publish_node_event(request: Request):
             )
             if not raw_pool_models:
                 raw_pool_models = body.get("models", [])
+
+            # Re-inject ctx_length if it was set from body
+            if event_ctx_length > 0:
+                event_metrics["ctx_length"] = event_ctx_length
 
             # Normalize to object format
             event_pool_models = []
