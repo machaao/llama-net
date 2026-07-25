@@ -11,7 +11,7 @@ import psutil
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from common.utils import get_logger
-from common.gguf_utils import get_model_architecture_info, estimate_kv_cache_gb
+from common.gguf_utils import get_model_architecture_info, get_model_context_length, estimate_kv_cache_gb
 
 logger = get_logger(__name__)
 
