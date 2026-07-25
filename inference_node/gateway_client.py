@@ -271,7 +271,7 @@ class GatewayClient:
                                 "node_hash": self.node_hash,
                                 "url": self.own_url,
                                 "metrics": metrics,
-                                "models": metrics.get("pool", {}).get("models", [self.model_name]),
+                                "models": self._get_models_with_context(),
                             },
                         ) as resp:
                             if resp.status != 200:
@@ -342,6 +342,7 @@ class GatewayClient:
                 pool_info = self.model_pool.get_network_info()
                 models_list = pool_info.get("models", [])
                 if models_list:
+                    # Object format: [{"name": "model", "ctx_length": N}]
                     metrics["pool_models"] = models_list
                     metrics["pool_size"] = len(models_list)
 
@@ -352,10 +353,8 @@ class GatewayClient:
                 "url": self.own_url,
                 "ip": self.public_ip,
                 "port": self.port,
-                "models": [self.model_name] + (
-                    [m for m in (self.model_pool.get_network_info().get("models", [])) if m != self.model_name]
-                    if self.model_pool else []
-                ),
+                "models": self._get_models_with_context(),
+                "ctx_length": self._get_active_context_length_value(),
                 "metrics": metrics,
                 "probe_metrics": self.probe_metrics,
                 "platform": self._get_platform_string(),
@@ -439,6 +438,31 @@ class GatewayClient:
         """Get OS-architecture string for quality gate hardware detection."""
         import platform as p
         return f"{p.system()}-{p.machine()}"
+
+    def _get_models_with_context(self) -> list:
+        """Build models list with ctx_length for each model in pool."""
+        models = [{"name": self.model_name, "ctx_length": 0}]
+        if self.model_pool:
+            try:
+                pool_info = self.model_pool.get_network_info()
+                models = pool_info.get("models", [])
+                active_name = self.model_name
+                names = {m["name"] for m in models}
+                if active_name not in names:
+                    active_slot = self.model_pool.get_active()
+                    ctx = active_slot.n_ctx if active_slot else 0
+                    models.insert(0, {"name": active_name, "ctx_length": ctx})
+            except Exception:
+                pass
+        return models
+
+    def _get_active_context_length_value(self) -> int:
+        """Get ctx_length for the active model."""
+        if self.model_pool:
+            slot = self.model_pool.get_active()
+            if slot:
+                return slot.n_ctx
+        return 0
 
     @staticmethod
     def _get_gpu_info() -> str:

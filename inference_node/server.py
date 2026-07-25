@@ -92,6 +92,18 @@ def _sanitize_node_for_api(node: dict) -> dict:
     """Remove sensitive fields (url, ip, port) from a node dict for public API responses."""
     return {k: v for k, v in node.items() if k not in ("url", "ip", "port")}
 
+def _get_active_context_length() -> int:
+    """Get the active model's context length."""
+    if llm and llm.llm is not None:
+        try:
+            return llm.llm.n_ctx()
+        except Exception:
+            pass
+    if config:
+        return config.n_ctx
+    return 0
+
+
 def _get_own_url() -> str:
     """Get this node's public tunnel URL. Always checks fresh sources."""
     # Always check fresh sources first (file/env may have updated URL)
@@ -413,6 +425,7 @@ async def _broadcast_current_node_metrics():
             "ttft": metrics.get("ttft", 0),
             "latency": metrics.get("latency", 0),
             "total_tokens": metrics.get("total_tokens", 0),
+            "context_length": _get_active_context_length(),
             "last_seen": int(time.time()),
         }
 
@@ -542,6 +555,7 @@ async def list_models():
             # Mark which model is currently active
             model_dict["is_active"] = (slot.model_name == model_pool.active_model)
             model_dict["size_display"] = ModelPool._format_size(slot.size_bytes) if slot.size_bytes else "Unknown"
+            model_dict["context_length"] = slot.n_ctx
             models_data.append(model_dict)
     elif llm:
         # Single model fallback (no pool)
@@ -560,6 +574,7 @@ async def list_models():
         except Exception as e:
             logger.warning(f"Could not get chat format info: {e}")
         model_dict["is_active"] = True
+        model_dict["context_length"] = _get_active_context_length()
         models_data.append(model_dict)
     
     if not models_data:
@@ -602,6 +617,7 @@ async def list_network_models():
             "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
             "total_tokens": metrics.get("total_tokens", 0),
             "gpu_info": system_info.get("gpu") if system_info else "",
+            "context_length": _get_active_context_length(),
             "pool_models": pool_models_list,
             "is_pool_model": len(pool_models_list) > 1,
         }))
@@ -625,6 +641,7 @@ async def list_network_models():
                     "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
                     "total_tokens": slot_metrics.get("total_tokens", 0),
                     "gpu_info": system_info.get("gpu") if system_info else "",
+                    "context_length": slot.n_ctx,
                     "pool_models": pool_models_list,
                     "is_pool_model": True,
                 }))
@@ -658,6 +675,7 @@ async def get_models_statistics():
         "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
         "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
         "total_tokens": metrics.get("total_tokens", 0),
+        "context_length": _get_active_context_length(),
     })
 
     models_dict: Dict[str, Any] = {}
@@ -679,6 +697,7 @@ async def get_models_statistics():
                 "uptime": slot_metrics.get("uptime", 0), "last_seen": int(time.time()),
                 "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
                 "total_tokens": slot_metrics.get("total_tokens", 0),
+                "context_length": slot.n_ctx,
             })
             models_dict[name] = {"nodes": [pool_node]}
 
@@ -1593,6 +1612,7 @@ async def info():
         raise HTTPException(status_code=503, detail="Node not initialized")
     return {
         "node_id": config.node_id, "model": config.model_name, "model_path": config.model_path,
+        "n_ctx": config.n_ctx, "n_ctx_auto_detected": getattr(config, 'n_ctx_auto_detected', False),
         "system": system_info, "openai_compatible": True,
         "chat_template": llm.get_chat_template_info() if llm else {},
         "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"],
@@ -1615,6 +1635,7 @@ async def health():
         "status": "ok",
         "llm_loaded": llm is not None,
         "model": config.model_name,
+        "context_length": _get_active_context_length(),
         "timestamp": time.time(),
         "heartbeat": heartbeat_health,
         **metrics,
