@@ -160,7 +160,7 @@ class LlamaNetUI {
         this.startUnifiedSSENetworkMonitoring();
         
         // Detect local node ID from /info endpoint
-        fetch(`${this.baseUrl}/info`).then(r => r.ok ? r.json() : null).then(data => {
+        fetch(`${this.baseUrl}/info`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).then(data => {
             if (data?.node_id) this.localNodeId = data.node_id;
         }).catch(() => {});
 
@@ -318,7 +318,7 @@ class LlamaNetUI {
 
         setInterval(async () => {
             try {
-                const resp = await fetch(`${this.baseUrl}/health`);
+                const resp = await fetch(`${this.baseUrl}/health`, { credentials: 'include' });
                 if (resp.ok) {
                     const data = await resp.json();
                     if (data.heartbeat && data.heartbeat.wake_events > 0 && !this._wakeWarningDismissed) {
@@ -342,6 +342,7 @@ class LlamaNetUI {
             const resp = await fetch(`${this.baseUrl}/models/pool/evict`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ model_name: modelName })
             });
             const data = await resp.json();
@@ -358,7 +359,7 @@ class LlamaNetUI {
 
     async loadPoolStatus() {
         try {
-            const resp = await fetch(`${this.baseUrl}/models/pool`);
+            const resp = await fetch(`${this.baseUrl}/models/pool`, { credentials: 'include' });
             if (resp.ok) {
                 const data = await resp.json();
                 if (data.enabled) {
@@ -594,6 +595,7 @@ class LlamaNetUI {
             const resp = await fetch(this.baseUrl + '/models/select', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ model_path: modelPath || modelName, load_mode: 'pool' })
             });
 
@@ -622,7 +624,7 @@ class LlamaNetUI {
 
     async loadTunnelStatus() {
         try {
-            const resp = await fetch(`${this.baseUrl}/tunnel/status`).catch(() => null);
+            const resp = await fetch(`${this.baseUrl}/tunnel/status`, { credentials: 'include' }).catch(() => null);
             if (!resp || !resp.ok) return;
             if (resp.ok) {
                 const data = await resp.json();
@@ -650,7 +652,7 @@ class LlamaNetUI {
         this.showNetworkLoading();
 
         try {
-            const modelsResponse = await fetch(`${this.baseUrl}/v1/models/network`);
+            const modelsResponse = await fetch(`${this.baseUrl}/v1/models/network`, { credentials: 'include' });
 
             if (modelsResponse.ok) {
                 const modelsData = await modelsResponse.json();
@@ -1261,7 +1263,7 @@ class LlamaNetUI {
     
     async refreshNetworkDataOnTopologyChange() {
         try {
-            const modelsResponse = await fetch(`${this.baseUrl}/v1/models/network`).catch(() => null);
+            const modelsResponse = await fetch(`${this.baseUrl}/v1/models/network`, { credentials: 'include' }).catch(() => null);
 
             if (modelsResponse && modelsResponse.ok) {
                 const modelsData = await modelsResponse.json();
@@ -1349,8 +1351,8 @@ class LlamaNetUI {
             
             // Get fresh data from API for validation and potential updates
             const [modelsResponse, statsResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/v1/models/network`).catch(() => null),
-                fetch(`${this.baseUrl}/models/statistics`).catch(() => null)
+                fetch(`${this.baseUrl}/v1/models/network`, { credentials: 'include' }).catch(() => null),
+                fetch(`${this.baseUrl}/models/statistics`, { credentials: 'include' }).catch(() => null)
             ]);
             
             // Check if SSE is still connected
@@ -1440,7 +1442,7 @@ class LlamaNetUI {
         
         try {
             // Get current node info
-            const nodeResponse = await fetch(`${this.baseUrl}/info`);
+            const nodeResponse = await fetch(`${this.baseUrl}/info`, { credentials: 'include' });
             const nodeInfo = await nodeResponse.json();
             
             // Create new content
@@ -1854,7 +1856,7 @@ class LlamaNetUI {
         
         try {
             // Get detailed model statistics
-            const statsResponse = await fetch(`${this.baseUrl}/models/statistics`);
+            const statsResponse = await fetch(`${this.baseUrl}/models/statistics`, { credentials: 'include' });
             
             if (statsResponse.ok) {
                 const statsData = await statsResponse.json();
@@ -1978,7 +1980,7 @@ class LlamaNetUI {
             const realtimeNode = this.activeNodes.get(nodeId);
             
             // Then get detailed info from API
-            const response = await fetch(`${this.baseUrl}/node/${nodeId}`);
+            const response = await fetch(`${this.baseUrl}/node/${nodeId}`, { credentials: 'include' });
             
             if (response.ok) {
                 const nodeInfo = await response.json();
@@ -2274,6 +2276,7 @@ class LlamaNetUI {
                 headers: {
                     'Content-Type': 'application/json'
                 },
+                credentials: 'include',
                 body: JSON.stringify(requestBody)
             });
             
@@ -2498,6 +2501,7 @@ class LlamaNetUI {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'include',
                 body: JSON.stringify(requestBody)
             };
             if (signal) fetchOptions.signal = signal;
@@ -2720,8 +2724,8 @@ class LlamaNetUI {
 
         try {
             const [infoResponse, statusResponse] = await Promise.all([
-                fetch(`${this.baseUrl}/info`),
-                fetch(`${this.baseUrl}/status`)
+                fetch(`${this.baseUrl}/info`, { credentials: 'include' }),
+                fetch(`${this.baseUrl}/status`, { credentials: 'include' })
             ]);
 
             const info = await infoResponse.json();
@@ -3341,7 +3345,7 @@ class ModelDownloaderUI {
         }
 
         try {
-            const response = await fetch(`${this.baseUrl}/models/search?q=${encodeURIComponent(query)}`);
+            const response = await fetch(`${this.baseUrl}/models/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
             const data = await response.json();
             if (data.success && data.data) {
                 this.searchResults = data.data;
@@ -3401,7 +3405,7 @@ class ModelDownloaderUI {
         modal.show();
 
         try {
-            const response = await fetch(`${this.baseUrl}/models/details/${encodeURIComponent(repoId)}`);
+            const response = await fetch(`${this.baseUrl}/models/details/${encodeURIComponent(repoId)}`, { credentials: 'include' });
             const data = await response.json();
             if (data.success && data.data) {
                 const info = data.data;
@@ -3470,6 +3474,7 @@ class ModelDownloaderUI {
             const response = await fetch(`${this.baseUrl}/models/download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ repo_id: repoId, quantization })
             });
             const data = await response.json();
@@ -3559,7 +3564,7 @@ class ModelDownloaderUI {
 
     async cancelDownload(downloadId) {
         try {
-            await fetch(`${this.baseUrl}/models/download/${downloadId}`, { method: 'DELETE' });
+            await fetch(`${this.baseUrl}/models/download/${downloadId}`, { method: 'DELETE', credentials: 'include' });
             this.activeDownloads.delete(downloadId);
             this.renderDownloads();
             this.showToast('info', 'Download cancelled');
@@ -3571,7 +3576,7 @@ class ModelDownloaderUI {
     async loadLocalModels() {
         const container = document.getElementById('localModelsList');
         try {
-            const response = await fetch(`${this.baseUrl}/models/local`);
+            const response = await fetch(`${this.baseUrl}/models/local`, { credentials: 'include' });
             const data = await response.json();
             if (data.success && data.data) {
                 this.localModels = data.data;
@@ -3619,6 +3624,7 @@ class ModelDownloaderUI {
             const response = await fetch(`${this.baseUrl}/models/select`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ model_path: modelPath, load_mode: 'pool' })
             });
             const data = await response.json();
@@ -3655,7 +3661,7 @@ class ModelDownloaderUI {
     async deleteModel(modelId) {
         if (!confirm('Delete this model from disk?')) return;
         try {
-            const response = await fetch(`${this.baseUrl}/models/local/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+            const response = await fetch(`${this.baseUrl}/models/local/${encodeURIComponent(modelId)}`, { method: 'DELETE', credentials: 'include' });
             const data = await response.json();
             if (data.success) {
                 this.showToast('success', 'Model deleted');
@@ -3843,7 +3849,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Check if server is in no-model mode
     try {
-        const healthResp = await fetch(`${window.location.origin}/health`);
+        const healthResp = await fetch(`${window.location.origin}/health`, { credentials: 'include' });
         if (healthResp.ok) {
             const health = await healthResp.json();
             if (health.status === 'no_model' || health.no_model_mode) {
