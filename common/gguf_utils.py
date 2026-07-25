@@ -110,6 +110,7 @@ def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
         "n_layers": 0,
         "n_embd": 0,
         "n_head": 0,
+        "n_kv_heads": 0,
     }
     try:
         meta = _read_metadata(filepath)
@@ -140,6 +141,9 @@ def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
             "n_head": _find_int(
                 f"{prefix}.attention.head_count",
                 f"{prefix}.num_attention_heads",
+            ),
+            "n_kv_heads": _find_int(
+                f"{prefix}.attention.head_count_kv",
             ),
         }
 
