@@ -185,9 +185,33 @@ async def lifespan(app: FastAPI):
             llm = LlamaWrapper(config)
             system_info = SystemInfo.get_all_info()
 
+            # Model pool change callback → gateway + SSE
+            async def _on_pool_model_change(event_type: str, changed_model: str):
+                """Propagate pool changes to gateway and connected clients."""
+                logger.info(f"📢 Pool event: {event_type} → {changed_model}")
+                if gateway_client:
+                    asyncio.create_task(gateway_client.send_event("node_updated"))
+                if sse_manager:
+                    try:
+                        pool_info = model_pool.get_network_info()
+                        await sse_manager.broadcast_event("node_updated", {
+                            "node_info": {
+                                "node_id": config.node_id,
+                                "url": _get_own_url(),
+                                "model": config.model_name,
+                                "pool": pool_info,
+                            },
+                            "event_type": event_type,
+                            "model_name": changed_model,
+                            "timestamp": time.time(),
+                            "source": "pool_change",
+                        })
+                    except Exception as e:
+                        logger.debug(f"SSE broadcast failed: {e}")
+
             # Initialize model pool
             from inference_node.model_pool import ModelPool
-            model_pool = ModelPool(config)
+            model_pool = ModelPool(config, on_model_change=_on_pool_model_change)
             model_pool.register(config.model_path, llm, config.model_name)
             logger.info(f"Model pool initialized: {model_pool}")
 

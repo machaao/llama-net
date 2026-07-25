@@ -256,6 +256,17 @@ class LlamaWrapper:
         self.config.model_path = new_model_path
         self.config.model_name = os.path.basename(new_model_path)
         
+        # Recalculate optimal context for the new model
+        from common.context_optimizer import calculate_optimal_context
+        cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
+        self.config.n_ctx, auto_detected = calculate_optimal_context(
+            new_model_path, cache_type_k
+        )
+        logger.info(
+            f"Context recalculated: {self.config.n_ctx} tokens "
+            f"(auto={auto_detected})"
+        )
+        
         # Re-detect chat format and reasoning support for the new model
         self.detected_chat_format = detect_chat_format_from_model_name(self.config.model_name)
         self.supports_reasoning = detect_reasoning_model(self.config.model_name)
