@@ -160,6 +160,7 @@ class LlamaWrapper:
     
     def __init__(self, config: InferenceConfig):
         self.config = config
+        self._model_name = config.model_name  # Snapshot — immune to global config mutation
         self.metrics_manager = MetricsManager()
         
         # Add processing lock for thread safety
@@ -220,7 +221,7 @@ class LlamaWrapper:
     def unload_model(self) -> None:
         """Unload the current model from memory"""
         if self.llm is not None:
-            logger.info(f"Unloading model: {self.config.model_name}")
+            logger.info(f"Unloading model: {self._model_name}")
             del self.llm
             self.llm = None
             gc.collect()
@@ -255,6 +256,7 @@ class LlamaWrapper:
         # Update model config BEFORE loading new model
         self.config.model_path = new_model_path
         self.config.model_name = os.path.basename(new_model_path)
+        self._model_name = self.config.model_name  # Update snapshot
         
         # Recalculate optimal context for the new model
         from common.context_optimizer import calculate_optimal_context

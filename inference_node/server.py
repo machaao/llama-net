@@ -147,6 +147,45 @@ def _sync_tunnel_url_to_gateway(url: str):
         logger.info(f"🔄 Synced tunnel URL to gateway client: {url}")
 
 
+def _sync_server_pool_state():
+    """Synchronize server globals with current pool state.
+
+    Call after any pool operation that may have changed the active model
+    or emptied the pool. Idempotent — safe to call multiple times.
+    """
+    global llm
+
+    if not model_pool:
+        return
+
+    active_slot = model_pool.get_active()
+    if active_slot:
+        llm = active_slot.llm
+        config.model_name = active_slot.model_name
+        config.model_path = active_slot.model_path
+        config.no_model_mode = False
+        logger.info(f"🔄 Server synced to active model: {config.model_name}")
+    else:
+        llm = None
+        config.model_name = "No Model Loaded"
+        config.model_path = ""
+        config.no_model_mode = True
+        logger.warning("⚠️ Pool empty — server in no-model mode")
+
+    if gateway_client:
+        gateway_client.model_name = config.model_name
+        if llm:
+            gateway_client.metrics_callback = llm.get_metrics
+        else:
+            gateway_client.metrics_callback = lambda: {"load": 0, "tps": 0, "uptime": 0}
+
+    if heartbeat_manager:
+        if llm:
+            heartbeat_manager.metrics_callback = llm.get_metrics
+        else:
+            heartbeat_manager.metrics_callback = lambda: {"load": 0, "tps": 0, "uptime": 0}
+
+
 # Gateway client handles all peer communication — no DHT, P2P, or discovery needed
 
 
@@ -189,20 +228,35 @@ async def lifespan(app: FastAPI):
             async def _on_pool_model_change(event_type: str, changed_model: str):
                 """Propagate pool changes to gateway and connected clients."""
                 logger.info(f"📢 Pool event: {event_type} → {changed_model}")
+
+                _sync_server_pool_state()
+
                 if gateway_client:
                     asyncio.create_task(gateway_client.send_event("node_updated"))
+
                 if sse_manager:
                     try:
                         pool_info = model_pool.get_network_info()
+                        node_info = {
+                            "node_id": config.node_id,
+                            "url": _get_own_url(),
+                            "model": config.model_name,
+                            "no_model_mode": config.no_model_mode,
+                            "pool": pool_info,
+                        }
+                        if llm:
+                            try:
+                                metrics = llm.get_metrics()
+                                node_info["load"] = metrics.get("load", 0)
+                                node_info["tps"] = metrics.get("tps", 0)
+                            except Exception:
+                                pass
+
                         await sse_manager.broadcast_event("node_updated", {
-                            "node_info": {
-                                "node_id": config.node_id,
-                                "url": _get_own_url(),
-                                "model": config.model_name,
-                                "pool": pool_info,
-                            },
+                            "node_info": node_info,
                             "event_type": event_type,
                             "model_name": changed_model,
+                            "pool_empty": len(model_pool) == 0,
                             "timestamp": time.time(),
                             "source": "pool_change",
                         })
@@ -1221,6 +1275,12 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
         else:
             logger.debug(f"Pool routing: using active model")
 
+    if active_llm is None or (hasattr(active_llm, 'llm') and active_llm.llm is None):
+        raise HTTPException(
+            status_code=503,
+            detail="No model loaded. Load a model via Model Manager first."
+        )
+
     # Track actual model name used for inference (not config.model_name)
     actual_model_name = active_llm.config.model_name if active_llm != llm else config.model_name
 
@@ -1602,17 +1662,27 @@ async def get_pool_status():
 @app.post("/models/pool/evict")
 async def evict_model(request: Request):
     """Manually evict a model from the pool"""
+    global llm
     if not model_pool:
         raise HTTPException(status_code=503, detail="Pool not available")
     body = await request.json()
     model_name = body.get("model_name")
     if not model_name:
         raise HTTPException(status_code=400, detail="model_name required")
+
     success = model_pool.evict(model_name)
     if not success:
         raise HTTPException(status_code=404, detail=f"Model {model_name} not in pool")
+
+    _sync_server_pool_state()
+
     config.save_pool_history(model_pool.get_history())
-    return {"success": success, "pool": model_pool.status()}
+    return {
+        "success": success,
+        "pool": model_pool.status(),
+        "no_model_mode": config.no_model_mode,
+        "active_model": config.model_name,
+    }
 
 
 @app.get("/models/pool/capacity")
@@ -1718,8 +1788,22 @@ async def network_events(request: Request):
         event_queue = await sse_manager.add_connection(connection_id)
         try:
             yield f"data: {json.dumps({'type': 'connected', 'connection_id': connection_id})}\n\n"
-            if llm and config:
-                yield f"data: {json.dumps({'type': 'node_joined', 'node_info': {'node_id': config.node_id, 'model': config.model_name}})}\n\n"
+            if config:
+                node_info = {
+                    'node_id': config.node_id,
+                    'model': config.model_name,
+                    'no_model_mode': config.no_model_mode,
+                }
+                if model_pool:
+                    node_info['pool'] = model_pool.get_network_info()
+                if llm:
+                    try:
+                        metrics = llm.get_metrics()
+                        node_info['load'] = metrics.get('load', 0)
+                        node_info['tps'] = metrics.get('tps', 0)
+                    except Exception:
+                        pass
+                yield f"data: {json.dumps({'type': 'node_info', 'node_info': node_info})}\n\n"
             while True:
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=25)
