@@ -466,12 +466,13 @@ async def _check_node_overload() -> Optional[JSONResponse]:
         return None
 
     try:
-        is_overloaded = llm.metrics_manager.is_overloaded(
+        overload_info = llm.metrics_manager.is_overloaded(
             cpu_threshold=90.0,
             memory_threshold=92.0,
         )
-        if is_overloaded:
-            logger.warning(f"⚠️ 503: Node overloaded ({is_overloaded})")
+        if overload_info.get("is_overloaded"):
+            reasons = overload_info.get("overload_reasons", [])
+            logger.warning(f"⚠️ 503: Node overloaded ({', '.join(reasons)})")
             return JSONResponse(
                 status_code=503,
                 content={
