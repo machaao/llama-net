@@ -86,6 +86,7 @@ gateway_client: Optional[GatewayClient] = None
 rate_limiter = None
 model_pool = None
 _active_sse_tasks: set = set()
+_shutdown_event = asyncio.Event()
 
 
 def _sanitize_node_for_api(node: dict) -> dict:
@@ -320,13 +321,20 @@ async def lifespan(app: FastAPI):
 
     logger.info("🛑 Shutting down...")
 
-    # Cancel all active SSE tasks first to prevent blocking during shutdown
-    global _active_sse_tasks
+    # Signal SSE generators to exit cleanly (prevents CancelledError traceback in Starlette)
+    _shutdown_event.set()
     if _active_sse_tasks:
-        logger.info(f"Cancelling {len(_active_sse_tasks)} active SSE connections...")
+        logger.info(f"Closing {len(_active_sse_tasks)} SSE connections...")
+        # Wait for generators to notice the flag and exit naturally
+        await asyncio.sleep(3.5)
+        # Force-cancel any stragglers
         for task in _active_sse_tasks:
-            task.cancel()
-        await asyncio.gather(*_active_sse_tasks, return_exceptions=True)
+            if not task.done():
+                task.cancel()
+        try:
+            await asyncio.gather(*_active_sse_tasks, return_exceptions=True)
+        except Exception:
+            pass
         _active_sse_tasks.clear()
 
     if gateway_client:
@@ -1816,8 +1824,10 @@ async def network_events(request: Request):
                         pass
                 yield f"data: {json.dumps({'type': 'node_info', 'node_info': node_info})}\n\n"
             while True:
+                if _shutdown_event.is_set():
+                    break
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=25)
+                    event = await asyncio.wait_for(event_queue.get(), timeout=3)
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
