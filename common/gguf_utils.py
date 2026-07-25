@@ -105,11 +105,23 @@ def get_model_context_length(filepath: str) -> Optional[int]:
     """Get the model's trained context length from GGUF metadata."""
     try:
         meta = read_gguf_metadata(filepath)
+
+        # Try standard key first
         ctx = meta.get("general.context_length")
+
+        # Fallback: try architecture-specific key (some tools use this)
+        if ctx is None:
+            arch = meta.get("general.architecture", "")
+            if arch:
+                ctx = meta.get(f"{arch}.context_length")
+
         if ctx is not None:
             ctx = int(ctx)
             if ctx > 0:
                 return ctx
+
+        # Debug: log available keys so we can diagnose missing context_length
+        logger.debug(f"No context_length found. Available keys: {sorted(meta.keys())}")
     except Exception as e:
         logger.debug(f"Could not read context length from {filepath}: {e}")
     return None
@@ -123,7 +135,10 @@ def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
 
         info = {
             "architecture": arch,
-            "context_length": int(meta.get("general.context_length", 0)),
+            "context_length": int(
+                meta.get("general.context_length", 0)
+                or meta.get(f"{arch}.context_length", 0)
+            ),
             "n_layers": 0,
             "n_embd": 0,
             "n_head": 0,
