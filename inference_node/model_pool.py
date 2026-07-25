@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from common.utils import get_logger
 from common.gguf_utils import get_model_architecture_info, estimate_kv_cache_gb
-from common.context_optimizer import COMPUTE_BUFFER_GB
+from common.context_optimizer import COMPUTE_BUFFER_GB, estimate_compute_buffer_gb
 
 logger = get_logger(__name__)
 
@@ -107,7 +107,8 @@ class ModelPool:
             except Exception:
                 pass
 
-        total = model_gb + kv_gb + COMPUTE_BUFFER_GB  # model + kv + compute buffers
+        compute_buf = estimate_compute_buffer_gb(model_gb)
+        total = model_gb + kv_gb + compute_buf  # model + kv + compute buffers (scaled)
         logger.debug(f"Per-model memory estimate: {model_gb:.1f} GB weights + {kv_gb:.1f} GB KV = {total:.1f} GB total")
         return max(total, self.DEFAULT_MODEL_SIZE_GB)
 

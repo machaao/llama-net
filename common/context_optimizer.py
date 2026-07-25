@@ -40,6 +40,24 @@ def _estimate_kv_rate_per_token(model_size_gb: float) -> float:
     return kv_per_8k / 8192
 
 
+def estimate_compute_buffer_gb(model_size_gb: float) -> float:
+    """Estimate compute buffer memory based on model file size.
+
+    Compute buffers scale linearly for small models, capped at COMPUTE_BUFFER_GB.
+
+    Reference data:
+        3B   (~2 GB weights)  → ~0.7 GB compute  (0.3 + 0.2×2)
+        8B   (~4 GB weights)  → ~1.1 GB compute  (0.3 + 0.2×4)
+        20B  (12 GB weights)  → 2.7 GB compute   (reference)
+        120B (61 GB weights)  → 2.7 GB compute   (reference)
+
+    Linear fit: 0.3 + 0.2 × model_size_gb, capped at COMPUTE_BUFFER_GB.
+    """
+    if model_size_gb <= 0:
+        return COMPUTE_BUFFER_GB
+    return max(0.3, min(COMPUTE_BUFFER_GB, 0.3 + 0.2 * model_size_gb))
+
+
 def get_system_specs() -> dict:
     """Detect and cache system specs (RAM, VRAM, GPU name).
 
@@ -124,7 +142,8 @@ def get_vram_context_cap(
 
     # ── Model-size-aware: calculate actual KV budget ──
     if model_size_gb > 0:
-        kv_budget = per_model - model_size_gb - COMPUTE_BUFFER_GB
+        compute_buf = estimate_compute_buffer_gb(model_size_gb)
+        kv_budget = per_model - model_size_gb - compute_buf
         if kv_budget <= 0:
             return 4096  # model barely fits — minimal context
 
@@ -208,6 +227,8 @@ def calculate_optimal_context(
         specs = get_system_specs()
         usable_gb = specs["usable_memory_gb"]
 
+        compute_buf = estimate_compute_buffer_gb(model_gb)
+
         kv_gb = estimate_kv_cache_gb(
             n_layers=n_layers,
             n_embd=n_embd,
@@ -217,13 +238,14 @@ def calculate_optimal_context(
             n_kv_heads=n_kv_heads,
         )
 
-        total_needed = model_gb + kv_gb + COMPUTE_BUFFER_GB
+        total_needed = model_gb + kv_gb + compute_buf
 
         if total_needed <= usable_gb:
             logger.info(
                 f"✅ Auto-detected context: {effective_ctx} tokens "
                 f"(native={native_ctx}, VRAM cap={vram_cap}, "
-                f"KV: {kv_gb:.1f} GB, total: {total_needed:.1f}/{usable_gb:.1f} GB)"
+                f"KV: {kv_gb:.1f} GB, compute: {compute_buf:.1f} GB, "
+                f"total: {total_needed:.1f}/{usable_gb:.1f} GB)"
             )
             return effective_ctx, True
 
@@ -234,7 +256,7 @@ def calculate_optimal_context(
             }.get(cache_type_k, 2.0)
             head_dim = n_embd // n_head if n_head > 0 else 128
             effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
-            budget_gb = usable_gb - model_gb - COMPUTE_BUFFER_GB
+            budget_gb = usable_gb - model_gb - compute_buf
             max_ctx = int(
                 (budget_gb * (1024 ** 3))
                 / (2 * n_layers * head_dim * effective_heads * bytes_per_elem)

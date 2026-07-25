@@ -510,9 +510,19 @@ async def _check_node_overload() -> Optional[JSONResponse]:
         return None
 
     try:
+        # Multi-model pools use more memory by design —
+        # raise thresholds so intentionally-loaded models don't trip overload.
+        pool_size = len(model_pool)
+        if pool_size > 1:
+            cpu_threshold = 95.0
+            memory_threshold = 96.0
+        else:
+            cpu_threshold = 90.0
+            memory_threshold = 92.0
+
         overload_info = llm.metrics_manager.is_overloaded(
-            cpu_threshold=90.0,
-            memory_threshold=92.0,
+            cpu_threshold=cpu_threshold,
+            memory_threshold=memory_threshold,
         )
         if overload_info.get("is_overloaded"):
             reasons = overload_info.get("overload_reasons", [])
