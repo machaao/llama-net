@@ -11,6 +11,22 @@ from inference_node.config import InferenceConfig
 
 logger = get_logger(__name__)
 
+# KV cache type string → GGML type integer for llama-cpp-python
+_KV_CACHE_TYPE_MAP = {
+    "f16": 1,    # GGML_TYPE_F16
+    "q8_0": 8,   # GGML_TYPE_Q8_0
+    "q4_0": 2,   # GGML_TYPE_Q4_0
+}
+
+
+def _resolve_kv_cache_type(type_str: str) -> int:
+    """Convert KV cache type string to llama-cpp-python integer enum value."""
+    resolved = _KV_CACHE_TYPE_MAP.get(type_str)
+    if resolved is None:
+        logger.warning(f"Unknown KV cache type '{type_str}', falling back to f16")
+        return 1  # GGML_TYPE_F16
+    return resolved
+
 
 def _detect_and_fix_metal_compatibility():
     """Auto-detect Intel Macs and disable Metal to prevent shader compilation errors.
@@ -171,8 +187,8 @@ class LlamaWrapper:
             reasoning=True,
             chat_format=self.detected_chat_format,
             flash_attn=getattr(config, 'flash_attn', False),
-            type_k=getattr(config, 'cache_type_k', 'f16'),
-            type_v=getattr(config, 'cache_type_v', 'f16'),
+            type_k=_resolve_kv_cache_type(getattr(config, 'cache_type_k', 'f16')),
+            type_v=_resolve_kv_cache_type(getattr(config, 'cache_type_v', 'f16')),
         )
         
         # Detect and log the chat template being used
@@ -222,8 +238,8 @@ class LlamaWrapper:
             reasoning=True,
             chat_format=self.detected_chat_format,
             flash_attn=getattr(self.config, 'flash_attn', False),
-            type_k=getattr(self.config, 'cache_type_k', 'f16'),
-            type_v=getattr(self.config, 'cache_type_v', 'f16'),
+            type_k=_resolve_kv_cache_type(getattr(self.config, 'cache_type_k', 'f16')),
+            type_v=_resolve_kv_cache_type(getattr(self.config, 'cache_type_v', 'f16')),
         )
         
         # Log actual context size allocated
