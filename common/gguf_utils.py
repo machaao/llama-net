@@ -33,6 +33,28 @@ KV_CACHE_BYTES_PER_ELEMENT = {
     "q4_0": 0.5625,
 }
 
+# Map GGUF architecture names to their metadata key prefix.
+# Models sharing a prefix (e.g. "mistral" → "llama") use the same
+# GGUF schema keys for layer/embedding/head counts.
+ARCH_PREFIX_MAP: Dict[str, str] = {
+    "llama": "llama",
+    "mistral": "llama",
+    "gptoss": "gptoss",
+    "qwen2": "qwen2",
+    "qwen3": "qwen3",
+    "qwen35": "qwen35",
+    "phi3": "phi3",
+    "gemma": "gemma",
+    "gemma2": "gemma2",
+    "deepseek2": "deepseek2",
+    "command-r": "command-r",
+}
+
+
+def get_arch_prefix(arch: str) -> str:
+    """Resolve a GGUF architecture name to its metadata key prefix."""
+    return ARCH_PREFIX_MAP.get(arch, arch)
+
 
 def _read_string(f) -> str:
     length = struct.unpack('<Q', f.read(8))[0]
@@ -205,21 +227,22 @@ def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
     Uses targeted parsing to avoid loading massive tokenizer arrays
     into memory (250K+ strings in some models).
     """
+    default = {"architecture": "unknown", "context_length": 0, "n_layers": 0, "n_embd": 0, "n_head": 0}
     try:
         with open(filepath, 'rb') as f:
             magic = struct.unpack('<I', f.read(4))[0]
             if magic != GGUF_MAGIC:
-                return {"architecture": "unknown", "context_length": 0, "n_layers": 0, "n_embd": 0, "n_head": 0}
+                return default
 
             version = struct.unpack('<I', f.read(4))[0]
             if version == 1:
-                f.read(4)  # tensor_count
+                f.read(4)
                 kv_count = struct.unpack('<I', f.read(4))[0]
             elif version in (2, 3):
-                f.read(8)  # tensor_count
+                f.read(8)
                 kv_count = struct.unpack('<Q', f.read(8))[0]
             else:
-                return {"architecture": "unknown", "context_length": 0, "n_layers": 0, "n_embd": 0, "n_head": 0}
+                return default
 
             arch = None
             ctx_length = 0
@@ -227,58 +250,56 @@ def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
             n_embd = 0
             n_head = 0
 
-            # Keys we're looking for — build dynamically once we know the arch
-            needed_keys = {"general.architecture", "general.context_length"}
+            # Keys we always want
+            needed_keys: set = {"general.architecture", "general.context_length"}
 
             for _ in range(kv_count):
                 key = _read_string(f)
                 value_type = struct.unpack('<I', f.read(4))[0]
 
-                if key in needed_keys:
-                    value = _read_value(f, value_type)
-                    if key == "general.architecture":
-                        arch = str(value)
-                        # Now that we know arch, add arch-specific keys to the set
-                        prefix_map = {
-                            "llama": "llama", "mistral": "llama", "gptoss": "gptoss",
-                            "qwen2": "qwen2", "qwen3": "qwen3", "qwen35": "qwen35",
-                            "phi3": "phi3", "gemma": "gemma", "gemma2": "gemma2",
-                            "deepseek2": "deepseek2", "command-r": "command-r",
-                        }
-                        prefix = prefix_map.get(arch, arch)
-                        needed_keys.update([
-                            f"{prefix}.context_length",
-                            f"{prefix}.block_count", f"{prefix}.layer_count",
-                            f"{prefix}.embedding_length", f"{prefix}.hidden_size",
-                            f"{prefix}.attention.head_count", f"{prefix}.num_attention_heads",
-                        ])
-                    elif key == "general.context_length":
-                        ctx_length = int(value)
-                elif arch:
-                    # Check arch-specific keys
-                    prefix_map = {
-                        "llama": "llama", "mistral": "llama", "gptoss": "gptoss",
-                        "qwen2": "qwen2", "qwen3": "qwen3", "qwen35": "qwen35",
-                        "phi3": "phi3", "gemma": "gemma", "gemma2": "gemma2",
-                        "deepseek2": "deepseek2", "command-r": "command-r",
-                    }
-                    prefix = prefix_map.get(arch, arch)
-                    layer_keys = {f"{prefix}.block_count", f"{prefix}.layer_count"}
-                    embd_keys = {f"{prefix}.embedding_length", f"{prefix}.hidden_size"}
-                    head_keys = {f"{prefix}.attention.head_count", f"{prefix}.num_attention_heads"}
-
-                    if key == f"{prefix}.context_length" and ctx_length == 0:
-                        ctx_length = int(_read_value(f, value_type))
-                    elif key in layer_keys and n_layers == 0:
-                        n_layers = int(_read_value(f, value_type))
-                    elif key in embd_keys and n_embd == 0:
-                        n_embd = int(_read_value(f, value_type))
-                    elif key in head_keys and n_head == 0:
-                        n_head = int(_read_value(f, value_type))
-                    else:
-                        _skip_value(f, value_type)
-                else:
+                if key not in needed_keys:
                     _skip_value(f, value_type)
+                    continue
+
+                value = _read_value(f, value_type)
+
+                if key == "general.architecture":
+                    arch = str(value)
+                    prefix = get_arch_prefix(arch)
+                    # Now that we know the prefix, add arch-specific keys
+                    needed_keys.update([
+                        f"{prefix}.context_length",
+                        f"{prefix}.block_count",
+                        f"{prefix}.layer_count",
+                        f"{prefix}.embedding_length",
+                        f"{prefix}.hidden_size",
+                        f"{prefix}.attention.head_count",
+                        f"{prefix}.num_attention_heads",
+                    ])
+
+                elif key == "general.context_length":
+                    ctx_length = int(value)
+
+                elif key.endswith(".context_length") and ctx_length == 0:
+                    ctx_length = int(value)
+
+                elif key.endswith(".block_count") and n_layers == 0:
+                    n_layers = int(value)
+
+                elif key.endswith(".layer_count") and n_layers == 0:
+                    n_layers = int(value)
+
+                elif key.endswith(".embedding_length") and n_embd == 0:
+                    n_embd = int(value)
+
+                elif key.endswith(".hidden_size") and n_embd == 0:
+                    n_embd = int(value)
+
+                elif key.endswith(".attention.head_count") and n_head == 0:
+                    n_head = int(value)
+
+                elif key.endswith(".num_attention_heads") and n_head == 0:
+                    n_head = int(value)
 
             return {
                 "architecture": arch or "unknown",
@@ -290,7 +311,7 @@ def get_model_architecture_info(filepath: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.debug(f"Could not read architecture info from {filepath}: {e}")
-        return {"architecture": "unknown", "context_length": 0, "n_layers": 0, "n_embd": 0, "n_head": 0}
+        return default
 
 
 def estimate_kv_cache_gb(
