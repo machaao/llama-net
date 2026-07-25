@@ -194,6 +194,28 @@ class InferenceConfig:
         # Configure networking for better stability
         self._configure_networking()
     
+    def _detect_kv_heads(self, n_head: int) -> int:
+        """Detect KV head count from GGUF metadata for GQA models.
+
+        Returns 0 if not found (estimation uses n_head as fallback).
+        """
+        try:
+            from common.gguf_utils import _read_metadata, get_arch_prefix
+            meta = _read_metadata(self.model_path)
+            arch = str(meta.get("general.architecture", "unknown"))
+            prefix = get_arch_prefix(arch)
+
+            kv_key = f"{prefix}.attention.head_count_kv"
+            n_kv = meta.get(kv_key)
+            if n_kv is not None:
+                n_kv = int(n_kv)
+                if 0 < n_kv < n_head:
+                    logger.info(f"GQA detected: {n_kv} KV heads / {n_head} attention heads")
+                    return n_kv
+        except Exception:
+            pass
+        return 0
+
     def _auto_detect_context_size(self) -> tuple:
         """Auto-detect context size from GGUF metadata, clamped to memory limits."""
         try:
@@ -204,13 +226,16 @@ class InferenceConfig:
                 n_embd = arch_info.get("n_embd", 4096)
                 n_head = arch_info.get("n_head", 32)
 
-                # Estimate KV cache memory for the model's native context
+                # GQA: read KV head count for accurate memory estimation
+                n_kv_heads = self._detect_kv_heads(n_head)
+
                 kv_gb = estimate_kv_cache_gb(
                     n_layers=n_layers,
                     n_embd=n_embd,
                     n_ctx=ctx_length,
                     cache_type=self.cache_type_k,
                     n_head=n_head,
+                    n_kv_heads=n_kv_heads,
                 )
 
                 # Check if we have enough memory
@@ -241,8 +266,10 @@ class InferenceConfig:
                     if n_layers > 0 and n_embd > 0:
                         bytes_per_elem = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5625}.get(self.cache_type_k, 2.0)
                         head_dim = n_embd // n_head if n_head > 0 else 128
+                        # Use KV heads if available for GQA models
+                        effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
                         budget_gb = usable_gb - model_gb - 0.5
-                        max_ctx = int((budget_gb * (1024 ** 3)) / (2 * n_layers * head_dim * n_head * bytes_per_elem))
+                        max_ctx = int((budget_gb * (1024 ** 3)) / (2 * n_layers * head_dim * effective_heads * bytes_per_elem))
                         # Round down to nearest power of 2 for clean token counts
                         clamped = 1
                         while clamped * 2 <= max_ctx:
