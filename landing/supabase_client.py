@@ -150,7 +150,8 @@ class SupabaseManager:
     def register_node(
         self, user_id: str, node_hash: str, model_name: str,
         model_slug: str, url: str, ip: str = "", port: int = 8000,
-        gpu_info: str = "", metrics: Dict[str, Any] = None
+        gpu_info: str = "", metrics: Dict[str, Any] = None,
+        ctx_length: int = 0, models_list: list = None,
     ) -> Dict[str, Any]:
         try:
             metrics = metrics or {}
@@ -162,9 +163,15 @@ class SupabaseManager:
                 "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
                 "uptime": metrics.get("uptime", 0),
                 "total_tokens": metrics.get("total_tokens", 0),
+                "ctx_length": ctx_length,
                 "status": "active", "last_heartbeat": "now()",
             }
             result = self.client.table("nodes").upsert(node_data, on_conflict="node_hash").execute()
+
+            # Upsert node_models junction table
+            all_models = models_list or [{"name": model_name, "ctx_length": ctx_length}]
+            self.upsert_node_models(node_hash, all_models, model_slug)
+
             logger.info(f"Registered node {node_hash[:12]}... model={model_name}")
             return result.data[0] if result.data else node_data
         except Exception as e:
@@ -218,10 +225,27 @@ class SupabaseManager:
                 "last_heartbeat": "now()", "status": "active",
             }
 
-            # Persist pool_models to BOTH the top-level column AND metrics JSONB
+            # Persist pool_models and upsert node_models
             if "pool_models" in metrics:
-                update_data["pool_models"] = metrics["pool_models"]
-                update_data["metrics"] = {"pool_models": metrics["pool_models"]}
+                pool_models = metrics["pool_models"]
+                update_data["pool_models"] = pool_models
+                update_data["metrics"] = {"pool_models": pool_models}
+                # Extract ctx_length from pool models for nodes table
+                active_slug = ""
+                try:
+                    node_result = self.client.table("nodes").select("model_slug").eq(
+                        "node_hash", node_hash
+                    ).execute()
+                    if node_result.data:
+                        active_slug = node_result.data[0].get("model_slug", "")
+                except Exception:
+                    pass
+                self.upsert_node_models(node_hash, pool_models, active_slug)
+                # Update primary model ctx_length if available
+                if pool_models:
+                    primary = pool_models[0] if isinstance(pool_models[0], dict) else None
+                    if primary:
+                        update_data["ctx_length"] = primary.get("ctx_length", 0)
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
             return len(result.data) > 0
@@ -241,10 +265,85 @@ class SupabaseManager:
             result = self.client.table("nodes").update(
                 {"status": "inactive"}
             ).eq("node_hash", node_hash).execute()
+
+            # Also clean up node_models
+            try:
+                self.client.table("node_models").delete().eq("node_hash", node_hash).execute()
+            except Exception as e:
+                logger.debug(f"Error cleaning node_models: {e}")
+
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error deregistering node: {e}")
             return False
+
+    def upsert_node_models(self, node_hash: str, models_list: list, active_model_slug: str = "") -> None:
+        """Upsert node_models entries for a node's pool.
+
+        models_list: [{"name": "model-a", "ctx_length": 8192}, ...]
+        Handles backward compat: if item is a string, wraps it.
+        """
+        try:
+            from landing.node_registry import model_name_to_slug
+
+            for model in models_list:
+                if isinstance(model, str):
+                    model_name = model
+                    ctx_length = 0
+                elif isinstance(model, dict):
+                    model_name = model.get("name", model.get("model_name", ""))
+                    ctx_length = model.get("ctx_length", 0)
+                else:
+                    continue
+
+                if not model_name:
+                    continue
+
+                model_slug = model_name_to_slug(model_name)
+                is_active = (model_slug == active_model_slug)
+
+                self.client.table("node_models").upsert({
+                    "node_hash": node_hash,
+                    "model_name": model_name,
+                    "model_slug": model_slug,
+                    "ctx_length": ctx_length,
+                    "is_active": is_active,
+                    "updated_at": "now()",
+                }, on_conflict="node_hash,model_slug").execute()
+
+            logger.debug(f"Upserted {len(models_list)} node_models for {node_hash}")
+        except Exception as e:
+            logger.error(f"Error upserting node_models: {e}")
+
+    def get_node_models(self, node_hash: str) -> list:
+        """Get all model entries for a node."""
+        try:
+            result = self.client.table("node_models").select("*").eq(
+                "node_hash", node_hash
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error getting node_models: {e}")
+            return []
+
+    def delete_stale_node_models(self, node_hash: str, valid_slugs: list) -> None:
+        """Remove node_models entries that are no longer in the pool."""
+        try:
+            if not valid_slugs:
+                return
+            result = self.client.table("node_models").select("model_slug").eq(
+                "node_hash", node_hash
+            ).execute()
+            if not result.data:
+                return
+            for row in result.data:
+                if row["model_slug"] not in valid_slugs:
+                    self.client.table("node_models").delete().eq(
+                        "node_hash", node_hash
+                    ).eq("model_slug", row["model_slug"]).execute()
+                    logger.debug(f"Removed stale node_model {row['model_slug']} for {node_hash}")
+        except Exception as e:
+            logger.error(f"Error deleting stale node_models: {e}")
 
     def get_user_nodes(self, user_id: str) -> List[Dict[str, Any]]:
         try:
@@ -274,6 +373,28 @@ class SupabaseManager:
 
     def get_nodes_for_model(self, model_slug: str) -> List[Dict[str, Any]]:
         try:
+            # Try node_models junction for ctx_length
+            try:
+                nm_result = self.client.table("node_models").select(
+                    "node_hash, ctx_length"
+                ).eq("model_slug", model_slug).execute()
+
+                if nm_result.data:
+                    node_hashes = [r["node_hash"] for r in nm_result.data]
+                    ctx_map = {r["node_hash"]: r.get("ctx_length", 0) for r in nm_result.data}
+
+                    nodes_result = self.client.table("nodes").select("*").in_(
+                        "node_hash", node_hashes
+                    ).eq("status", "active").order("load").execute()
+
+                    for node in (nodes_result.data or []):
+                        node["ctx_length"] = ctx_map.get(node["node_hash"], 0)
+
+                    return nodes_result.data or []
+            except Exception as e:
+                logger.debug(f"node_models join failed for get_nodes_for_model: {e}")
+
+            # Fallback
             result = self.client.table("nodes").select("*").eq(
                 "model_slug", model_slug
             ).eq("status", "active").order("load").execute()
@@ -284,8 +405,80 @@ class SupabaseManager:
 
     def list_active_models(self) -> List[Dict[str, Any]]:
         try:
+            from landing.node_registry import model_name_to_slug
+
+            # ── Primary source: node_models junction table ──
+            try:
+                nm_result = self.client.table("node_models").select(
+                    "node_hash, model_name, model_slug, ctx_length, is_active"
+                ).execute()
+
+                if nm_result.data:
+                    models: Dict[str, Dict] = {}
+                    node_hashes_needed = set()
+
+                    for nm in nm_result.data:
+                        slug = nm["model_slug"]
+                        node_hashes_needed.add(nm["node_hash"])
+                        if slug not in models:
+                            models[slug] = {
+                                "model_name": nm["model_name"],
+                                "model_slug": slug,
+                                "node_count": 0,
+                                "nodes": [],
+                            }
+                        models[slug]["nodes"].append({
+                            "node_hash": nm["node_hash"],
+                            "ctx_length": nm.get("ctx_length", 0),
+                            "is_active": nm.get("is_active", False),
+                        })
+                        models[slug]["node_count"] = len(models[slug]["nodes"])
+
+                    if node_hashes_needed:
+                        nodes_result = self.client.table("nodes").select("*").eq(
+                            "status", "active"
+                        ).in_("node_hash", list(node_hashes_needed)).execute()
+                        nodes_by_hash = {
+                            n["node_hash"]: n for n in (nodes_result.data or [])
+                        }
+                    else:
+                        nodes_by_hash = {}
+
+                    for slug, model in models.items():
+                        enriched_nodes = []
+                        for nm_node in model["nodes"]:
+                            full_node = nodes_by_hash.get(nm_node["node_hash"])
+                            if not full_node or full_node.get("status") != "active":
+                                continue
+                            full_node["ctx_length"] = nm_node["ctx_length"]
+                            enriched_nodes.append(full_node)
+
+                        model["nodes"] = enriched_nodes
+                        model["node_count"] = len(enriched_nodes)
+                        model["total_tps"] = sum(n.get("tps", 0) for n in enriched_nodes)
+                        model["avg_load"] = (
+                            sum(n.get("load", 0) for n in enriched_nodes) / len(enriched_nodes)
+                            if enriched_nodes else 0
+                        )
+                        model["avg_ttft"] = (
+                            sum(n.get("ttft", 0) or 0 for n in enriched_nodes) / len(enriched_nodes)
+                            if enriched_nodes else 0
+                        )
+                        model["total_tokens"] = sum(n.get("total_tokens", 0) for n in enriched_nodes)
+                        model["best_node"] = (
+                            min(enriched_nodes, key=lambda n: n.get("load", 1))
+                            if enriched_nodes else None
+                        )
+
+                    models = {s: m for s, m in models.items() if m["node_count"] > 0}
+                    return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
+
+            except Exception as e:
+                logger.warning(f"node_models query failed, falling back to legacy: {e}")
+
+            # ── Fallback: legacy JSONB pool_models parsing ──
             result = self.client.table("nodes").select(
-                "model_name, model_slug"
+                "model_name, model_slug, ctx_length"
             ).eq("status", "active").execute()
             if not result.data:
                 return []
@@ -293,34 +486,35 @@ class SupabaseManager:
             for node in result.data:
                 slug = node["model_slug"]
                 if slug not in models:
-                    models[slug] = {"model_name": node["model_name"], "model_slug": slug, "node_count": 0}
+                    models[slug] = {
+                        "model_name": node["model_name"],
+                        "model_slug": slug,
+                        "node_count": 0,
+                    }
                 models[slug]["node_count"] += 1
 
-            # Also discover pool models from metadata AND assign nodes to them
-            all_nodes_result = self.client.table("nodes").select(
-                "*"
-            ).eq("status", "active").execute()
+            all_nodes_result = self.client.table("nodes").select("*").eq(
+                "status", "active"
+            ).execute()
             all_nodes = all_nodes_result.data or []
 
             if all_nodes:
-                from landing.node_registry import model_name_to_slug
-
                 for node in all_nodes:
                     node_hash = node.get("node_hash", "")
                     node_metrics = node.get("metrics", {}) or {}
-
-                    # Read pool_models from metrics JSONB OR top-level column
                     all_model_names = node_metrics.get("pool_models", []) or node.get("pool_models", [])
-
-                    # For every model this node can serve (primary + pool),
-                    # ensure an entry exists in `models` and add this node to it.
                     seen_slugs = set()
-                    for pool_model_name in all_model_names:
+                    for pool_model in all_model_names:
+                        if isinstance(pool_model, dict):
+                            pool_model_name = pool_model.get("name", "")
+                        else:
+                            pool_model_name = str(pool_model)
+                        if not pool_model_name:
+                            continue
                         pool_slug = model_name_to_slug(pool_model_name)
                         if pool_slug in seen_slugs:
                             continue
                         seen_slugs.add(pool_slug)
-
                         if pool_slug not in models:
                             models[pool_slug] = {
                                 "model_name": pool_model_name,
@@ -329,32 +523,22 @@ class SupabaseManager:
                                 "pool_discovered": True,
                                 "nodes": [],
                             }
-
-                        # Always ensure "nodes" key exists
                         if "nodes" not in models[pool_slug]:
                             models[pool_slug]["nodes"] = []
-
                         node_hashes = [n.get("node_hash", "") for n in models[pool_slug]["nodes"]]
                         if node_hash not in node_hashes:
                             models[pool_slug]["nodes"].append(node)
                             models[pool_slug]["node_count"] = len(models[pool_slug]["nodes"])
 
-            # Calculate aggregated metrics for every model
             for slug, model in models.items():
-                # Merge pool-discovered nodes with primary-model nodes
                 existing_nodes = model.get("nodes", [])
                 existing_hashes = {n.get("node_hash") for n in existing_nodes}
-
-                # Get nodes where this is the primary model
                 primary_nodes = self.get_nodes_for_model(slug)
-
-                # Merge: add primary nodes not already discovered via pool
                 for node in primary_nodes:
                     nh = node.get("node_hash")
                     if nh and nh not in existing_hashes:
                         existing_nodes.append(node)
                         existing_hashes.add(nh)
-
                 nodes = existing_nodes
                 model["nodes"] = nodes
                 model["node_count"] = len(nodes)
@@ -363,7 +547,7 @@ class SupabaseManager:
                 model["avg_ttft"] = sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes) if nodes else 0
                 model["total_tokens"] = sum(n.get("total_tokens", 0) for n in nodes)
                 model["best_node"] = min(nodes, key=lambda n: n.get("load", 1)) if nodes else None
-            # Remove stale model entries
+
             models = {slug: m for slug, m in models.items() if m["node_count"] > 0}
             return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
         except Exception as e:
@@ -389,6 +573,12 @@ class SupabaseManager:
                         self.client.table("nodes").update(
                             {"status": "inactive"}
                         ).eq("node_hash", node["node_hash"]).execute()
+                        try:
+                            self.client.table("node_models").delete().eq(
+                                "node_hash", node["node_hash"]
+                            ).execute()
+                        except Exception:
+                            pass
                         stale_count += 1
                 except Exception:
                     pass
