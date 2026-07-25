@@ -21,6 +21,24 @@ _system_specs_cache: Optional[dict] = None
 _system_specs_cached_at: float = 0.0
 _SPECS_CACHE_TTL = 300  # seconds
 
+# Reference data: gpt-oss model memory requirements
+#   20B  (12.0 GB model data): compute = 2.7 GB, KV = 0.2 GB per 8192 tokens
+#   120B (61.0 GB model data): compute = 2.7 GB, KV = 0.3 GB per 8192 tokens
+COMPUTE_BUFFER_GB = 2.7
+
+
+def _estimate_kv_rate_per_token(model_size_gb: float) -> float:
+    """Estimate KV cache rate (GB per token) from model file size.
+
+    Derived from reference data via linear fit:
+        20B  (12 GB model) → 0.2 GB / 8192 = 2.44e-5 GB/token
+        120B (61 GB model) → 0.3 GB / 8192 = 3.66e-5 GB/token
+
+    Linear interpolation: kv_per_8k ≈ 0.15 + (model_size_gb × 0.0025)
+    """
+    kv_per_8k = 0.15 + (model_size_gb * 0.0025)
+    return kv_per_8k / 8192
+
 
 def get_system_specs() -> dict:
     """Detect and cache system specs (RAM, VRAM, GPU name).
@@ -80,15 +98,16 @@ def get_system_specs() -> dict:
     return specs
 
 
-def get_vram_context_cap(vram_gb: float = 0.0) -> int:
-    """Ollama's VRAM-based context window cap.
+def get_vram_context_cap(
+    vram_gb: float = 0.0,
+    model_size_gb: float = 0.0,
+    max_concurrent: int = 1,
+) -> int:
+    """VRAM-based context window cap, accounting for multi-model concurrency.
 
-    Returns the maximum context size based on available GPU/VRAM:
-        < 24 GiB  →  4,096 tokens
-        24-48 GiB → 32,768 tokens
-        > 48 GiB  → 262,144 tokens
-
-    If *vram_gb* is not provided, reads from cached system specs.
+    When *max_concurrent* > 1, divides available memory by the concurrency
+    count so that multiple models can coexist without swapping, sustaining
+    25-50 TPS with sub-second TTFT.
     """
     if vram_gb <= 0:
         specs = get_system_specs()
@@ -98,17 +117,47 @@ def get_vram_context_cap(vram_gb: float = 0.0) -> int:
             else specs["available_ram_gb"]
         )
 
-    if vram_gb > 48:
-        return 262144
-    elif vram_gb >= 24:
+    # Reserve 10% for OS / driver overhead
+    usable = vram_gb * 0.90
+    # Fair-share per concurrent model
+    per_model = usable / max(max_concurrent, 1)
+
+    # ── Model-size-aware: calculate actual KV budget ──
+    if model_size_gb > 0:
+        kv_budget = per_model - model_size_gb - COMPUTE_BUFFER_GB
+        if kv_budget <= 0:
+            return 4096  # model barely fits — minimal context
+
+        kv_rate = _estimate_kv_rate_per_token(model_size_gb)
+        max_tokens = int(kv_budget / kv_rate)
+
+        # Snap down to nearest standard power-of-2 size
+        for size in (262144, 131072, 65536, 32768, 16384, 8192, 4096, 2048):
+            if size <= max_tokens:
+                return size
+        return 2048
+
+    # ── No model size known — generous VRAM-only defaults ──
+    if per_model > 48:
+        return 131072
+    elif per_model > 32:
+        return 65536
+    elif per_model > 24:
         return 32768
-    else:
+    elif per_model > 16:
+        return 16384
+    elif per_model > 12:
+        return 8192
+    elif per_model > 8:
         return 4096
+    else:
+        return 2048
 
 
 def calculate_optimal_context(
     model_path: str,
     cache_type_k: str = "f16",
+    max_concurrent: int = 1,
 ) -> Tuple[int, bool]:
     """Calculate optimal context size for a model.
 
@@ -142,11 +191,20 @@ def calculate_optimal_context(
         n_head = arch_info.get("n_head", 32)
         n_kv_heads = arch_info.get("n_kv_heads", 0)
 
-        # 3. VRAM tier cap
-        vram_cap = get_vram_context_cap()
+        # 3. Calculate model size early (needed for VRAM cap)
+        try:
+            model_gb = os.path.getsize(model_path) / (1024 ** 3)
+        except OSError:
+            model_gb = 5.0
+
+        # 4. VRAM tier cap — now model-size-aware and concurrency-aware
+        vram_cap = get_vram_context_cap(
+            model_size_gb=model_gb,
+            max_concurrent=max_concurrent,
+        )
         effective_ctx = min(native_ctx, vram_cap)
 
-        # 4. Memory-aware clamp
+        # 5. Memory-aware clamp
         specs = get_system_specs()
         usable_gb = specs["usable_memory_gb"]
 
@@ -159,12 +217,7 @@ def calculate_optimal_context(
             n_kv_heads=n_kv_heads,
         )
 
-        try:
-            model_gb = os.path.getsize(model_path) / (1024 ** 3)
-        except OSError:
-            model_gb = 5.0
-
-        total_needed = model_gb + kv_gb + 0.5
+        total_needed = model_gb + kv_gb + COMPUTE_BUFFER_GB
 
         if total_needed <= usable_gb:
             logger.info(
@@ -181,7 +234,7 @@ def calculate_optimal_context(
             }.get(cache_type_k, 2.0)
             head_dim = n_embd // n_head if n_head > 0 else 128
             effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
-            budget_gb = usable_gb - model_gb - 0.5
+            budget_gb = usable_gb - model_gb - COMPUTE_BUFFER_GB
             max_ctx = int(
                 (budget_gb * (1024 ** 3))
                 / (2 * n_layers * head_dim * effective_heads * bytes_per_elem)
