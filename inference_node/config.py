@@ -216,77 +216,134 @@ class InferenceConfig:
             pass
         return 0
 
+    def _get_ollama_context_cap(self) -> int:
+        """Apply Ollama's VRAM-based context window strategy.
+
+        Returns the maximum context size based on available GPU/VRAM:
+            < 24 GiB  →  4,096 tokens
+            24-48 GiB → 32,768 tokens
+            > 48 GiB  → 262,144 tokens
+
+        On Apple Silicon, unified memory is used directly.
+        On NVIDIA GPUs, VRAM is detected via nvidia-ml-py.
+        On CPU-only, system RAM is used.
+        """
+        available_gib = 0.0
+
+        # Try NVIDIA VRAM first
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            available_gib = mem.free / (1024 ** 3)
+            pynvml.nvmlShutdown()
+            logger.info(f"NVIDIA GPU VRAM: {available_gib:.1f} GiB free")
+            return self._cap_from_gib(available_gib)
+        except Exception:
+            pass
+
+        # Fallback: system memory (Apple Silicon unified memory, CPU-only)
+        try:
+            import psutil
+            available_gib = psutil.virtual_memory().available / (1024 ** 3)
+            logger.info(f"Available memory: {available_gib:.1f} GiB")
+        except Exception:
+            available_gib = 16.0  # Conservative default
+
+        return self._cap_from_gib(available_gib)
+
+    @staticmethod
+    def _cap_from_gib(gib: float) -> int:
+        """Map available memory to Ollama's context tier."""
+        if gib > 48:
+            return 262144
+        elif gib >= 24:
+            return 32768
+        else:
+            return 4096
+
     def _auto_detect_context_size(self) -> tuple:
-        """Auto-detect context size from GGUF metadata, clamped to memory limits."""
+        """Auto-detect context size using Ollama's VRAM-based strategy.
+
+        Flow:
+        1. Read model's native context from GGUF metadata
+        2. Apply Ollama's VRAM-tier cap (<24G→4k, 24-48G→32k, >48G→256k)
+        3. Memory-aware clamp: if model weights + KV cache exceeds budget, reduce
+        4. Final fallback: 4096
+        """
         try:
             ctx_length = get_model_context_length(self.model_path)
-            if ctx_length and ctx_length > 0:
-                arch_info = get_model_architecture_info(self.model_path)
-                n_layers = arch_info.get("n_layers", 32)
-                n_embd = arch_info.get("n_embd", 4096)
-                n_head = arch_info.get("n_head", 32)
+            if not ctx_length or ctx_length <= 0:
+                logger.info("No context_length in GGUF metadata, using Ollama VRAM defaults")
+                return self._get_ollama_context_cap(), False
 
-                # GQA: read KV head count for accurate memory estimation
+            arch_info = get_model_architecture_info(self.model_path)
+            n_layers = arch_info.get("n_layers", 32)
+            n_embd = arch_info.get("n_embd", 4096)
+            n_head = arch_info.get("n_head", 32)
+            n_kv_heads = arch_info.get("n_kv_heads", 0)
+            if n_kv_heads <= 0:
                 n_kv_heads = self._detect_kv_heads(n_head)
 
-                kv_gb = estimate_kv_cache_gb(
-                    n_layers=n_layers,
-                    n_embd=n_embd,
-                    n_ctx=ctx_length,
-                    cache_type=self.cache_type_k,
-                    n_head=n_head,
-                    n_kv_heads=n_kv_heads,
+            # Ollama VRAM tier cap
+            vram_cap = self._get_ollama_context_cap()
+            effective_ctx = min(ctx_length, vram_cap)
+
+            # Memory-aware clamp
+            kv_gb = estimate_kv_cache_gb(
+                n_layers=n_layers,
+                n_embd=n_embd,
+                n_ctx=effective_ctx,
+                cache_type=self.cache_type_k,
+                n_head=n_head,
+                n_kv_heads=n_kv_heads,
+            )
+
+            try:
+                import psutil
+                available_gb = psutil.virtual_memory().available / (1024 ** 3)
+                usable_gb = available_gb * 0.70
+            except Exception:
+                usable_gb = 20.0
+
+            try:
+                model_gb = os.path.getsize(self.model_path) / (1024 ** 3)
+            except OSError:
+                model_gb = 5.0
+
+            total_needed = model_gb + kv_gb + 0.5
+
+            if total_needed <= usable_gb:
+                logger.info(
+                    f"✅ Auto-detected context: {effective_ctx} tokens "
+                    f"(model native={ctx_length}, VRAM cap={vram_cap}, "
+                    f"KV cache: {kv_gb:.1f} GB with {self.cache_type_k}, "
+                    f"total: {total_needed:.1f} GB / {usable_gb:.1f} GB)"
                 )
-
-                # Check if we have enough memory
-                try:
-                    import psutil
-                    available_gb = psutil.virtual_memory().available / (1024 ** 3)
-                    usable_gb = available_gb * 0.70
-                except Exception:
-                    usable_gb = 20.0
-
-                # Estimate model file size (GGUF weights)
-                try:
-                    model_gb = os.path.getsize(self.model_path) / (1024 ** 3)
-                except OSError:
-                    model_gb = 5.0
-
-                total_needed = model_gb + kv_gb + 0.5  # model + kv cache + overhead
-
-                if total_needed <= usable_gb:
-                    logger.info(
-                        f"✅ Auto-detected context: {ctx_length} tokens "
-                        f"(KV cache: {kv_gb:.1f} GB with {self.cache_type_k}, "
-                        f"total: {total_needed:.1f} GB / {usable_gb:.1f} GB available)"
-                    )
-                    return ctx_length, True
-                else:
-                    # Clamp: find max context that fits
-                    if n_layers > 0 and n_embd > 0:
-                        bytes_per_elem = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5625}.get(self.cache_type_k, 2.0)
-                        head_dim = n_embd // n_head if n_head > 0 else 128
-                        # Use KV heads if available for GQA models
-                        effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
-                        budget_gb = usable_gb - model_gb - 0.5
-                        max_ctx = int((budget_gb * (1024 ** 3)) / (2 * n_layers * head_dim * effective_heads * bytes_per_elem))
-                        # Round down to nearest power of 2 for clean token counts
-                        clamped = 1
-                        while clamped * 2 <= max_ctx:
-                            clamped *= 2
-                        clamped = max(4096, min(clamped, ctx_length))
-                        logger.warning(
-                            f"⚠️ Native context {ctx_length} requires {total_needed:.1f} GB "
-                            f"but only {usable_gb:.1f} GB usable. Clamped to {clamped} tokens. "
-                            f"Use --cache-type-k q4_0 for more headroom."
-                        )
-                        return clamped, True
-                    else:
-                        logger.warning(f"Could not estimate memory for clamping, using 4096")
-                        return 4096, False
+                return effective_ctx, True
             else:
-                logger.info("No context_length in GGUF metadata, using default")
-                return 4096, False
+                # Clamp to fit memory
+                if n_layers > 0 and n_embd > 0:
+                    bytes_per_elem = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5625}.get(self.cache_type_k, 2.0)
+                    head_dim = n_embd // n_head if n_head > 0 else 128
+                    effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
+                    budget_gb = usable_gb - model_gb - 0.5
+                    max_ctx = int((budget_gb * (1024 ** 3)) / (2 * n_layers * head_dim * effective_heads * bytes_per_elem))
+                    clamped = 1
+                    while clamped * 2 <= max_ctx:
+                        clamped *= 2
+                    clamped = max(4096, min(clamped, effective_ctx))
+                    logger.warning(
+                        f"⚠️ Context {effective_ctx} requires {total_needed:.1f} GB "
+                        f"but only {usable_gb:.1f} GB usable. Clamped to {clamped} tokens. "
+                        f"Use --cache-type-k q4_0 for more headroom."
+                    )
+                    return clamped, True
+                else:
+                    logger.warning("Could not estimate memory for clamping, using 4096")
+                    return 4096, False
+
         except Exception as e:
             logger.warning(f"Context auto-detection failed: {e}")
             return 4096, False
