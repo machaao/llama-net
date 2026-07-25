@@ -106,7 +106,7 @@ class ModelPool:
             except Exception:
                 pass
 
-        total = model_gb + kv_gb + 0.5  # model + kv + overhead
+        total = model_gb + kv_gb + COMPUTE_BUFFER_GB  # model + kv + compute buffers
         logger.debug(f"Per-model memory estimate: {model_gb:.1f} GB weights + {kv_gb:.1f} GB KV = {total:.1f} GB total")
         return max(total, self.DEFAULT_MODEL_SIZE_GB)
 
@@ -224,7 +224,10 @@ class ModelPool:
         logger.info(f"Loading model into pool: {model_path}")
 
         cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
-        n_ctx, _ = calculate_optimal_context(model_path, cache_type_k)
+        n_ctx, _ = calculate_optimal_context(
+            model_path, cache_type_k,
+            max_concurrent=self.max_models,
+        )
 
         from inference_node.config import InferenceConfig
         model_config = InferenceConfig.__new__(InferenceConfig)
