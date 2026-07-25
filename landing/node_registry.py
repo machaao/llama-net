@@ -110,15 +110,17 @@ class NodeRegistry:
         self, user_id: str, node_id: str, model: str,
         url: str, ip: str = "", port: int = 8000,
         gpu: str = "", metrics: Dict[str, Any] = None,
-        enable_tunnel: bool = False
+        enable_tunnel: bool = False,
+        ctx_length: int = 0, models_list: list = None,
     ) -> Dict[str, Any]:
         node_hash = self._generate_node_hash(node_id)
         model_slug = model_name_to_slug(model)
-        result = {"node_hash": node_hash, "model": model, "url": url, "tunnel_url": None, "tunnel_provisioned": False}
+        result = {"node_hash": node_hash, "model": model, "url": url, "tunnel_url": None, "tunnel_provisioned": False, "ctx_length": ctx_length}
         self.db.register_node(
             user_id=user_id, node_hash=node_hash, model_name=model,
             model_slug=model_slug, url=url, ip=ip, port=port,
             gpu_info=gpu, metrics=metrics,
+            ctx_length=ctx_length, models_list=models_list,
         )
         if enable_tunnel and self.cf.is_configured:
             tunnel_result = await self._provision_tunnel(node_hash, node_id, port)
@@ -129,6 +131,7 @@ class NodeRegistry:
                     user_id=user_id, node_hash=node_hash, model_name=model,
                     model_slug=model_slug, url=tunnel_result["url"],
                     ip=ip, port=port, gpu_info=gpu, metrics=metrics,
+                    ctx_length=ctx_length, models_list=models_list,
                 )
         logger.info(f"Registered node {node_hash} model={model} tunnel={result['tunnel_provisioned']}")
         return result

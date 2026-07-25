@@ -92,3 +92,21 @@ CREATE TABLE IF NOT EXISTS token_usage (
 ALTER TABLE token_usage ALTER COLUMN usage_date SET DEFAULT CURRENT_DATE;
 
 CREATE INDEX IF NOT EXISTS idx_token_usage_key_date ON token_usage(key_hash, usage_date);
+
+-- 8. Context length per model on each node (junction table)
+CREATE TABLE IF NOT EXISTS node_models (
+    node_hash   TEXT NOT NULL,
+    model_name  TEXT NOT NULL,
+    model_slug  TEXT NOT NULL,
+    ctx_length  INTEGER DEFAULT 0,
+    is_active   BOOLEAN DEFAULT false,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    updated_at  TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (node_hash, model_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_node_models_slug ON node_models(model_slug);
+CREATE INDEX IF NOT EXISTS idx_node_models_ctx ON node_models(ctx_length);
+
+-- 9. Add context length to nodes table for primary model
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ctx_length INTEGER DEFAULT 0;

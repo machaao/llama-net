@@ -474,8 +474,10 @@ class LlamaNetUI {
             opt.dataset.reasoning = info.supports_reasoning ? 'true' : 'false';
             if (info.source === 'pool') {
                 opt.textContent = (info.is_active ? '\u26a1 ' : '\u2705 ') + name + ' (local)';
+                opt.dataset.contextLength = String(info.context_length || 0);
             } else {
                 opt.textContent = '\ud83c\udf10 ' + name + ' (network)';
+                opt.dataset.contextLength = String(info.context_length || 0);
             }
             select.appendChild(opt);
         });
@@ -893,6 +895,7 @@ class LlamaNetUI {
                 ttft: parseFloat(nodeData.ttft) || null,
                 latency: parseFloat(nodeData.latency) || null,
                 total_tokens: parseInt(nodeData.total_tokens) || 0,
+                context_length: parseInt(nodeData.context_length) || 0,
                 
                 // UI validation metadata
                 validated: true,
@@ -1148,9 +1151,30 @@ class LlamaNetUI {
             parts.push(`<span class="node-metric-badge"><i class="fas fa-coins"></i> ${tokenDisplay} Tokens</span>`);
         }
         
+        // Context length tier
+        const ctx = this._safeMetric(node.context_length, 0);
+        if (ctx > 0) {
+            const tier = this._formatContextTier(ctx);
+            if (tier) {
+                parts.push(`<span class="node-metric-badge"><i class="fas ${tier.icon}"></i> ${tier.label} ctx</span>`);
+            }
+        }
+
         return parts.length > 0 ? `<div class="node-metrics-container">${parts.join('')}</div>` : '';
     }
     
+    _formatContextTier(ctxLength) {
+        if (!ctxLength || ctxLength <= 0) return null;
+        const ctx = ctxLength;
+        if (ctx <= 4096)     return { label: '4K',   cls: 'bg-warning text-dark', icon: 'fa-compress-arrows-alt' };
+        if (ctx <= 8192)     return { label: '8K',   cls: 'bg-info text-white',   icon: 'fa-compress-arrows-alt' };
+        if (ctx <= 16384)    return { label: '16K',  cls: 'bg-info text-white',   icon: 'fa-expand-arrows-alt' };
+        if (ctx <= 32768)    return { label: '32K',  cls: 'bg-success text-white',icon: 'fa-expand-arrows-alt' };
+        if (ctx <= 65536)    return { label: '64K',  cls: 'bg-success text-white',icon: 'fa-expand-arrows-alt' };
+        if (ctx <= 131072)   return { label: '128K', cls: 'bg-primary text-white',icon: 'fa-arrows-alt' };
+        return                     { label: '256K', cls: 'bg-purple text-white', icon: 'fa-arrows-alt' };
+    }
+
     _safeMetric(value, defaultVal) {
         if (value === null || value === undefined) return defaultVal;
         const num = typeof value === 'number' ? value : parseFloat(value);

@@ -484,11 +484,22 @@ async def node_heartbeat(request: Request):
     metrics = body.get("metrics", {})
     node_url = body.get("url", "")
 
-    # Accept pool models from heartbeat payload (persisted to DB via registry.heartbeat)
-    pool_models = body.get("models", [])
-    if pool_models and len(pool_models) > 0:
+    # Accept pool models from heartbeat payload
+    raw_models = body.get("models", [])
+    pool_models = []
+    if raw_models and len(raw_models) > 0:
+        for m in raw_models:
+            if isinstance(m, dict):
+                pool_models.append(m)
+            elif isinstance(m, str):
+                pool_models.append({"name": m, "ctx_length": 0})
         metrics["pool_models"] = pool_models
         metrics["pool_size"] = len(pool_models)
+        # Upsert node_models junction table
+        try:
+            supabase_mgr.upsert_node_models(node_hash, pool_models)
+        except Exception as e:
+            logger.debug(f"node_models upsert in heartbeat failed: {e}")
 
     # Validate URL before processing
     if node_url:
@@ -596,6 +607,7 @@ async def publish_node(request: Request):
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
         tunnel_url = body.get("tunnel_url", "")
+        ctx_length = body.get("ctx_length", 0)
 
         # ── Quality Gate: Hardware Check ──
         hw_passed, hw_reason = quality_gate.evaluate_hardware(
@@ -618,8 +630,18 @@ async def publish_node(request: Request):
         model_name = body.get("model", "unknown")
         model_slug = model_name_to_slug(model_name)
 
-        # Accept pool models list
-        models_list = body.get("models", [model_name])
+        # Accept pool models list (objects with ctx_length or legacy strings)
+        models_list = body.get("models", [{"name": model_name, "ctx_length": ctx_length}])
+        # Normalize models_list to object format
+        normalized_models = []
+        for m in models_list:
+            if isinstance(m, dict):
+                normalized_models.append(m)
+            elif isinstance(m, str):
+                normalized_models.append({"name": m, "ctx_length": 0})
+            else:
+                normalized_models.append({"name": str(m), "ctx_length": 0})
+        models_list = normalized_models if normalized_models else [{"name": model_name, "ctx_length": ctx_length}]
         reg_metrics = body.get("metrics", {})
         if len(models_list) > 1:
             reg_metrics["pool_models"] = models_list
@@ -650,6 +672,7 @@ async def publish_node(request: Request):
             model_slug=model_slug, url=tunnel_url or body.get("url", ""),
             ip=body.get("ip", ""), port=body.get("port", 8000),
             gpu_info=body.get("gpu", ""), metrics=reg_metrics,
+            ctx_length=ctx_length, models_list=models_list,
         )
 
         # ── Quality Gate: Performance Check (self-reported native probe metrics) ──
@@ -699,6 +722,7 @@ async def publish_node(request: Request):
                 "model_name": model_name,
                 "model_slug": model_slug,
                 "pool_models": models_list,
+                "ctx_length": ctx_length,
                 "load": reg_metrics.get("load", 0),
                 "tps": reg_metrics.get("tps", 0),
                 "ttft": reg_metrics.get("ttft"),
@@ -806,8 +830,24 @@ async def publish_node_event(request: Request):
                 user_id=system_user_id, node_hash=node_hash, model_name=model_name,
                 model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
                 port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
-                metrics=body.get("metrics", {})
+                metrics=body.get("metrics", {}),
+                ctx_length=body.get("ctx_length", 0),
             )
+
+            # Upsert node_models for pool models
+            event_pool_models_raw = body.get("models", [])
+            event_pool_models = []
+            for m in event_pool_models_raw:
+                if isinstance(m, dict):
+                    event_pool_models.append(m)
+                elif isinstance(m, str):
+                    event_pool_models.append({"name": m, "ctx_length": 0})
+
+            if event_pool_models:
+                try:
+                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, model_slug)
+                except Exception as e:
+                    logger.debug(f"node_models upsert in event failed: {e}")
 
             # ── Quality Gate: Performance Check (self-reported native probe metrics) ──
             event_probe_metrics = body.get("probe_metrics", {})
@@ -848,6 +888,7 @@ async def publish_node_event(request: Request):
                     "node_hash": node_hash, "model_name": model_name,
                     "model_slug": model_slug,
                     "pool_models": event_pool_models,
+                    "ctx_length": body.get("ctx_length", 0),
                     "load": body.get("metrics", {}).get("load", 0),
                     "tps": body.get("metrics", {}).get("tps", 0),
                     "ttft": body.get("metrics", {}).get("ttft"),
@@ -897,20 +938,31 @@ async def publish_node_event(request: Request):
                     model_slug = new_slug
                     logger.info(f"📡 Node {node_hash} model changed → {new_model}")
 
-            # Extract pool_models from multiple possible locations in the payload
-            # GatewayClient sends metrics['pool']['models'] via send_event
+            # Extract pool_models from multiple possible locations
             event_metrics = body.get("metrics", {})
-            event_pool_models = (
+            raw_pool_models = (
                 event_metrics.get("pool_models", [])
                 or event_metrics.get("pool", {}).get("models", [])
             )
-            # Also check top-level "models" key (heartbeat handler convention)
-            if not event_pool_models:
-                event_pool_models = body.get("models", [])
-            # Inject pool_models into metrics for update_node_metrics to persist
+            if not raw_pool_models:
+                raw_pool_models = body.get("models", [])
+
+            # Normalize to object format
+            event_pool_models = []
+            for m in raw_pool_models:
+                if isinstance(m, dict):
+                    event_pool_models.append(m)
+                elif isinstance(m, str):
+                    event_pool_models.append({"name": m, "ctx_length": 0})
+
             if event_pool_models:
                 event_metrics["pool_models"] = event_pool_models
                 event_metrics["pool_size"] = len(event_pool_models)
+                # Upsert node_models
+                try:
+                    supabase_mgr.upsert_node_models(node_hash, event_pool_models)
+                except Exception as e:
+                    logger.debug(f"node_models upsert in node_updated failed: {e}")
 
             supabase_mgr.update_node_metrics(node_hash, event_metrics)
 

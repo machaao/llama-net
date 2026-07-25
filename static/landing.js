@@ -284,12 +284,13 @@ class LandingApp {
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
                     <span class="node-metric ${loadClass} me-1">${(node.load || 0).toFixed(2)} load</span>
+                    ${node.ctx_length ? (() => { const t = this._formatContextTier(node.ctx_length); return t ? `<span class="node-metric ${t.cls}">${t.label}</span>` : ''; })() : ''}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
                 </div>`;
             }).join('');
             return `<div class="model-card">
                 <div class="d-flex justify-content-between align-items-start">
-                    <div><span class="status-dot online"></span><span class="model-name">${this.escapeHtml(model.model_name)}</span></div>
+                    <div><span class="status-dot online"></span><span class="model-name">${this.escapeHtml(model.model_name)}</span>${(model.best_node && model.best_node.ctx_length) ? (() => { const t = this._formatContextTier(model.best_node.ctx_length); return t ? `<span class="${t.cls} ms-2" style="font-size:0.7rem">${t.label} ctx</span>` : ''; })() : ''}</div>
                     <button class="btn btn-sm btn-outline-primary copy-api-btn" onclick="app.copyApiCommand('${this.escapeHtml(model.model_slug)}', '${this.escapeHtml(model.model_name)}')"><i class="fas fa-copy"></i> API</button>
                 </div>
                 <div class="model-stats">
@@ -307,6 +308,17 @@ class LandingApp {
     copyCode(button) { const pre = button.closest('.code-block').querySelector('pre code'); this.copyToClipboard(pre.textContent, 'Copied!'); }
     copyToClipboard(text, message) { navigator.clipboard.writeText(text).then(() => this.showToast(message)).catch(() => { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); this.showToast(message); }); }
     showToast(message) { const toast = document.createElement('div'); toast.className = 'alert alert-success position-fixed'; toast.style.cssText = 'top:20px;right:20px;z-index:9999;min-width:250px;'; toast.innerHTML = `<i class="fas fa-check-circle"></i> ${this.escapeHtml(message)}`; document.body.appendChild(toast); setTimeout(() => toast.remove(), 2000); }
+    _formatContextTier(ctxLength) {
+        if (!ctxLength || ctxLength <= 0) return null;
+        const ctx = ctxLength;
+        if (ctx <= 4096)     return { label: '4K',   cls: 'badge bg-warning text-dark' };
+        if (ctx <= 8192)     return { label: '8K',   cls: 'badge bg-info' };
+        if (ctx <= 16384)    return { label: '16K',  cls: 'badge bg-info' };
+        if (ctx <= 32768)    return { label: '32K',  cls: 'badge bg-success' };
+        if (ctx <= 65536)    return { label: '64K',  cls: 'badge bg-success' };
+        if (ctx <= 131072)   return { label: '128K', cls: 'badge bg-primary' };
+        return                     { label: '256K', cls: 'badge bg-primary' };
+    }
     escapeHtml(text) { const div = document.createElement('div'); div.textContent = text || ''; return div.innerHTML; }
     copyInstallCommand(platform) {
         const cmdEl = document.getElementById(platform === 'mac' ? 'cmd-mac' : 'cmd-win');

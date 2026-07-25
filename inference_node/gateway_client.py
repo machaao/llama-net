@@ -85,10 +85,8 @@ class GatewayClient:
                         "url": self.own_url,
                         "tunnel_url": self.tunnel_url,
                         "model": self.model_name,
-                        "models": [self.model_name] + (
-                            [m for m in (self.model_pool.get_network_info().get("models", [])) if m != self.model_name]
-                            if self.model_pool else []
-                        ),
+                        "models": self._get_models_with_context(),
+                        "ctx_length": self._get_active_context_length_value(),
                         "ip": self.public_ip,
                         "port": self.port,
                         "metrics": metrics,

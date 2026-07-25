@@ -27,6 +27,7 @@ class ModelSlot:
     loaded_at: float = field(default_factory=time.time)
     size_bytes: int = 0
     access_count: int = 0
+    n_ctx: int = 0
 
 
 class ModelPool:
@@ -236,6 +237,15 @@ class ModelPool:
             size_bytes=size_bytes,
         )
 
+        # Read actual allocated context from Llama instance
+        if hasattr(llm, 'llm') and llm.llm is not None:
+            try:
+                slot.n_ctx = llm.llm.n_ctx()
+            except Exception:
+                slot.n_ctx = getattr(llm.config, 'n_ctx', 0)
+        else:
+            slot.n_ctx = getattr(getattr(llm, 'config', None), 'n_ctx', 0)
+
         self.slots[model_name] = slot
         self.active_model = model_name
 
@@ -385,14 +395,19 @@ class ModelPool:
                 ),
                 "size_bytes": slot.size_bytes,
                 "access_count": slot.access_count,
+                "context_length": slot.n_ctx,
                 "is_active": name == self.active_model,
             })
         history.sort(key=lambda h: h["last_used"], reverse=True)
         return history
 
     def get_network_info(self) -> Dict[str, Any]:
+        models = [
+            {"name": name, "ctx_length": slot.n_ctx}
+            for name, slot in self.slots.items()
+        ]
         return {
-            "models": list(self.slots.keys()),
+            "models": models,
             "active_model": self.active_model,
             "capacity": self.max_models,
             "used": len(self.slots),
@@ -420,6 +435,7 @@ class ModelPool:
                 "access_count": slot.access_count,
                 "size_bytes": slot.size_bytes,
                 "size_display": self._format_size(slot.size_bytes),
+                "context_length": slot.n_ctx,
                 "metrics": slot.metrics.get_performance_metrics(),
             })
 

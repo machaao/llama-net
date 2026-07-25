@@ -135,6 +135,7 @@ class DashboardApp {
                 <span class="model-stat"><i class="fas fa-bolt"></i> <span class="value">${(node.tps || 0).toFixed(1)}</span> TPS</span>
                 <span class="model-stat"><i class="fas fa-tachometer-alt"></i> <span class="value">${(node.load || 0).toFixed(2)}</span> load</span>
                 ${node.gpu_info ? `<span class="model-stat"><i class="fas fa-microchip"></i> ${this.escapeHtml(node.gpu_info)}</span>` : ''}
+                ${node.ctx_length ? `<span class="model-stat"><i class="fas fa-expand-arrows-alt"></i> <span class="value">${(node.ctx_length >= 1024 ? (node.ctx_length/1024)+'K' : node.ctx_length)}</span> ctx</span>` : ''}
             </div></div>`).join('');
     }
     async deregisterNode(nodeHash) { if (!confirm('Deregister this node?')) return; try { await fetch(`${this.baseUrl}/api/nodes/${nodeHash}`, { method: 'DELETE', credentials: 'include' }); await this.loadMyNodes(); } catch (e) { alert('Failed to deregister'); } }
@@ -174,7 +175,7 @@ class DashboardApp {
             if (!models.length) { empty.style.display = 'block'; return; }
             content.style.display = 'block';
             select.innerHTML = models.map(m =>
-                `<option value="${this.escapeHtml(m.model_slug)}" data-model-name="${this.escapeHtml(m.model_name)}" data-node-count="${m.node_count}" data-total-tps="${(m.total_tps || 0).toFixed(1)}" data-avg-load="${(m.avg_load || 0).toFixed(2)}">${this.escapeHtml(m.model_name)} (${m.node_count} node${m.node_count > 1 ? 's' : ''})</option>`
+                `<option value="${this.escapeHtml(m.model_slug)}" data-model-name="${this.escapeHtml(m.model_name)}" data-node-count="${m.node_count}" data-total-tps="${(m.total_tps || 0).toFixed(1)}" data-avg-load="${(m.avg_load || 0).toFixed(2)}" data-ctx-length="${m.best_node?.ctx_length || 0}">${this.escapeHtml(m.model_name)} (${m.node_count} node${m.node_count > 1 ? 's' : ''})</option>`
             ).join('');
             select.addEventListener('change', () => this.updateLiveModelInfo());
             this.updateLiveModelInfo();
@@ -234,7 +235,13 @@ class DashboardApp {
         const nodes = opt.dataset.nodeCount || 0;
         const tps = opt.dataset.totalTps || 0;
         const load = opt.dataset.avgLoad || 0;
-        info.innerHTML = `<span class="badge bg-info me-1"><i class="fas fa-server"></i> ${nodes} node${nodes > 1 ? 's' : ''}</span><span class="badge bg-success me-1"><i class="fas fa-bolt"></i> ${tps} TPS</span><span class="badge bg-${parseFloat(load) < 0.5 ? 'success' : 'warning'}"><i class="fas fa-tachometer-alt"></i> ${load} load</span>`;
+        const ctxDisplay = opt.dataset.ctxLength || 0;
+        let ctxBadge = '';
+        if (ctxDisplay > 0) {
+            const display = ctxDisplay >= 1024 ? Math.round(ctxDisplay/1024)+'K' : ctxDisplay;
+            ctxBadge = `<span class="badge bg-secondary ms-1"><i class="fas fa-expand-arrows-alt"></i> ${display} ctx</span>`;
+        }
+        info.innerHTML = `<span class="badge bg-info me-1"><i class="fas fa-server"></i> ${nodes} node${nodes > 1 ? 's' : ''}</span><span class="badge bg-success me-1"><i class="fas fa-bolt"></i> ${tps} TPS</span><span class="badge bg-${parseFloat(load) < 0.5 ? 'success' : 'warning'}"><i class="fas fa-tachometer-alt"></i> ${load} load</span>${ctxBadge}`;
     }
     async sendLiveTest() {
         const select = document.getElementById('live-model-select');
