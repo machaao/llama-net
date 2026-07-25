@@ -971,11 +971,45 @@ async def publish_node_event(request: Request):
             if event_pool_models:
                 event_metrics["pool_models"] = event_pool_models
                 event_metrics["pool_size"] = len(event_pool_models)
-                # Upsert node_models
+
+                # Update nodes.model_slug to match active model from pool
+                active_model = next(
+                    (m for m in event_pool_models if isinstance(m, dict) and m.get("is_active")),
+                    None
+                )
+                if not active_model:
+                    # First model in list is the active one (from get_network_info)
+                    active_model = event_pool_models[0] if event_pool_models else None
+
+                if active_model and isinstance(active_model, dict):
+                    active_name = active_model.get("name", "")
+                    if active_name:
+                        active_slug = model_name_to_slug(active_name)
+                        try:
+                            supabase_mgr.client.table("nodes").update({
+                                "model_name": active_name,
+                                "model_slug": active_slug,
+                            }).eq("node_hash", node_hash).eq("status", "active").execute()
+                            model_name = active_name
+                            model_slug = active_slug
+                        except Exception as e:
+                            logger.debug(f"Active model update in node_updated failed: {e}")
+
+                # Upsert node_models junction table
                 try:
                     supabase_mgr.upsert_node_models(node_hash, event_pool_models)
                 except Exception as e:
                     logger.debug(f"node_models upsert in node_updated failed: {e}")
+
+                # Remove evicted models from junction table
+                pool_slugs = [
+                    model_name_to_slug(m.get("name", ""))
+                    for m in event_pool_models if isinstance(m, dict) and m.get("name")
+                ]
+                try:
+                    supabase_mgr.delete_stale_node_models(node_hash, pool_slugs)
+                except Exception as e:
+                    logger.debug(f"Stale node_models cleanup failed: {e}")
 
             supabase_mgr.update_node_metrics(node_hash, event_metrics)
 
