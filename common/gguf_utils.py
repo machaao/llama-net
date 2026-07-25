@@ -83,12 +83,9 @@ def get_model_context_length(filepath: str) -> Optional[int]:
         arch = meta.get("general.architecture")
         ctx = meta.get("general.context_length")
 
-        logger.info(f"GGUF arch prefix '{meta.keys()}, {arch}'")
-
         # Fallback: architecture-specific key
         if ctx is None and arch:
             prefix = get_arch_prefix(str(arch))
-            logger.info(f"GGUF arch prefix '{arch}'")
             ctx = meta.get(f"{prefix}.context_length")
 
         if ctx is not None:
