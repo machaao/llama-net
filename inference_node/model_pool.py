@@ -91,12 +91,15 @@ class ModelPool:
                 arch_info = get_model_architecture_info(model_path)
                 cache_type = getattr(self.config, 'cache_type_k', 'f16')
                 n_ctx = getattr(self.config, 'n_ctx', 4096)
+                n_head = arch_info.get("n_head", 32)
+                n_kv_heads = arch_info.get("n_kv_heads", 0)
                 kv_gb = estimate_kv_cache_gb(
                     n_layers=arch_info.get("n_layers", 32),
                     n_embd=arch_info.get("n_embd", 4096),
                     n_ctx=n_ctx,
                     cache_type=cache_type,
-                    n_head=arch_info.get("n_head", 32),
+                    n_head=n_head,
+                    n_kv_heads=n_kv_heads,
                 )
             except Exception:
                 pass
