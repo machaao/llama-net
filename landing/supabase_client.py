@@ -603,9 +603,14 @@ class SupabaseManager:
             for n in nodes:
                 node_metrics = n.get("metrics", {}) or {}
                 pool_list = node_metrics.get("pool_models", []) or n.get("pool_models", [])
-                for model_name in pool_list:
-                    slug = model_name_to_slug(model_name)
-                    models.add(slug)
+                for pool_model in pool_list:
+                    if isinstance(pool_model, dict):
+                        pool_model_name = pool_model.get("name", "")
+                    else:
+                        pool_model_name = str(pool_model)
+                    if pool_model_name:
+                        slug = model_name_to_slug(pool_model_name)
+                        models.add(slug)
 
             active_tokens = sum(n.get("total_tokens", 0) for n in nodes)
             return {
