@@ -48,7 +48,10 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
     reader = GGUFReader(filepath)
     metadata: Dict[str, Any] = {}
 
-    for field in reader.fields:
+    # Handle both dict (older gguf) and list (gguf >= latest) formats
+    field_list = list(reader.fields.values()) if isinstance(reader.fields, dict) else list(reader.fields)
+
+    for field in field_list:
         try:
             # Skip tokenizer arrays (131K+ entries) — we don't need them
             # and they're expensive to convert via contents()
