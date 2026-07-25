@@ -854,18 +854,6 @@ async def publish_node_event(request: Request):
                 ctx_length=ctx_length,
             )
 
-            logger.info(
-                f"🟢 NODE JOINED: {node_hash} model={model_name} "
-                f"url={body.get('url', '')[:60]} "
-                f"ctx={ctx_length} "
-                f"pool={[m.get('name', m) if isinstance(m, dict) else m for m in normalized_models]} "
-                f"load={body.get('metrics', {}).get('load', 0):.2f} "
-                f"tps={body.get('metrics', {}).get('tps', 0):.1f} "
-                f"ttft={body.get('metrics', {}).get('ttft', 'N/A')} "
-                f"latency={body.get('metrics', {}).get('latency', 'N/A')} "
-                f"gpu={body.get('gpu', '')[:40]}"
-            )
-
             # Upsert node_models for pool models
             event_pool_models_raw = body.get("models", [])
             event_pool_models = []
@@ -874,6 +862,18 @@ async def publish_node_event(request: Request):
                     event_pool_models.append(m)
                 elif isinstance(m, str):
                     event_pool_models.append({"name": m, "ctx_length": 0})
+
+            logger.info(
+                f"🟢 NODE JOINED: {node_hash} model={model_name} "
+                f"url={body.get('url', '')[:60]} "
+                f"ctx={ctx_length} "
+                f"pool={[m.get('name', m) if isinstance(m, dict) else m for m in event_pool_models]} "
+                f"load={body.get('metrics', {}).get('load', 0):.2f} "
+                f"tps={body.get('metrics', {}).get('tps', 0):.1f} "
+                f"ttft={body.get('metrics', {}).get('ttft', 'N/A')} "
+                f"latency={body.get('metrics', {}).get('latency', 'N/A')} "
+                f"gpu={body.get('gpu', '')[:40]}"
+            )
 
             if event_pool_models:
                 try:
