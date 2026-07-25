@@ -354,6 +354,7 @@ class LlamaNetUI {
                 if (data.no_model_mode || (data.pool && data.pool.used_slots === 0)) {
                     this.selectedModel = null;
                     localStorage.removeItem('llamanet_selected_model');
+                    this._lastPoolData = null;
                     this.updateChatInterface('No Model Loaded');
                     this.updateChatModelSelector();
                     const banner = document.getElementById('no-model-banner');
@@ -844,12 +845,17 @@ class LlamaNetUI {
                 if (data.node_info) {
                     if (data.node_info.no_model_mode) {
                         this.selectedModel = null;
+                        localStorage.removeItem('llamanet_selected_model');
                         this.updateChatInterface('No Model Loaded');
+                        this._lastPoolData = null;
+                        this.updateChatModelSelector();
                         const banner = document.getElementById('no-model-banner');
                         if (banner) banner.style.display = 'block';
                     } else if (data.node_info.model && data.node_info.model !== 'No Model Loaded') {
                         this.selectedModel = data.node_info.model;
                         this.updateChatInterface(data.node_info.model);
+                        const banner = document.getElementById('no-model-banner');
+                        if (banner) banner.style.display = 'none';
                     }
                     if (data.node_info.pool) {
                         this.loadPoolStatus();

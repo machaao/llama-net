@@ -1014,10 +1014,18 @@ async def publish_node_event(request: Request):
             supabase_mgr.update_node_metrics(node_hash, event_metrics)
 
             if sse_mgr:
+                # Detect empty pool state from node event
+                is_pool_empty = (
+                    not event_pool_models
+                    and body.get("pool_empty", False)
+                )
+
                 await sse_mgr.broadcast("node_updated", {
                     "node_hash": node_hash, "model_name": model_name,
                     "metrics": event_metrics,
                     "pool_models": event_pool_models,
+                    "pool_empty": is_pool_empty,
+                    "no_model_mode": is_pool_empty,
                     "load": event_metrics.get("load", 0),
                     "tps": event_metrics.get("tps", 0),
                     "ttft": event_metrics.get("ttft"),
