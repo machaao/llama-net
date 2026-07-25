@@ -316,14 +316,14 @@ class ModelPool:
         model_config.host = self.config.host
         model_config.port = self.config.port
         model_config.node_id = self.config.node_id
+        model_config.flash_attn = getattr(self.config, 'flash_attn', False)
+        model_config.cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
+        model_config.cache_type_v = getattr(self.config, 'cache_type_v', 'f16')
         model_config.n_ctx = self._detect_optimal_context(model_path, model_config.cache_type_k)
         model_config.n_batch = self.config.n_batch
         model_config.n_gpu_layers = self.config.n_gpu_layers
         model_config.verbose = self.config.verbose
         model_config.no_model_mode = False
-        model_config.flash_attn = getattr(self.config, 'flash_attn', False)         # NEW
-        model_config.cache_type_k = getattr(self.config, 'cache_type_k', 'f16')     # NEW
-        model_config.cache_type_v = getattr(self.config, 'cache_type_v', 'f16')     # NEW
 
         llm = LlamaWrapper(model_config)
         slot = self.register(model_path, llm, model_name)
