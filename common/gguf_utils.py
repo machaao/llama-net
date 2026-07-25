@@ -42,6 +42,9 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
 
     Handles all GGUF types (strings, scalars, arrays) including
     massive tokenizer arrays (250K+ strings) without issues.
+
+    Uses getattr() for field attributes to handle different
+    GGUFReader API versions gracefully.
     """
     from gguf.gguf_reader import GGUFReader
 
@@ -50,26 +53,35 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
 
     for field in reader.fields:
         try:
-            data = field.data
+            # Handle both dict-style and object-style fields
+            if isinstance(field, str):
+                continue
+
+            name = getattr(field, 'name', None) or getattr(field, 'key', None)
+            data = getattr(field, 'data', None) or getattr(field, 'value', None)
+
+            if name is None or data is None:
+                logger.debug(f"Skipping field with missing name/data: {type(field)}")
+                continue
 
             if hasattr(data, 'dtype') and data.dtype == 'uint8' and data.ndim == 1:
                 # String field stored as raw bytes → decode
-                metadata[field.name] = bytes(data).decode('utf-8', errors='replace')
+                metadata[name] = bytes(data).decode('utf-8', errors='replace')
             elif hasattr(data, '__len__') and len(data) == 1:
                 # Scalar field (int, float, bool)
                 val = data[0]
-                metadata[field.name] = val.item() if hasattr(val, 'item') else val
+                metadata[name] = val.item() if hasattr(val, 'item') else val
             elif hasattr(data, '__len__') and len(data) > 1:
                 # Array field
-                metadata[field.name] = [
+                metadata[name] = [
                     x.item() if hasattr(x, 'item') else x for x in data
                 ]
             else:
                 # Fallback — try direct use
-                metadata[field.name] = data
+                metadata[name] = data
 
         except Exception as e:
-            logger.debug(f"Could not read GGUF field '{field.name}': {e}")
+            logger.debug(f"Could not read GGUF field: {e}")
 
     return metadata
 
