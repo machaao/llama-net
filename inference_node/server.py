@@ -330,6 +330,17 @@ async def lifespan(app: FastAPI):
         _active_sse_tasks.clear()
 
     if gateway_client:
+        # 1. Send departure event via event-driven path (logged, SSE-broadcast)
+        try:
+            await asyncio.wait_for(
+                gateway_client.send_event("node_left"),
+                timeout=5.0
+            )
+            logger.info("✅ Departure event sent to gateway")
+        except Exception as e:
+            logger.warning(f"Departure event failed: {e}")
+
+        # 2. Unregister via unpublish path (redundant safety net)
         try:
             await asyncio.wait_for(gateway_client.unregister(), timeout=8.0)
         except Exception:
