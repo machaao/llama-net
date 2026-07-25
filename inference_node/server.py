@@ -701,6 +701,10 @@ async def get_models_statistics():
 @app.post("/v1/completions")
 async def create_completion(request: Request, body: OpenAICompletionRequest):
     """Text completion — handle locally or route to best peer."""
+    auth_err = await _verify_gateway_request(request)
+    if auth_err:
+        return auth_err
+
     # ── Self-throttling ──
     overload_err = await _check_node_overload()
     if overload_err:
@@ -1054,6 +1058,10 @@ async def _forward_completion(request: OpenAICompletionRequest, target_node):
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: Request, body: OpenAIChatCompletionRequest):
     """Chat completion — handle locally or route to best peer."""
+    auth_err = await _verify_gateway_request(request)
+    if auth_err:
+        return auth_err
+
     # ── Self-throttling ──
     overload_err = await _check_node_overload()
     if overload_err:
