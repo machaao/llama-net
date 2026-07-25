@@ -602,13 +602,13 @@ class SupabaseManager:
             # Also count pool models from persisted DB metrics column
             for n in nodes:
                 node_metrics = n.get("metrics", {}) or {}
-                pool_list = node_metrics.get("pool_models", []) or n.get("pool_models", [])
+                pool_list = node_metrics.get("pool_models", []) or n.get("pool_models", []) or []
                 for pool_model in pool_list:
                     if isinstance(pool_model, dict):
                         pool_model_name = pool_model.get("name", "")
                     else:
                         pool_model_name = str(pool_model)
-                    if pool_model_name:
+                    if pool_model_name and isinstance(pool_model_name, str):
                         slug = model_name_to_slug(pool_model_name)
                         models.add(slug)
 
