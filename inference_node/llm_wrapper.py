@@ -260,7 +260,8 @@ class LlamaWrapper:
         from common.context_optimizer import calculate_optimal_context
         cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
         self.config.n_ctx, auto_detected = calculate_optimal_context(
-            new_model_path, cache_type_k
+            new_model_path, cache_type_k,
+            max_concurrent=max(getattr(self.config, 'max_models', 0), 2),
         )
         logger.info(
             f"Context recalculated: {self.config.n_ctx} tokens "

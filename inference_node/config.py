@@ -184,7 +184,8 @@ class InferenceConfig:
         _should_auto_detect = self.n_ctx <= 0 or self.n_ctx == 4096
         if _should_auto_detect and self.model_path and not self.no_model_mode:
             self.n_ctx, self.n_ctx_auto_detected = calculate_optimal_context(
-                self.model_path, self.cache_type_k
+                self.model_path, self.cache_type_k,
+                max_concurrent=max(self.max_models, 2),
             )
 
         if self.n_ctx <= 0:
