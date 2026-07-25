@@ -349,6 +349,16 @@ class LlamaNetUI {
             if (data.success) {
                 this.showToast('success', 'Unloaded: ' + modelName);
                 await this.loadPoolStatus();
+
+                // If pool is now empty, clear chat model state
+                if (data.no_model_mode || (data.pool && data.pool.used_slots === 0)) {
+                    this.selectedModel = null;
+                    localStorage.removeItem('llamanet_selected_model');
+                    this.updateChatInterface('No Model Loaded');
+                    this.updateChatModelSelector();
+                    const banner = document.getElementById('no-model-banner');
+                    if (banner) banner.style.display = 'block';
+                }
             } else {
                 this.showToast('error', 'Failed: ' + (data.message || 'Unknown error'));
             }
@@ -447,7 +457,7 @@ class LlamaNetUI {
         }
 
         this.activeNodes.forEach(node => {
-            if (node.model && node.model !== 'unknown' && !allModels.has(node.model)) {
+            if (node.model && node.model !== 'unknown' && node.model !== 'No Model Loaded' && !allModels.has(node.model)) {
                 allModels.set(node.model, {
                     name: node.model,
                     path: '',
@@ -462,7 +472,8 @@ class LlamaNetUI {
         select.innerHTML = '';
 
         if (allModels.size === 0) {
-            select.innerHTML = '<option value="">No models available</option>';
+            select.innerHTML = '<option value="">No models available — load a model via Model Manager</option>';
+            this.toggleSendButton(false);
             return;
         }
 
@@ -491,6 +502,7 @@ class LlamaNetUI {
         }
 
         this.selectedModel = select.value;
+        this.toggleSendButton(true);
 
         // Auto-update reasoning toggle for the newly selected model
         const selectedOpt = select.selectedOptions[0];
@@ -614,6 +626,8 @@ class LlamaNetUI {
                 this.selectedModel = modelName;
                 this.updateChatInterface(modelName);
                 localStorage.setItem('llamanet_selected_model', modelName);
+                const banner = document.getElementById('no-model-banner');
+                if (banner) banner.style.display = 'none';
                 await this.loadPoolStatus();
             } else {
                 this.showToast('error', 'Failed: ' + (data.message || 'Unknown error'));
@@ -782,8 +796,18 @@ class LlamaNetUI {
                         }
 
                         // Refresh pool status on model changes
-                        if (modelChanged || data.source === 'pool_load' || data.source === 'instant_switch') {
+                        if (modelChanged || data.source === 'pool_load' || data.source === 'instant_switch' || data.source === 'pool_change') {
                             this.loadPoolStatus();
+                        }
+
+                        // Handle pool emptying (last model evicted)
+                        if (data.pool_empty) {
+                            this.selectedModel = null;
+                            localStorage.removeItem('llamanet_selected_model');
+                            this.updateChatInterface('No Model Loaded');
+                            this.updateChatModelSelector();
+                            const banner = document.getElementById('no-model-banner');
+                            if (banner) banner.style.display = 'block';
                         }
                         
                         this.updateNetworkDisplayRealTime();
@@ -813,6 +837,23 @@ class LlamaNetUI {
                     console.log(`👋 Node left (Unified SSE): ${nodeId.substring(0, 8)}...`);
                     this.showToast('warning', `👋 Node left: ${nodeId.substring(0, 8)}...`);
                     this.updateNetworkDisplayRealTime();
+                }
+                break;
+                
+            case 'node_info':
+                if (data.node_info) {
+                    if (data.node_info.no_model_mode) {
+                        this.selectedModel = null;
+                        this.updateChatInterface('No Model Loaded');
+                        const banner = document.getElementById('no-model-banner');
+                        if (banner) banner.style.display = 'block';
+                    } else if (data.node_info.model && data.node_info.model !== 'No Model Loaded') {
+                        this.selectedModel = data.node_info.model;
+                        this.updateChatInterface(data.node_info.model);
+                    }
+                    if (data.node_info.pool) {
+                        this.loadPoolStatus();
+                    }
                 }
                 break;
                 
@@ -1858,6 +1899,16 @@ class LlamaNetUI {
                 <p>Welcome to LlamaNet! Using model: <strong>${modelId}</strong></p>
                 <p class="small">Start a conversation below.</p>
             `;
+        }
+
+        // Disable chat when no model is loaded
+        const sendBtn = document.getElementById('send-btn');
+        const input = document.getElementById('message-input');
+        const isNoModel = !modelId || modelId === 'No Model Loaded';
+        if (sendBtn) sendBtn.disabled = isNoModel;
+        if (input) {
+            input.disabled = isNoModel;
+            input.placeholder = isNoModel ? 'Load a model to start chatting...' : 'Type your message...';
         }
     }
     
