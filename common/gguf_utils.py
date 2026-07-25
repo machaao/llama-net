@@ -58,24 +58,37 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
             if data is None:
                 continue
 
+            # String fields stored as uint8 byte arrays
             if hasattr(data, 'dtype') and data.dtype == 'uint8' and data.ndim == 1:
-                # String field stored as raw bytes → decode
                 metadata[name] = bytes(data).decode('utf-8', errors='replace')
+            # Scalar fields (may be numpy.bytes_, numpy.str_, int, float)
             elif hasattr(data, '__len__') and len(data) == 1:
-                # Scalar field (int, float, bool)
                 val = data[0]
-                metadata[name] = val.item() if hasattr(val, 'item') else val
+                if isinstance(val, bytes):
+                    metadata[name] = val.decode('utf-8', errors='replace')
+                elif hasattr(val, 'item'):
+                    metadata[name] = val.item()
+                else:
+                    metadata[name] = val
+            # Array fields
             elif hasattr(data, '__len__') and len(data) > 1:
-                # Array field
-                metadata[name] = [
-                    x.item() if hasattr(x, 'item') else x for x in data
-                ]
+                first = data[0]
+                if isinstance(first, bytes):
+                    metadata[name] = [
+                        x.decode('utf-8', errors='replace') if isinstance(x, bytes)
+                        else (x.item() if hasattr(x, 'item') else x)
+                        for x in data
+                    ]
+                else:
+                    metadata[name] = [
+                        x.item() if hasattr(x, 'item') else x for x in data
+                    ]
             else:
                 # Fallback — try direct use
                 metadata[name] = data
 
         except Exception as e:
-            logger.debug(f"Could not read GGUF field: {e}")
+            logger.debug(f"Could not read GGUF field '{name}': {e}")
 
     return metadata
 
