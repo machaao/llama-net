@@ -11,6 +11,7 @@ import psutil
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from common.utils import get_logger
+from common.gguf_utils import get_model_architecture_info, estimate_kv_cache_gb
 
 logger = get_logger(__name__)
 
@@ -36,7 +37,7 @@ class ModelPool:
     least recently used one.
     """
 
-    DEFAULT_MODEL_SIZE_GB = 5.0
+    DEFAULT_MODEL_SIZE_GB = 5.0  # Fallback when GGUF metadata unavailable
 
     def __init__(self, config):
         self.config = config
@@ -60,15 +61,49 @@ class ModelPool:
             mem = psutil.virtual_memory()
             available_gb = mem.available / (1024 ** 3)
             usable_gb = available_gb * 0.70
-            max_count = max(1, min(5, int(usable_gb / self.DEFAULT_MODEL_SIZE_GB)))
+            per_model_gb = self._estimate_per_model_memory()
+            max_count = max(1, min(5, int(usable_gb / per_model_gb)))
             logger.info(
                 f"Auto-detected capacity: {available_gb:.1f} GB available, "
-                f"{usable_gb:.1f} GB usable → {max_count} model slots"
+                f"{usable_gb:.1f} GB usable, {per_model_gb:.1f} GB/model → {max_count} slots"
             )
             return max_count
         except Exception as e:
             logger.warning(f"Could not auto-detect capacity: {e}, defaulting to 1")
             return 1
+
+    def _estimate_per_model_memory(self) -> float:
+        """Estimate per-model memory including KV cache."""
+        model_gb = self.DEFAULT_MODEL_SIZE_GB
+        kv_gb = 0.0
+
+        # Try to get actual model file size
+        model_path = getattr(self.config, 'model_path', '')
+        if model_path and os.path.exists(model_path):
+            try:
+                model_gb = os.path.getsize(model_path) / (1024 ** 3)
+            except OSError:
+                pass
+
+        # Estimate KV cache from model metadata + config
+        if model_path and os.path.exists(model_path):
+            try:
+                arch_info = get_model_architecture_info(model_path)
+                cache_type = getattr(self.config, 'cache_type_k', 'f16')
+                n_ctx = getattr(self.config, 'n_ctx', 4096)
+                kv_gb = estimate_kv_cache_gb(
+                    n_layers=arch_info.get("n_layers", 32),
+                    n_embd=arch_info.get("n_embd", 4096),
+                    n_ctx=n_ctx,
+                    cache_type=cache_type,
+                    n_head=arch_info.get("n_head", 32),
+                )
+            except Exception:
+                pass
+
+        total = model_gb + kv_gb + 0.5  # model + kv + overhead
+        logger.debug(f"Per-model memory estimate: {model_gb:.1f} GB weights + {kv_gb:.1f} GB KV = {total:.1f} GB total")
+        return max(total, self.DEFAULT_MODEL_SIZE_GB)
 
     def _detect_memory_budget(self) -> float:
         try:
@@ -172,6 +207,9 @@ class ModelPool:
         model_config.n_gpu_layers = self.config.n_gpu_layers
         model_config.verbose = self.config.verbose
         model_config.no_model_mode = False
+        model_config.flash_attn = getattr(self.config, 'flash_attn', False)         # NEW
+        model_config.cache_type_k = getattr(self.config, 'cache_type_k', 'f16')     # NEW
+        model_config.cache_type_v = getattr(self.config, 'cache_type_v', 'f16')     # NEW
 
         llm = LlamaWrapper(model_config)
         slot = self.register(model_path, llm, model_name)

@@ -145,6 +145,13 @@ async def lifespan(app: FastAPI):
     try:
         config = InferenceConfig()
         logger.info(f"Starting inference node: {config}")
+        logger.info(
+            f"Context size: {config.n_ctx} tokens "
+            f"({'auto-detected' if getattr(config, 'n_ctx_auto_detected', False) else 'user-specified'}) "
+            f"[flash_attn={getattr(config, 'flash_attn', False)}, "
+            f"cache_k={getattr(config, 'cache_type_k', 'f16')}, "
+            f"cache_v={getattr(config, 'cache_type_v', 'f16')}]"
+        )
 
         download_manager = DownloadManager()
         request_queue_manager = RequestQueueManager(max_queue_size=50)

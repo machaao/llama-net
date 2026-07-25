@@ -169,7 +169,10 @@ class LlamaWrapper:
             n_gpu_layers=config.n_gpu_layers,
             verbose=config.verbose,
             reasoning=True,
-            chat_format=self.detected_chat_format  # Use detected format instead of "auto"
+            chat_format=self.detected_chat_format,
+            flash_attn=getattr(config, 'flash_attn', False),
+            type_k=getattr(config, 'cache_type_k', 'f16'),
+            type_v=getattr(config, 'cache_type_v', 'f16'),
         )
         
         # Detect and log the chat template being used
@@ -217,8 +220,15 @@ class LlamaWrapper:
             n_gpu_layers=self.config.n_gpu_layers,
             verbose=self.config.verbose,
             reasoning=True,
-            chat_format=self.detected_chat_format
+            chat_format=self.detected_chat_format,
+            flash_attn=getattr(self.config, 'flash_attn', False),
+            type_k=getattr(self.config, 'cache_type_k', 'f16'),
+            type_v=getattr(self.config, 'cache_type_v', 'f16'),
         )
+        
+        # Log actual context size allocated
+        actual_ctx = self.llm.n_ctx() if hasattr(self.llm, 'n_ctx') else self.config.n_ctx
+        logger.info(f"Actual n_ctx allocated: {actual_ctx} (requested: {self.config.n_ctx})")
         logger.info(f"Model loaded successfully from {model_path}")
 
     def reload_model(self, new_model_path: str) -> None:

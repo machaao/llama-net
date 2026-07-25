@@ -9,6 +9,7 @@ from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
 from common.port_utils import PortManager
 from inference_node.model_manager import ModelManager
+from common.gguf_utils import get_model_context_length, get_model_architecture_info, estimate_kv_cache_gb
 
 logger = get_logger(__name__)
 
@@ -60,8 +61,17 @@ class InferenceConfig:
             parser.add_argument('--public-ip',
                               help='Public IP address for internet-accessible nodes')
 
-            parser.add_argument('--ctx-size', default=4096, type=int, 
-                                help='Llama Server Context Size (in tokens)')
+            parser.add_argument('--ctx-size', default=0, type=int, 
+                                help='Context size in tokens (0 = auto-detect from model, default: 0)')
+
+            parser.add_argument('--flash-attn', action='store_true', default=False,
+                                help='Enable FlashAttention for memory-efficient inference')
+
+            parser.add_argument('--cache-type-k', default='f16', choices=['f16', 'q8_0', 'q4_0'],
+                                help='KV cache key quantization type (default: f16)')
+
+            parser.add_argument('--cache-type-v', default='f16', choices=['f16', 'q8_0', 'q4_0'],
+                                help='KV cache value quantization type (default: f16)')
 
             parser.add_argument('--batch-size', default=4096, type=int,
                                 help='Llama Server Batch Size (in tokens)')
@@ -80,7 +90,13 @@ class InferenceConfig:
             # Use command line args or fall back to environment variables
             self.model_path = args.model_path or load_env_var("MODEL_PATH", "")
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
+            
+            # KV cache and context configuration
+            self.flash_attn = args.flash_attn or load_env_var("FLASH_ATTN", "false").lower() == "true"
+            self.cache_type_k = load_env_var("CACHE_TYPE_K", args.cache_type_k)
+            self.cache_type_v = load_env_var("CACHE_TYPE_V", args.cache_type_v)
             self.n_ctx = int(load_env_var("N_CTX", args.ctx_size))
+            
             self.n_batch = int(load_env_var("N_BATCH", args.batch_size))
             # LLM configuration
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
@@ -126,8 +142,12 @@ class InferenceConfig:
             if self.public_ip:
                 logger.info(f"Configured public IP: {self.public_ip}")
             
-            # LLM configuration from environment
-            self.n_ctx = int(load_env_var("N_CTX", 4096))
+            # KV cache and context configuration
+            self.flash_attn = load_env_var("FLASH_ATTN", "false").lower() == "true"
+            self.cache_type_k = load_env_var("CACHE_TYPE_K", "f16")
+            self.cache_type_v = load_env_var("CACHE_TYPE_V", "f16")
+            self.n_ctx = int(load_env_var("N_CTX", 0))
+            
             self.n_batch = int(load_env_var("N_BATCH", 4096))
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
             self.verbose = bool(load_env_var("VERBOSE", False))
@@ -156,12 +176,90 @@ class InferenceConfig:
             self.no_model_mode = True
             self.model_path = ""
 
+        # Auto-detect context size from model if n_ctx == 0
+        self.n_ctx_auto_detected = False
+        if self.n_ctx <= 0 and self.model_path and not self.no_model_mode:
+            self.n_ctx, self.n_ctx_auto_detected = self._auto_detect_context_size()
+
+        if self.n_ctx <= 0:
+            self.n_ctx = 4096  # Safe fallback
+
         # Extract model name from path
         self.model_name = os.path.basename(self.model_path) if self.model_path else "No Model Loaded"
         
         # Configure networking for better stability
         self._configure_networking()
     
+    def _auto_detect_context_size(self) -> tuple:
+        """Auto-detect context size from GGUF metadata, clamped to memory limits."""
+        try:
+            ctx_length = get_model_context_length(self.model_path)
+            if ctx_length and ctx_length > 0:
+                arch_info = get_model_architecture_info(self.model_path)
+                n_layers = arch_info.get("n_layers", 32)
+                n_embd = arch_info.get("n_embd", 4096)
+                n_head = arch_info.get("n_head", 32)
+
+                # Estimate KV cache memory for the model's native context
+                kv_gb = estimate_kv_cache_gb(
+                    n_layers=n_layers,
+                    n_embd=n_embd,
+                    n_ctx=ctx_length,
+                    cache_type=self.cache_type_k,
+                    n_head=n_head,
+                )
+
+                # Check if we have enough memory
+                try:
+                    import psutil
+                    available_gb = psutil.virtual_memory().available / (1024 ** 3)
+                    usable_gb = available_gb * 0.70
+                except Exception:
+                    usable_gb = 20.0
+
+                # Estimate model file size (GGUF weights)
+                try:
+                    model_gb = os.path.getsize(self.model_path) / (1024 ** 3)
+                except OSError:
+                    model_gb = 5.0
+
+                total_needed = model_gb + kv_gb + 0.5  # model + kv cache + overhead
+
+                if total_needed <= usable_gb:
+                    logger.info(
+                        f"✅ Auto-detected context: {ctx_length} tokens "
+                        f"(KV cache: {kv_gb:.1f} GB with {self.cache_type_k}, "
+                        f"total: {total_needed:.1f} GB / {usable_gb:.1f} GB available)"
+                    )
+                    return ctx_length, True
+                else:
+                    # Clamp: find max context that fits
+                    if n_layers > 0 and n_embd > 0:
+                        bytes_per_elem = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5625}.get(self.cache_type_k, 2.0)
+                        head_dim = n_embd // n_head if n_head > 0 else 128
+                        budget_gb = usable_gb - model_gb - 0.5
+                        max_ctx = int((budget_gb * (1024 ** 3)) / (2 * n_layers * head_dim * n_head * bytes_per_elem))
+                        # Round down to nearest power of 2 for clean token counts
+                        clamped = 1
+                        while clamped * 2 <= max_ctx:
+                            clamped *= 2
+                        clamped = max(4096, min(clamped, ctx_length))
+                        logger.warning(
+                            f"⚠️ Native context {ctx_length} requires {total_needed:.1f} GB "
+                            f"but only {usable_gb:.1f} GB usable. Clamped to {clamped} tokens. "
+                            f"Use --cache-type-k q4_0 for more headroom."
+                        )
+                        return clamped, True
+                    else:
+                        logger.warning(f"Could not estimate memory for clamping, using 4096")
+                        return 4096, False
+            else:
+                logger.info("No context_length in GGUF metadata, using default")
+                return 4096, False
+        except Exception as e:
+            logger.warning(f"Context auto-detection failed: {e}")
+            return 4096, False
+
     def _configure_networking(self):
         """Configure networking settings for better stability"""
         import socket
@@ -296,8 +394,12 @@ class InferenceConfig:
             "public_ip": self.public_ip or "auto-detected",
             "bootstrap_peers": self.bootstrap_peers,
             "n_ctx": self.n_ctx,
+            "n_ctx_auto_detected": getattr(self, 'n_ctx_auto_detected', False),
             "n_batch": self.n_batch,
             "n_gpu_layers": self.n_gpu_layers,
+            "flash_attn": getattr(self, 'flash_attn', False),
+            "cache_type_k": getattr(self, 'cache_type_k', 'f16'),
+            "cache_type_v": getattr(self, 'cache_type_v', 'f16'),
             "verbose": self.verbose,
         }
         
