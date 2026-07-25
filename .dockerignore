@@ -1,0 +1,49 @@
+# Git
+.git
+.github
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+.eggs
+venv
+.venv
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model files (downloaded at runtime, too large for image)
+models/
+*.gguf
+*.gguf.*
+
+# Cache
+.cache
+.mypy_cache
+.pytest_cache
+
+# Docker
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# Logs
+*.log
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
