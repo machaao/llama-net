@@ -3573,26 +3573,25 @@ class ModelDownloaderUI {
                         </div>
                         <div id="detailSizeWarning" class="small text-muted mt-2"></div>
                     </div>`;
-            } else {
-                content.innerHTML = '<div class="alert alert-warning">Could not load details</div>';
-            }
-
-            // Check if model fits in system
-            if (this.systemInfo && info.gguf_files && info.gguf_files.length > 0) {
-                const maxGb = this.systemInfo.max_model_size_gb;
-                const q4File = info.gguf_files.find(f => {
-                    const name = typeof f === 'string' ? f : f.filename;
-                    return name.toUpperCase().includes('Q4_K_M');
-                });
-                if (q4File) {
-                    const sizeGb = typeof q4File === 'object' ? (q4File.size_gb || 0) : 0;
-                    if (sizeGb > maxGb && sizeGb > 0) {
-                        const warnDiv = document.getElementById('detailSizeWarning');
-                        if (warnDiv) {
-                            warnDiv.innerHTML = `<i class="fas fa-exclamation-triangle text-warning"></i> Q4_K_M is ~${sizeGb} GB — exceeds your ~${maxGb} GB limit. Try a smaller quantization (Q2_K, Q3_K_M).`;
+                // Check if model fits in system
+                if (this.systemInfo && info.gguf_files && info.gguf_files.length > 0) {
+                    const maxGb = this.systemInfo.max_model_size_gb;
+                    const q4File = info.gguf_files.find(f => {
+                        const name = typeof f === 'string' ? f : f.filename;
+                        return name.toUpperCase().includes('Q4_K_M');
+                    });
+                    if (q4File) {
+                        const sizeGb = typeof q4File === 'object' ? (q4File.size_gb || 0) : 0;
+                        if (sizeGb > maxGb && sizeGb > 0) {
+                            const warnDiv = document.getElementById('detailSizeWarning');
+                            if (warnDiv) {
+                                warnDiv.innerHTML = `<i class="fas fa-exclamation-triangle text-warning"></i> Q4_K_M is ~${sizeGb} GB — exceeds your ~${maxGb} GB limit. Try a smaller quantization (Q2_K, Q3_K_M).`;
+                            }
                         }
                     }
                 }
+            } else {
+                content.innerHTML = '<div class="alert alert-warning">Could not load details</div>';
             }
         } catch (error) {
             content.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
