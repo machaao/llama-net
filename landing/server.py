@@ -942,13 +942,13 @@ async def publish_node_event(request: Request):
                     model_slug = new_slug
                     logger.info(f"📡 Node {node_hash} model changed → {new_model}")
 
-            # Extract ctx_length from event payload
+            # Extract metrics and ctx_length from event payload
+            event_metrics = body.get("metrics", {})
             event_ctx_length = body.get("ctx_length", 0)
             if event_ctx_length > 0:
                 event_metrics["ctx_length"] = event_ctx_length
 
             # Extract pool_models from multiple possible locations
-            event_metrics = body.get("metrics", {})
             raw_pool_models = (
                 event_metrics.get("pool_models", [])
                 or event_metrics.get("pool", {}).get("models", [])
