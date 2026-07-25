@@ -471,7 +471,7 @@ async def _check_node_overload() -> Optional[JSONResponse]:
             memory_threshold=92.0,
         )
         if is_overloaded:
-            logger.warning("⚠️ 503: Node overloaded (CPU/memory threshold exceeded)")
+            logger.warning(f"⚠️ 503: Node overloaded ({is_overloaded})")
             return JSONResponse(
                 status_code=503,
                 content={
