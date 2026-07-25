@@ -419,6 +419,73 @@ cloudflared tunnel route dns my-node node.mydomain.com
 llamanet run hf.co/user/Model:Q4_K_M --tunnel
 ```
 
+## Run on a GPU Cloud Provider (No Hardware Needed)
+
+Don't have a GPU? Rent one by the hour and run LlamaNet in 2 minutes.
+
+### RunPod (Recommended)
+
+1. Go to [runpod.io](https://runpod.io) and create an account
+2. Click **Deploy** → **Custom** → paste Docker image: `machaao/llamanet:latest`
+3. Select a GPU (see sizing table below)
+4. Set **Environment Variables**:
+   - `MODEL_URL` = `hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M`
+5. Expose **Port 8000** (TCP)
+6. Click **Deploy**
+7. Open the proxy URL — Web UI loads automatically
+8. Your node joins the `llamanet.app` network
+
+| GPU | VRAM | Recommended Models | ~Cost/hr |
+|-----|------|--------------------|----------|
+| RTX 4060 | 8 GB | Phi-4 Mini, Qwen 4B | ~$0.20 |
+| RTX 4090 | 24 GB | Ministral 8B, Gemma 12B, Qwen 14B | ~$0.44 |
+| A100 80GB | 80 GB | Qwen 35B, DeepSeek-R1 32B | ~$1.64 |
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL_URL` | *(empty)* | HuggingFace model URL (e.g. `hf.co/user/Model:Q4_K_M`) |
+| `ENABLE_TUNNEL` | `true` | Join public llamanet.app network |
+| `N_GPU_LAYERS` | `-1` | GPU layers (-1 = all) |
+| `N_CTX` | `4096` | Context window in tokens |
+| `BOOTSTRAP_PEERS` | `https://llamanet.app` | Gateway URL |
+
+### vast.ai
+
+1. Go to [vast.ai](https://vast.ai) and create an account
+2. Search for GPU rentals → click **Rent** on a machine
+3. Set **Docker Image**: `machaao/llamanet:latest`
+4. Set **Environment Variables** (same as RunPod above)
+5. Set **Port Mapping**: `8000`
+6. Launch — Web UI available at the instance proxy URL
+
+### Docker Hub
+
+The image is published at `machaao/llamanet:latest`:
+
+```bash
+# Run locally with GPU
+docker run --gpus all -p 8000:8000 \
+  -e MODEL_URL="hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M" \
+  machaao/llamanet:latest
+
+# Run without GPU (CPU only)
+docker run -p 8000:8000 \
+  -e MODEL_URL="hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M" \
+  -e N_GPU_LAYERS=0 \
+  machaao/llamanet:latest
+```
+
+### Build & Push Your Own Image
+
+```bash
+git clone https://github.com/machaao/llama-net.git
+cd llama-net
+docker build -t yourusername/llamanet:latest .
+docker push yourusername/llamanet:latest
+```
+
 ### Operating Your Own Rig
 
 For dedicated GPU machines (desktop, workstation, or server):
