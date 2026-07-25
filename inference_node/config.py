@@ -165,26 +165,32 @@ class InferenceConfig:
     def _configure_networking(self):
         """Configure networking settings for better stability"""
         import socket
-        
+
         try:
-            # Set socket options for better UDP handling
             socket.setdefaulttimeout(30)
-            
-            # Configure socket reuse
+
             original_socket = socket.socket
-            def patched_socket(*args, **kwargs):
-                sock = original_socket(*args, **kwargs)
-                if sock.family == socket.AF_INET and sock.type == socket.SOCK_DGRAM:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    # Set buffer sizes for UDP
-                    try:
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
-                    except OSError:
-                        pass  # Some systems don't allow this
-                return sock
-            socket.socket = patched_socket
-            
+
+            class _PatchedSocket(original_socket):
+                """Subclass that sets SO_REUSEADDR and larger buffers on UDP sockets.
+
+                Using a proper class (instead of a plain function) keeps
+                ``isinstance(sock, socket.socket)`` valid, which is required
+                by asyncio on Windows (ProactorEventLoop).
+                """
+
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    if self.family == socket.AF_INET and self.type == socket.SOCK_DGRAM:
+                        try:
+                            self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                            self.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+                            self.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                        except OSError:
+                            pass  # Some systems don't allow this
+
+            socket.socket = _PatchedSocket
+
             logger.info("Network configuration applied successfully")
         except Exception as e:
             logger.warning(f"Could not configure networking: {e}")
