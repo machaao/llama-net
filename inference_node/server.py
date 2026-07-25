@@ -471,6 +471,7 @@ async def _check_node_overload() -> Optional[JSONResponse]:
             memory_threshold=92.0,
         )
         if is_overloaded:
+            logger.warning("⚠️ 503: Node overloaded (CPU/memory threshold exceeded)")
             return JSONResponse(
                 status_code=503,
                 content={
@@ -714,16 +715,19 @@ async def create_completion(request: Request, body: OpenAICompletionRequest):
     request = body
     if config and config.no_model_mode and not llm:
         if not gateway_client:
+            logger.warning("⚠️ 503: No model loaded AND no gateway_client (no_model_mode)")
             raise HTTPException(status_code=503, detail="No model loaded, no peers available")
         peer = await gateway_client.select_node(
             model=getattr(request, 'model', None),
             strategy=getattr(request, 'strategy', 'load_balanced'),
         )
         if not peer:
+            logger.warning(f"⚠️ 503: No peers available for model '{getattr(request, 'model', None)}'")
             raise HTTPException(status_code=503, detail="No peers available for this model")
         return await _forward_request(request.dict(), "completions", peer, stream=request.stream)
 
     if not llm or not request_queue_manager:
+        logger.warning(f"⚠️ 503: Services not initialized — llm={llm is not None}, queue={request_queue_manager is not None}")
         raise HTTPException(status_code=503, detail="Services not initialized")
 
     async def process(request_data):
@@ -1064,16 +1068,19 @@ async def create_chat_completion(request: Request, body: OpenAIChatCompletionReq
     request = body
     if config and config.no_model_mode and not llm:
         if not gateway_client:
+            logger.warning("⚠️ 503: No model loaded AND no gateway_client (no_model_mode)")
             raise HTTPException(status_code=503, detail="No model loaded, no peers available")
         peer = await gateway_client.select_node(
             model=getattr(request, 'model', None),
             strategy=getattr(request, 'strategy', 'load_balanced'),
         )
         if not peer:
+            logger.warning(f"⚠️ 503: No peers available for model '{getattr(request, 'model', None)}'")
             raise HTTPException(status_code=503, detail="No peers available for this model")
         return await _forward_request(request.dict(), "chat/completions", peer, stream=request.stream)
 
     if not llm or not request_queue_manager:
+        logger.warning(f"⚠️ 503: Services not initialized — llm={llm is not None}, queue={request_queue_manager is not None}")
         raise HTTPException(status_code=503, detail="Services not initialized")
 
     async def process(request_data):
