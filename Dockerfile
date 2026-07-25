@@ -30,6 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Install cloudflared for tunnel support ──
+RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared \
+    && chmod +x /usr/local/bin/cloudflared
+
 # ── Upgrade pip ──
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
@@ -80,8 +84,8 @@ ENV PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tracke
 EXPOSE 8000
 
 # ── Health check ──
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 # ── Entrypoint ──
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
