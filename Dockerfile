@@ -53,11 +53,7 @@ RUN pip install --no-cache-dir \
     llama-cpp-python==0.3.34
 
 # ── Install remaining inference dependencies ──
-RUN pip install --no-cache-dir \
-    psutil>=5.8.0,<6.0.0 \
-    nvidia-ml-py \
-    tqdm>=4.64.0 \
-    huggingface_hub>=0.0.1
+RUN pip install --no-cache-dir -r requirements-inference.txt
 
 # ── Copy source code ──
 COPY . .
