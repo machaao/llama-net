@@ -176,9 +176,13 @@ class InferenceConfig:
             self.no_model_mode = True
             self.model_path = ""
 
-        # Auto-detect context size from model if n_ctx == 0
+        # Auto-detect context size from model if n_ctx == 0 (or legacy default 4096)
+        # Treat 4096 as "unset" because it was the old hardcoded default and
+        # stale N_CTX=4096 in shell environments would otherwise prevent
+        # auto-detection of the model's native context length.
         self.n_ctx_auto_detected = False
-        if self.n_ctx <= 0 and self.model_path and not self.no_model_mode:
+        _should_auto_detect = self.n_ctx <= 0 or self.n_ctx == 4096
+        if _should_auto_detect and self.model_path and not self.no_model_mode:
             self.n_ctx, self.n_ctx_auto_detected = self._auto_detect_context_size()
 
         if self.n_ctx <= 0:
