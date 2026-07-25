@@ -1890,6 +1890,50 @@ async def delete_local_model_endpoint(model_id: str):
     }
 
 
+@app.get("/models/system-info")
+async def get_model_system_info():
+    """Return hardware specs for client-side model size filtering."""
+    import psutil
+
+    mem = psutil.virtual_memory()
+    available_gb = round(mem.available / (1024 ** 3), 1)
+    total_gb = round(mem.total / (1024 ** 3), 1)
+
+    gpu_vram_gb = 0.0
+    gpu_name = ""
+    try:
+        from inference_node.metrics import SystemInfo
+        sys_info = SystemInfo.get_all_info()
+        gpu_name = sys_info.get("gpu", "")
+        # Try pynvml for precise VRAM
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            gpu_mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            gpu_vram_gb = round(gpu_mem.total / (1024 ** 3), 1)
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # Usable memory: 70% of available RAM (mirrors model_pool._detect_memory_budget)
+    usable_gb = round(available_gb * 0.70, 1)
+
+    # Max single model: 85% of usable (leave headroom for KV cache + overhead)
+    max_model_gb = round(usable_gb * 0.85, 1)
+
+    return {
+        "ram_total_gb": total_gb,
+        "ram_available_gb": available_gb,
+        "gpu_vram_gb": gpu_vram_gb,
+        "gpu_name": gpu_name,
+        "usable_memory_gb": usable_gb,
+        "max_model_size_gb": max_model_gb,
+    }
+
+
 @app.post("/models/select")
 async def select_model(request: Request):
     """Select a model — instant switch if in pool, otherwise load (may evict LRU)."""

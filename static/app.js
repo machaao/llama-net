@@ -3396,30 +3396,69 @@ class ModelDownloaderUI {
             resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>No models found</p></div>';
             return;
         }
-        const header = isTrending ? '<div class="mb-2"><span class="badge bg-primary me-1"><i class="fas fa-fire"></i> Trending</span><small class="text-muted">Popular GGUF models on Hugging Face</small></div>' : '';
-        resultsDiv.innerHTML = header + this.searchResults.map(model => {
-            const sizeDisplay = model.size_estimate && model.size_estimate.estimated
-                ? `<span class="me-3" title="Estimated Q4_K_M size"><i class="fas fa-hdd"></i> ${model.size_estimate.label}</span>`
-                : '';
-            return `
-            <div class="model-search-result-item border rounded p-3 mb-2">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div class="flex-grow-1">
-                        <h6 class="mb-1"><i class="fas fa-brain text-primary"></i> <span class="fw-bold">${this.escapeHtml(model.repo_id)}</span></h6>
-                        <div class="text-muted small mb-2">
-                            ${sizeDisplay}
-                            <span class="me-3"><i class="fas fa-download"></i> ${this.formatNumber(model.downloads)}</span>
-                            <span class="me-3"><i class="fas fa-heart"></i> ${this.formatNumber(model.likes)}</span>
-                            ${(model.tags || []).slice(0, 5).map(t => `<span class="badge bg-light text-dark me-1">${this.escapeHtml(t)}</span>`).join('')}
-                        </div>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-info" onclick="modelDownloader.showModelDetails('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-info-circle"></i> Details</button>
-                        <button class="btn btn-sm btn-primary" onclick="modelDownloader.showDownloadDialog('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-download"></i> Download</button>
+
+        const maxModelGb = this.systemInfo ? this.systemInfo.max_model_size_gb : 0;
+
+        const header = isTrending
+            ? '<div class="mb-2"><span class="badge bg-primary me-1"><i class="fas fa-fire"></i> Trending</span><small class="text-muted">Popular GGUF models on Hugging Face</small></div>'
+            : '';
+
+        // Split into compatible and incompatible
+        const compatible = [];
+        const incompatible = [];
+        this.searchResults.forEach(model => {
+            const estGb = (model.size_estimate && model.size_estimate.estimated) ? model.size_estimate.size_gb : 0;
+            if (maxModelGb > 0 && estGb > maxModelGb) {
+                incompatible.push(model);
+            } else {
+                compatible.push(model);
+            }
+        });
+
+        let html = header;
+
+        // Compatible models
+        html += compatible.map(model => this._renderModelSearchItem(model, false)).join('');
+
+        // Incompatible models section
+        if (incompatible.length > 0) {
+            const sysLabel = this.systemInfo
+                ? `${this.systemInfo.ram_available_gb} GB RAM available, ~${maxModelGb} GB max model`
+                : 'unknown system specs';
+            html += `<div class="mt-3 mb-2 p-2 bg-light rounded border-start border-3 border-warning">
+                <small class="text-muted"><i class="fas fa-exclamation-triangle text-warning me-1"></i>
+                <strong>${incompatible.length} model(s) hidden</strong> — too large for your hardware (${sysLabel}).
+                Smaller quantizations (Q2_K, Q3_K_M) of these models may still work.</small>
+            </div>`;
+        }
+
+        resultsDiv.innerHTML = html;
+    }
+
+    _renderModelSearchItem(model, disabled) {
+        const sizeDisplay = model.size_estimate && model.size_estimate.estimated
+            ? `<span class="me-3" title="Estimated Q4_K_M size"><i class="fas fa-hdd"></i> ${model.size_estimate.label}</span>`
+            : '';
+        const btnDisabled = disabled ? 'disabled' : '';
+        const opacityStyle = disabled ? 'opacity: 0.5;' : '';
+        return `
+        <div class="model-search-result-item border rounded p-3 mb-2" style="${opacityStyle}">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1">
+                    <h6 class="mb-1"><i class="fas fa-brain text-primary"></i> <span class="fw-bold">${this.escapeHtml(model.repo_id)}</span></h6>
+                    <div class="text-muted small mb-2">
+                        ${sizeDisplay}
+                        <span class="me-3"><i class="fas fa-download"></i> ${this.formatNumber(model.downloads)}</span>
+                        <span class="me-3"><i class="fas fa-heart"></i> ${this.formatNumber(model.likes)}</span>
+                        ${(model.tags || []).slice(0, 5).map(t => `<span class="badge bg-light text-dark me-1">${this.escapeHtml(t)}</span>`).join('')}
                     </div>
                 </div>
-            </div>`;
-        }).join('');
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-info" onclick="modelDownloader.showModelDetails('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-info-circle"></i> Details</button>
+                    <button class="btn btn-sm btn-primary" ${btnDisabled} onclick="modelDownloader.showDownloadDialog('${this.escapeHtml(model.repo_id)}')"><i class="fas fa-download"></i> Download</button>
+                </div>
+            </div>
+        </div>`;
     }
 
     async showModelDetails(repoId) {
@@ -3471,13 +3510,32 @@ class ModelDownloaderUI {
                                 <option value="Q5_K_M">Q5_K_M</option>
                                 <option value="Q8_0">Q8_0 (Higher Quality)</option>
                             </select>
-                            <button class="btn btn-primary" onclick="bootstrap.Modal.getInstance(document.getElementById('modelDetailsModal')).hide(); modelDownloader.startDownload('${this.escapeHtml(repoId)}', document.getElementById('detailQuantSelect').value);">
+                            <button class="btn btn-primary" id="detailDownloadBtn" onclick="bootstrap.Modal.getInstance(document.getElementById('modelDetailsModal')).hide(); modelDownloader.startDownload('${this.escapeHtml(repoId)}', document.getElementById('detailQuantSelect').value);">
                                 <i class="fas fa-download"></i> Download
                             </button>
                         </div>
+                        <div id="detailSizeWarning" class="small text-muted mt-2"></div>
                     </div>`;
             } else {
                 content.innerHTML = '<div class="alert alert-warning">Could not load details</div>';
+            }
+
+            // Check if model fits in system
+            if (this.systemInfo && info.gguf_files && info.gguf_files.length > 0) {
+                const maxGb = this.systemInfo.max_model_size_gb;
+                const q4File = info.gguf_files.find(f => {
+                    const name = typeof f === 'string' ? f : f.filename;
+                    return name.toUpperCase().includes('Q4_K_M');
+                });
+                if (q4File) {
+                    const sizeGb = typeof q4File === 'object' ? (q4File.size_gb || 0) : 0;
+                    if (sizeGb > maxGb && sizeGb > 0) {
+                        const warnDiv = document.getElementById('detailSizeWarning');
+                        if (warnDiv) {
+                            warnDiv.innerHTML = `<i class="fas fa-exclamation-triangle text-warning"></i> Q4_K_M is ~${sizeGb} GB — exceeds your ~${maxGb} GB limit. Try a smaller quantization (Q2_K, Q3_K_M).`;
+                        }
+                    }
+                }
             }
         } catch (error) {
             content.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
@@ -3491,6 +3549,19 @@ class ModelDownloaderUI {
             : '';
         const quant = prompt(`Select quantization for ${repoId}:${sizeHint}\n\n1. Q4_K_M (Recommended)\n2. Q5_K_M (Better quality)\n3. Q8_0 (High quality)\n\nEnter choice (default: Q4_K_M):`, 'Q4_K_M');
         if (quant !== null) this.startDownload(repoId, quant.trim() || 'Q4_K_M');
+    }
+
+    async loadSystemInfo() {
+        try {
+            const resp = await fetch(`${this.baseUrl}/models/system-info`, { credentials: 'include' });
+            if (resp.ok) {
+                this.systemInfo = await resp.json();
+                console.log('📊 System info:', this.systemInfo);
+            }
+        } catch (e) {
+            console.debug('System info not available:', e);
+            this.systemInfo = null;
+        }
     }
 
     async startDownload(repoId, quantization = 'Q4_K_M') {
@@ -3698,7 +3769,7 @@ class ModelDownloaderUI {
         }
     }
 
-    show() {
+    async show() {
         const modal = new bootstrap.Modal(document.getElementById('modelManagerModal'));
         modal.show();
         document.getElementById('local-tab').addEventListener('shown.bs.tab', () => this.loadLocalModels());
@@ -3708,6 +3779,7 @@ class ModelDownloaderUI {
                 llamaNetUI.loadPoolStatus();
             }
         });
+        await this.loadSystemInfo();
         this.loadTrendingModels();
         this._initSearchAutocomplete();
     }
