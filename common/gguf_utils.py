@@ -48,7 +48,7 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
     reader = GGUFReader(filepath)
     metadata: Dict[str, Any] = {}
 
-    for field in reader.metadata:
+    for field in reader.fields:
         try:
             data = field.data
 
