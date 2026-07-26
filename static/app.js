@@ -1823,16 +1823,19 @@ class LlamaNetUI {
     updateReasoningForModel(supportsReasoning) {
         const reasoningCb = document.getElementById('enable-reasoning');
         if (!reasoningCb) return;
+        const formCheck = reasoningCb.closest('.form-check');
+        const label = formCheck?.querySelector('.form-check-label');
 
-        // Use authoritative backend data if available, otherwise client-side detection
         if (supportsReasoning) {
             reasoningCb.disabled = false;
             reasoningCb.checked = this.reasoningEnabled;
-            reasoningCb.closest('.form-check')?.setAttribute('title', 'Enable reasoning for this model');
+            if (formCheck) formCheck.setAttribute('title', 'Show step-by-step thinking for this model');
+            if (label) label.innerHTML = '<i class="fas fa-brain"></i> Reasoning';
         } else {
             reasoningCb.disabled = true;
             reasoningCb.checked = false;
-            reasoningCb.closest('.form-check')?.setAttribute('title', 'This model does not support reasoning');
+            if (formCheck) formCheck.setAttribute('title', 'This model does not support reasoning');
+            if (label) label.innerHTML = '<i class="fas fa-brain"></i> Reasoning <small class="text-muted">(N/A)</small>';
         }
     }
 
@@ -2419,7 +2422,17 @@ class LlamaNetUI {
         streamState.bubbleDiv = document.createElement('div');
         streamState.bubbleDiv.className = 'message-bubble';
         streamState.bubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><div class="streaming-text"></div><span class="streaming-cursor">▋</span>';
-        
+
+        // Reasoning phase tracking
+        streamState.reasoningStartTime = null;
+        streamState.reasoningTokenCount = 0;
+        streamState.reasoningPhase = 'none';
+        streamState.reasoningBlockEl = null;
+        streamState.reasoningContentEl = null;
+        streamState.reasoningStatsEl = null;
+        streamState.reasoningHeaderEl = null;
+        streamState.contentBlockEl = null;
+
         streamState.messageDiv.appendChild(streamState.bubbleDiv);
         chatContainer.appendChild(streamState.messageDiv);
         chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -2435,56 +2448,91 @@ class LlamaNetUI {
     }
 
     handleOpenAIToken(data, streamState) {
-        // Handle reasoning content
+        // ── Reasoning content (DOM-efficient: create shell once, update text) ──
         if (data.reasoning_content) {
-            streamState.reasoningText = (streamState.reasoningText || '') + data.reasoning_content;
-            const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
-            if (textContainer) {
-                textContainer.innerHTML = this.renderReasoningBlock(streamState.reasoningText, false);
+            if (!streamState.reasoningStartTime) {
+                streamState.reasoningStartTime = Date.now();
+                streamState.reasoningPhase = 'thinking';
+                this._createReasoningShell(streamState);
             }
-            document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+
+            streamState.reasoningText = (streamState.reasoningText || '') + data.reasoning_content;
+            streamState.reasoningTokenCount++;
+
+            if (streamState.reasoningContentEl) {
+                streamState.reasoningContentEl.textContent = streamState.reasoningText;
+            }
+
+            this._updateReasoningMetrics(streamState);
+
+            document.getElementById('chat-messages').scrollTop =
+                document.getElementById('chat-messages').scrollHeight;
         }
 
-        // Handle regular content
+        // ── Regular content (finalize reasoning on first content token) ──
         if (data.content) {
-            streamState.accumulatedText += data.content;
-            const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
-            if (textContainer) {
-                const renderedContent = this.markdownRenderer.render(streamState.accumulatedText);
-                let html = '';
-                if (streamState.reasoningText) {
-                    html += this.renderReasoningBlock(streamState.reasoningText, false);
-                }
-                html += `<div class="markdown-content streaming-markdown">${renderedContent}</div>`;
-                textContainer.innerHTML = html;
-                this.highlightCodeBlocks(textContainer);
+            if (streamState.reasoningPhase === 'thinking') {
+                this._finalizeReasoningBlock(streamState);
             }
-            document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+
+            streamState.accumulatedText += data.content;
+
+            if (!streamState.contentBlockEl) {
+                const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'markdown-content streaming-markdown';
+                textContainer.appendChild(contentDiv);
+                streamState.contentBlockEl = contentDiv;
+            }
+
+            streamState.contentBlockEl.innerHTML = this.markdownRenderer.render(streamState.accumulatedText);
+            this.highlightCodeBlocks(streamState.contentBlockEl);
+
+            document.getElementById('chat-messages').scrollTop =
+                document.getElementById('chat-messages').scrollHeight;
         }
 
         if (data.id) {
             streamState.responseId = data.id;
         }
 
-        // Capture node info from any chunk that contains it
         if (data.node_info) {
             streamState.nodeInfo = data.node_info;
         }
     }
 
-    renderReasoningBlock(text, expanded = false) {
+    renderReasoningBlock(text, expanded = false, options = {}) {
         const escapedText = this.escapeHtml(text);
         const displayStyle = expanded ? 'block' : 'none';
         const chevronIcon = expanded ? 'fa-chevron-down' : 'fa-chevron-right';
-        return `
-            <div class="reasoning-block">
-                <div class="reasoning-header" onclick="llamaNetUI.toggleReasoningBlock(this)">
-                    <i class="fas ${chevronIcon} reasoning-chevron"></i>
-                    <i class="fas fa-brain"></i> Thinking...
-                </div>
-                <div class="reasoning-content" style="display: ${displayStyle};">${escapedText}</div>
-            </div>
-        `;
+
+        const phase = options.phase || 'complete';
+        const tokenCount = options.tokenCount || 0;
+        const duration = options.duration || 0;
+
+        const stateClass = phase === 'thinking' ? 'reasoning-active' : 'reasoning-complete';
+        const phaseIcon = phase === 'thinking'
+            ? '<span class="reasoning-spinner"></span>'
+            : '<i class="fas fa-check-circle reasoning-phase-icon"></i>';
+        const phaseLabel = phase === 'thinking' ? 'Thinking...' : 'Thought process';
+
+        let statsHtml = '';
+        if (tokenCount > 0 || duration > 0) {
+            const parts = [];
+            if (tokenCount > 0) parts.push(tokenCount + ' tokens');
+            if (duration > 0) parts.push(duration.toFixed(1) + 's');
+            statsHtml = '<span class="reasoning-stats">' + parts.join(' · ') + '</span>';
+        }
+
+        return '<div class="reasoning-block ' + stateClass + '">' +
+            '<div class="reasoning-header" onclick="llamaNetUI.toggleReasoningBlock(this)">' +
+                '<i class="fas ' + chevronIcon + ' reasoning-chevron"></i>' +
+                phaseIcon +
+                '<span class="reasoning-phase-text"> ' + phaseLabel + '</span>' +
+                statsHtml +
+            '</div>' +
+            '<div class="reasoning-content" style="display: ' + displayStyle + ';">' + escapedText + '</div>' +
+        '</div>';
     }
 
     toggleReasoningBlock(headerEl) {
@@ -2501,7 +2549,85 @@ class LlamaNetUI {
         }
     }
 
+    _createReasoningShell(streamState) {
+        const textContainer = streamState.bubbleDiv.querySelector('.streaming-text');
+
+        const block = document.createElement('div');
+        block.className = 'reasoning-block reasoning-active';
+
+        const header = document.createElement('div');
+        header.className = 'reasoning-header';
+        header.onclick = () => this.toggleReasoningBlock(header);
+
+        const chevron = document.createElement('i');
+        chevron.className = 'fas fa-chevron-right reasoning-chevron';
+
+        const spinner = document.createElement('span');
+        spinner.className = 'reasoning-spinner';
+
+        const phaseText = document.createElement('span');
+        phaseText.className = 'reasoning-phase-text';
+        phaseText.textContent = ' Thinking...';
+
+        const stats = document.createElement('span');
+        stats.className = 'reasoning-stats';
+
+        header.appendChild(chevron);
+        header.appendChild(spinner);
+        header.appendChild(phaseText);
+        header.appendChild(stats);
+
+        const content = document.createElement('div');
+        content.className = 'reasoning-content';
+        content.style.display = 'none';
+
+        block.appendChild(header);
+        block.appendChild(content);
+        textContainer.appendChild(block);
+
+        streamState.reasoningBlockEl = block;
+        streamState.reasoningContentEl = content;
+        streamState.reasoningStatsEl = stats;
+        streamState.reasoningHeaderEl = header;
+    }
+
+    _updateReasoningMetrics(streamState) {
+        if (!streamState.reasoningStatsEl || !streamState.reasoningStartTime) return;
+        const elapsed = ((Date.now() - streamState.reasoningStartTime) / 1000).toFixed(1);
+        streamState.reasoningStatsEl.textContent = streamState.reasoningTokenCount + ' tokens · ' + elapsed + 's';
+    }
+
+    _finalizeReasoningBlock(streamState) {
+        streamState.reasoningPhase = 'complete';
+
+        if (streamState.reasoningBlockEl) {
+            streamState.reasoningBlockEl.classList.remove('reasoning-active');
+            streamState.reasoningBlockEl.classList.add('reasoning-complete');
+        }
+
+        if (streamState.reasoningHeaderEl) {
+            const spinner = streamState.reasoningHeaderEl.querySelector('.reasoning-spinner');
+            if (spinner) {
+                const checkIcon = document.createElement('i');
+                checkIcon.className = 'fas fa-check-circle reasoning-phase-icon';
+                spinner.replaceWith(checkIcon);
+            }
+
+            const phaseText = streamState.reasoningHeaderEl.querySelector('.reasoning-phase-text');
+            if (phaseText) {
+                phaseText.textContent = ' Thought process';
+            }
+        }
+
+        this._updateReasoningMetrics(streamState);
+    }
+
     handleOpenAIComplete(streamState, resolve) {
+        // Finalize reasoning block if model stopped mid-thought
+        if (streamState.reasoningPhase === 'thinking') {
+            this._finalizeReasoningBlock(streamState);
+        }
+
         // Remove streaming cursor
         const cursor = streamState.bubbleDiv.querySelector('.streaming-cursor');
         if (cursor) {
@@ -2732,7 +2858,9 @@ class LlamaNetUI {
             renderedContent = this.markdownRenderer.render(content);
             let reasoningHtml = '';
             if (metadata && metadata.reasoning) {
-                reasoningHtml = this.renderReasoningBlock(metadata.reasoning, false);
+                reasoningHtml = this.renderReasoningBlock(metadata.reasoning, false, {
+                    phase: 'complete'
+                });
             }
             messageDiv.innerHTML = `
                 <div class="message-bubble">
