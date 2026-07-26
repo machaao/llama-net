@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa)](https://github.com/sponsors/machaao)
 
-# LlamaNet
+# LlamaNet - Powered by Llama.cpp
 
 **Turn your idle Mac or GPU into a free public AI API.**
 
