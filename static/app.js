@@ -2560,7 +2560,7 @@ class LlamaNetUI {
         header.onclick = () => this.toggleReasoningBlock(header);
 
         const chevron = document.createElement('i');
-        chevron.className = 'fas fa-chevron-right reasoning-chevron';
+        chevron.className = 'fas fa-chevron-down reasoning-chevron';
 
         const spinner = document.createElement('span');
         spinner.className = 'reasoning-spinner';
@@ -2579,7 +2579,7 @@ class LlamaNetUI {
 
         const content = document.createElement('div');
         content.className = 'reasoning-content';
-        content.style.display = 'none';
+        content.style.display = 'block';
 
         block.appendChild(header);
         block.appendChild(content);
@@ -2620,6 +2620,17 @@ class LlamaNetUI {
         }
 
         this._updateReasoningMetrics(streamState);
+
+        // Collapse the content area and update chevron
+        if (streamState.reasoningContentEl) {
+            streamState.reasoningContentEl.style.display = 'none';
+        }
+        if (streamState.reasoningHeaderEl) {
+            const chevron = streamState.reasoningHeaderEl.querySelector('.reasoning-chevron');
+            if (chevron) {
+                chevron.className = 'fas fa-chevron-right reasoning-chevron';
+            }
+        }
     }
 
     handleOpenAIComplete(streamState, resolve) {
