@@ -3776,7 +3776,7 @@ class ModelDownloaderUI {
                     download_id: downloadId,
                     repo_id: repoId,
                     quantization: quantization,
-                    status: 'pending',
+                    status: 'queued',
                     percent: 0,
                     bytes_downloaded: 0,
                     total_bytes: 0,
@@ -3843,6 +3843,7 @@ class ModelDownloaderUI {
             const percent = dl.percent || 0;
             const isTerminal = ['completed', 'failed', 'cancelled'].includes(dl.status);
             const progressClass = dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : '';
+            const statusLabel = dl.status === 'queued' ? 'queued, waiting' : dl.status;
             const etaDisplay = dl.eta_formatted && !isTerminal
                 ? ` &bull; ETA: ${dl.eta_formatted}`
                 : '';
@@ -3852,7 +3853,7 @@ class ModelDownloaderUI {
                         <div>
                             <strong><i class="fas fa-file-archive"></i> ${this.escapeHtml(dl.repo_id || id)}</strong>
                             <span class="badge bg-secondary ms-2">${this.escapeHtml(dl.quantization || '')}</span>
-                            <span class="badge ${dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : 'bg-primary'} ms-1">${dl.status}</span>
+                            <span class="badge ${dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : 'bg-primary'} ms-1">${statusLabel}</span>
                         </div>
                         ${!isTerminal ? `<button class="btn btn-sm btn-outline-danger" onclick="modelDownloader.cancelDownload('${id}')"><i class="fas fa-times"></i> Cancel</button>` : ''}
                     </div>
