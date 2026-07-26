@@ -198,7 +198,7 @@ def calculate_optimal_context(
         specs = get_system_specs()
 
         # Get raw available memory (VRAM if present, else RAM)
-        raw_available = specs.get("available_vram_gb", 0) or specs.get("available_ram_gb", 0)
+        raw_available = (specs.get("available_vram_gb", 0) or specs.get("available_ram_gb", 0)) / 2
 
         ctx = get_model_context_length(
             model_path,
