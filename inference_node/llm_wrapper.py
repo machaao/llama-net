@@ -347,23 +347,28 @@ class LlamaWrapper:
         return adapted
     
     def _separate_reasoning_and_content(self, text: str) -> tuple[str, str]:
-        """Separate reasoning content from final response"""
+        """Separate reasoning content from final response.
+
+        Handles two marker patterns:
+          1. gpt-oss style: reasoning ... <|channel|>final<|message|> content
+          2. generic style: reasoning ... <|message|> content
+        """
         if not self.supports_reasoning:
             return "", text
-        
-        # Look for the message marker that separates reasoning from final content
-        if "<|message|>" in text:
-            parts = text.split("<|message|>", 1)
-            reasoning_part = parts[0].strip()
-            content_part = parts[1].strip() if len(parts) > 1 else ""
-            
-            # Clean up reasoning part - remove special tokens
-            reasoning_part = self._clean_reasoning_content(reasoning_part)
-            
-            return reasoning_part, content_part
-        else:
-            # If no marker found, treat everything as content for now
-            return "", text
+
+        # Try gpt-oss pattern first: <|channel|>final<|message|>
+        # Also handles cases where markers may have been partially stripped
+        for boundary in ("<|channel|>final<|message|>", "<|channel|>final",
+                         "<|message|>"):
+            if boundary in text:
+                parts = text.split(boundary, 1)
+                reasoning_part = parts[0].strip()
+                content_part = parts[1].strip() if len(parts) > 1 else ""
+                reasoning_part = self._clean_reasoning_content(reasoning_part)
+                return reasoning_part, content_part
+
+        # No marker found — treat everything as content
+        return "", text
     
     def _clean_reasoning_content(self, reasoning_text: str) -> str:
         """Clean up reasoning content by removing special tokens"""
@@ -382,6 +387,7 @@ class LlamaWrapper:
         # Remove other special tokens
         tokens_to_remove = [
             "<|start|>", "<|end|>", "<|message|>",
+            "<|channel|>final", "<|channel|>analysis",
             "assistantfinal", "assistant", "final"
         ]
         for token in tokens_to_remove:
@@ -658,7 +664,8 @@ class LlamaWrapper:
             cleaned = re.sub(r'</?\|?channel\|?>', '', cleaned)
             cleaned = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', cleaned)
             cleaned = re.sub(r'<[a-zA-Z_]+\|>', '', cleaned)
-            for token in ["<|start|>", "<|end|>", "<|message|>"]:
+            for token in ["<|start|>", "<|end|>", "<|message|>",
+                          "<|channel|>final", "<|channel|>analysis"]:
                 cleaned = cleaned.replace(token, "")
             return cleaned
 
@@ -681,9 +688,18 @@ class LlamaWrapper:
 
                         # Detect reasoning→content transition via <|message|> boundary
                         if in_reasoning_phase and self.supports_reasoning and reasoning:
-                            if "<|message|>" in accumulated_text:
+                            # Detect gpt-oss (<|channel|>final<|message|>) or generic (<|message|>) boundary
+                            boundary = None
+                            if "<|channel|>final<|message|>" in accumulated_text:
+                                boundary = "<|channel|>final<|message|>"
+                            elif "<|channel|>final" in accumulated_text:
+                                boundary = "<|channel|>final"
+                            elif "<|message|>" in accumulated_text:
+                                boundary = "<|message|>"
+
+                            if boundary:
                                 # Split at the marker boundary
-                                parts = accumulated_text.split("<|message|>", 1)
+                                parts = accumulated_text.split(boundary, 1)
                                 reasoning_text = parts[0]
                                 remaining = parts[1] if len(parts) > 1 else ""
 
