@@ -3804,6 +3804,14 @@ class ModelDownloaderUI {
         const eventSource = new EventSource(`${this.baseUrl}/models/download/status?download_id=${downloadId}`);
         this.downloadEventSources.set(downloadId, eventSource);
 
+        eventSource.onopen = () => {
+            // SSE connected — if still queued, re-render to confirm connection is live
+            const dl = this.activeDownloads.get(downloadId);
+            if (dl && (dl.status === 'queued' || dl.status === 'pending')) {
+                this.renderDownloads();
+            }
+        };
+
         eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
@@ -3842,13 +3850,18 @@ class ModelDownloaderUI {
         container.innerHTML = Array.from(this.activeDownloads.entries()).map(([id, dl]) => {
             const percent = dl.percent || 0;
             const isTerminal = ['completed', 'failed', 'cancelled'].includes(dl.status);
+            const isQueued = dl.status === 'queued' || dl.status === 'pending';
             const progressClass = dl.status === 'completed' ? 'bg-success' : dl.status === 'failed' ? 'bg-danger' : '';
-            const statusLabel = dl.status === 'queued' ? 'queued, waiting' : dl.status;
+            const statusLabel = isQueued ? 'queued, waiting' : dl.status;
+            const itemClass = isQueued ? 'download-item status-queued' : 'download-item';
             const etaDisplay = dl.eta_formatted && !isTerminal
                 ? ` &bull; ETA: ${dl.eta_formatted}`
                 : '';
+            const subtitleText = isQueued
+                ? '<i class="fas fa-spinner fa-spin me-1"></i> Preparing download...'
+                : `${this.formatBytes(dl.bytes_downloaded || 0)} / ${this.formatBytes(dl.total_bytes || 0)}${!isTerminal ? ` &bull; ${this.formatBytes(dl.speed || 0)}/s` : ''}${etaDisplay}${dl.error ? ` <span class="text-danger">&bull; ${this.escapeHtml(dl.error)}</span>` : ''}`;
             return `
-                <div class="download-item border rounded p-3 mb-2">
+                <div class="${itemClass} border rounded p-3 mb-2" data-download-id="${id}">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <div>
                             <strong><i class="fas fa-file-archive"></i> ${this.escapeHtml(dl.repo_id || id)}</strong>
@@ -3858,13 +3871,10 @@ class ModelDownloaderUI {
                         ${!isTerminal ? `<button class="btn btn-sm btn-outline-danger" onclick="modelDownloader.cancelDownload('${id}')"><i class="fas fa-times"></i> Cancel</button>` : ''}
                     </div>
                     <div class="progress mb-1" style="height: 20px;">
-                        <div class="progress-bar progress-bar-striped ${!isTerminal ? 'progress-bar-animated' : ''} ${progressClass}" role="progressbar" style="width: ${percent}%">${percent}%</div>
+                        <div class="progress-bar progress-bar-striped ${!isTerminal ? 'progress-bar-animated' : ''} ${progressClass}" role="progressbar" style="width: ${percent}%">${percent > 0 ? percent + '%' : ''}</div>
                     </div>
-                    <div class="small text-muted">
-                        ${this.formatBytes(dl.bytes_downloaded || 0)} / ${this.formatBytes(dl.total_bytes || 0)}
-                        ${!isTerminal ? ` &bull; ${this.formatBytes(dl.speed || 0)}/s` : ''}
-                        ${etaDisplay}
-                        ${dl.error ? ` <span class="text-danger">&bull; ${this.escapeHtml(dl.error)}</span>` : ''}
+                    <div class="small text-muted download-status-text">
+                        ${subtitleText}
                     </div>
                 </div>`;
         }).join('');

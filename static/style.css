@@ -1287,6 +1287,49 @@ pre {
     color: white;
 }
 
+/* ═══════════════════════════════════════════════════════ */
+/* DOWNLOAD PROGRESS SMOOTHNESS                           */
+/* ═══════════════════════════════════════════════════════ */
+
+.download-item {
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease;
+}
+
+.download-item.status-queued {
+    border-left: 3px solid var(--primary-color);
+}
+
+.download-item.status-queued .progress-bar {
+    animation: downloadPreparing 1.5s ease-in-out infinite;
+}
+
+@keyframes downloadPreparing {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.download-item .progress {
+    transition: all 0.3s ease;
+}
+
+.download-item .badge {
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.download-status-text {
+    transition: opacity 0.2s ease;
+}
+
+.download-item.status-transitioning {
+    animation: downloadStateFlash 0.4s ease;
+}
+
+@keyframes downloadStateFlash {
+    0% { background-color: transparent; }
+    50% { background-color: rgba(13, 110, 253, 0.05); }
+    100% { background-color: transparent; }
+}
+
 /* Autocomplete dropdown */
 .autocomplete-dropdown {
     position: absolute;
