@@ -2421,7 +2421,7 @@ class LlamaNetUI {
         
         streamState.bubbleDiv = document.createElement('div');
         streamState.bubbleDiv.className = 'message-bubble';
-        streamState.bubbleDiv.innerHTML = '<i class="fas fa-robot me-2"></i><div class="streaming-text"></div><span class="streaming-cursor">▋</span>';
+        streamState.bubbleDiv.innerHTML = '<div class="streaming-text"></div><span class="streaming-cursor">▋</span>';
 
         // Reasoning phase tracking
         streamState.reasoningStartTime = null;
@@ -2875,7 +2875,6 @@ class LlamaNetUI {
             }
             messageDiv.innerHTML = `
                 <div class="message-bubble">
-                    <i class="${roleIcon} me-2"></i>
                     ${reasoningHtml}
                     <div class="markdown-content">${renderedContent}</div>
                 </div>

@@ -1664,3 +1664,75 @@ pre {
     max-height: 300px;
     overflow-y: auto;
 }
+
+/* Reasoning active/thinking state */
+.reasoning-block.reasoning-active {
+    border-color: rgba(13, 110, 253, 0.4);
+    box-shadow: 0 0 8px rgba(13, 110, 253, 0.1);
+    animation: reasoningPulse 2s ease-in-out infinite;
+}
+
+@keyframes reasoningPulse {
+    0%, 100% { border-color: rgba(13, 110, 253, 0.4); }
+    50% { border-color: rgba(13, 110, 253, 0.15); }
+}
+
+/* Reasoning complete state */
+.reasoning-block.reasoning-complete {
+    border-color: rgba(25, 135, 84, 0.3);
+    background-color: rgba(25, 135, 84, 0.03);
+}
+
+.reasoning-block.reasoning-complete .reasoning-header {
+    color: var(--success-color);
+}
+
+.reasoning-block.reasoning-complete .reasoning-header:hover {
+    background-color: rgba(25, 135, 84, 0.06);
+}
+
+/* Inline spinner for active thinking */
+.reasoning-spinner {
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    border: 2px solid rgba(13, 110, 253, 0.3);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 0.35rem;
+    vertical-align: middle;
+}
+
+/* Phase icon (checkmark when complete) */
+.reasoning-phase-icon {
+    margin-right: 0.35rem;
+    font-size: 0.75rem;
+}
+
+.reasoning-active .reasoning-phase-icon {
+    color: var(--primary-color);
+}
+
+.reasoning-complete .reasoning-phase-icon {
+    color: var(--success-color);
+}
+
+/* Phase text label */
+.reasoning-phase-text {
+    font-size: 0.8rem;
+}
+
+/* Stats in header (token count, duration) */
+.reasoning-stats {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--secondary-color);
+    margin-left: auto;
+    white-space: nowrap;
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+}
+
+.reasoning-complete .reasoning-stats {
+    color: rgba(25, 135, 84, 0.8);
+}
