@@ -221,6 +221,46 @@ async def lifespan(app: FastAPI):
             system_info = SystemInfo.get_all_info()
             sse_manager = UnifiedSSEManager(f"http://{config.host}:{config.port}")
             await sse_manager.start()
+
+            # Create empty model pool so pool status/management endpoints work
+            # even before any model is loaded. Prevents /models/pool returning
+            # "Pool not available" and avoids fragile lazy-init in /models/select.
+            async def _on_pool_model_change(event_type: str, changed_model: str):
+                logger.info(f"📢 Pool event: {event_type} → {changed_model}")
+                _sync_server_pool_state()
+                if gateway_client:
+                    asyncio.create_task(gateway_client.send_event("node_updated"))
+                if sse_manager:
+                    try:
+                        pool_info = model_pool.get_network_info()
+                        node_info = {
+                            "node_id": config.node_id,
+                            "url": _get_own_url(),
+                            "model": config.model_name,
+                            "no_model_mode": config.no_model_mode,
+                            "pool": pool_info,
+                        }
+                        if llm:
+                            try:
+                                metrics = llm.get_metrics()
+                                node_info["load"] = metrics.get("load", 0)
+                                node_info["tps"] = metrics.get("tps", 0)
+                            except Exception:
+                                pass
+                        await sse_manager.broadcast_event("node_updated", {
+                            "node_info": node_info,
+                            "event_type": event_type,
+                            "model_name": changed_model,
+                            "pool_empty": len(model_pool) == 0,
+                            "timestamp": time.time(),
+                            "source": "pool_change",
+                        })
+                    except Exception as e:
+                        logger.debug(f"SSE broadcast failed: {e}")
+
+            from inference_node.model_pool import ModelPool
+            model_pool = ModelPool(config, on_model_change=_on_pool_model_change)
+            logger.info(f"Empty model pool created: max_models={model_pool.max_models}")
         else:
             llm = LlamaWrapper(config)
             system_info = SystemInfo.get_all_info()
@@ -2093,46 +2133,6 @@ async def select_model(request: Request):
             raise HTTPException(status_code=404, detail=f"Model file not found: {model_path}")
 
         model_name = os.path.basename(model_path)
-
-        # Lazily create model pool on first model load (no-model mode startup)
-        if model_pool is None and load_mode == "pool":
-            from inference_node.model_pool import ModelPool as _MP
-
-            async def _on_pool_model_change(event_type: str, changed_model: str):
-                logger.info(f"📢 Pool event: {event_type} → {changed_model}")
-                _sync_server_pool_state()
-                if gateway_client:
-                    asyncio.create_task(gateway_client.send_event("node_updated"))
-                if sse_manager:
-                    try:
-                        pool_info = model_pool.get_network_info()
-                        node_info = {
-                            "node_id": config.node_id,
-                            "url": _get_own_url(),
-                            "model": config.model_name,
-                            "no_model_mode": config.no_model_mode,
-                            "pool": pool_info,
-                        }
-                        if llm:
-                            try:
-                                metrics = llm.get_metrics()
-                                node_info["load"] = metrics.get("load", 0)
-                                node_info["tps"] = metrics.get("tps", 0)
-                            except Exception:
-                                pass
-                        await sse_manager.broadcast_event("node_updated", {
-                            "node_info": node_info,
-                            "event_type": event_type,
-                            "model_name": changed_model,
-                            "pool_empty": len(model_pool) == 0,
-                            "timestamp": time.time(),
-                            "source": "pool_change",
-                        })
-                    except Exception as e:
-                        logger.debug(f"SSE broadcast failed: {e}")
-
-            model_pool = _MP(config, on_model_change=_on_pool_model_change)
-            logger.info("✅ Model pool created (lazy init in select_model)")
 
         # ── Pool mode: instant switch or load with LRU eviction ──
         if model_pool and load_mode == "pool":
