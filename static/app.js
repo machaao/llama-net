@@ -3769,8 +3769,26 @@ class ModelDownloaderUI {
             const data = await response.json();
             if (data.success && data.data) {
                 this.showToast('success', `Download started: ${repoId}:${quantization}`);
+
+                // Immediately add a placeholder entry so the downloads tab isn't empty
+                const downloadId = data.data.download_id;
+                this.activeDownloads.set(downloadId, {
+                    download_id: downloadId,
+                    repo_id: repoId,
+                    quantization: quantization,
+                    status: 'pending',
+                    percent: 0,
+                    bytes_downloaded: 0,
+                    total_bytes: 0,
+                    speed: 0,
+                });
+
+                // Switch to downloads tab and render immediately
                 document.getElementById('downloads-tab').click();
-                this.trackDownloadProgress(data.data.download_id);
+                this.renderDownloads();
+
+                // Now start tracking real progress via SSE
+                this.trackDownloadProgress(downloadId);
             } else {
                 this.showToast('error', `Failed: ${data.message || 'Unknown error'}`);
             }
