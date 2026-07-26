@@ -180,11 +180,12 @@ def calculate_optimal_context(
 ) -> Tuple[int, bool]:
     """Calculate optimal context size for a model.
 
-    Flow:
-        1. Read model's native context from GGUF metadata
-        2. Apply Ollama's VRAM-tier cap (<24G→4k, 24-48G→32k, >48G→256k)
-        3. Memory-aware clamp: reduce if model weights + KV cache exceeds budget
-        4. Final fallback: 4096
+    Delegates to get_model_context_length() which handles:
+      - GGUF metadata reading
+      - Memory-aware budgeting
+      - Concurrency-aware allocation
+      - System responsiveness reservation
+      - Power-of-two alignment
 
     Returns:
         ``(n_ctx, auto_detected)`` — the context size and whether it was auto-detected.
@@ -194,84 +195,26 @@ def calculate_optimal_context(
         return 4096, False
 
     try:
-        # 1. Read native context from GGUF
-        native_ctx = get_model_context_length(model_path)
-        if not native_ctx or native_ctx <= 0:
-            logger.info(
-                f"No context_length in GGUF for {os.path.basename(model_path)}, "
-                f"using VRAM defaults"
-            )
-            return get_vram_context_cap(), False
-
-        # 2. Architecture info for KV estimation
-        arch_info = get_model_architecture_info(model_path)
-        n_layers = arch_info.get("n_layers", 32)
-        n_embd = arch_info.get("n_embd", 4096)
-        n_head = arch_info.get("n_head", 32)
-        n_kv_heads = arch_info.get("n_kv_heads", 0)
-
-        # 3. Calculate model size early (needed for VRAM cap)
-        try:
-            model_gb = os.path.getsize(model_path) / (1024 ** 3)
-        except OSError:
-            model_gb = 5.0
-
-        # 4. VRAM tier cap — now model-size-aware and concurrency-aware
-        vram_cap = get_vram_context_cap(
-            model_size_gb=model_gb,
-            max_concurrent=max_concurrent,
-        )
-        effective_ctx = min(native_ctx, vram_cap)
-
-        # 5. Memory-aware clamp
         specs = get_system_specs()
-        usable_gb = specs["usable_memory_gb"]
 
-        compute_buf = estimate_compute_buffer_gb(model_gb)
+        # Get raw available memory (VRAM if present, else RAM)
+        raw_available = specs.get("available_vram_gb", 0) or specs.get("available_ram_gb", 0)
 
-        kv_gb = estimate_kv_cache_gb(
-            n_layers=n_layers,
-            n_embd=n_embd,
-            n_ctx=effective_ctx,
-            cache_type=cache_type_k,
-            n_head=n_head,
-            n_kv_heads=n_kv_heads,
+        ctx = get_model_context_length(
+            model_path,
+            total_memory_gb=raw_available if raw_available > 0 else None,
+            concurrent_models=max_concurrent,
+            keep_system_responsive=True,
         )
 
-        total_needed = model_gb + kv_gb + compute_buf
-
-        if total_needed <= usable_gb:
+        if ctx is not None and ctx > 0:
             logger.info(
-                f"✅ Auto-detected context: {effective_ctx} tokens "
-                f"(native={native_ctx}, VRAM cap={vram_cap}, "
-                f"KV: {kv_gb:.1f} GB, compute: {compute_buf:.1f} GB, "
-                f"total: {total_needed:.1f}/{usable_gb:.1f} GB)"
+                f"✅ Context optimizer: {ctx} tokens "
+                f"(memory={raw_available:.1f} GB, concurrent={max_concurrent})"
             )
-            return effective_ctx, True
+            return ctx, True
 
-        # Clamp to fit memory
-        if n_layers > 0 and n_embd > 0:
-            bytes_per_elem = {
-                "f16": 2.0, "q8_0": 1.0, "q4_0": 0.5625,
-            }.get(cache_type_k, 2.0)
-            head_dim = n_embd // n_head if n_head > 0 else 128
-            effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
-            budget_gb = usable_gb - model_gb - compute_buf
-            max_ctx = int(
-                (budget_gb * (1024 ** 3))
-                / (2 * n_layers * head_dim * effective_heads * bytes_per_elem)
-            )
-            clamped = 1
-            while clamped * 2 <= max_ctx:
-                clamped *= 2
-            clamped = max(4096, min(clamped, effective_ctx))
-            logger.warning(
-                f"⚠️ Context {effective_ctx} requires {total_needed:.1f} GB "
-                f"but only {usable_gb:.1f} GB usable. Clamped to {clamped} tokens."
-            )
-            return clamped, True
-
-        logger.warning("Could not estimate memory for clamping, using 4096")
+        logger.warning("Context auto-detection returned no result, using 4096")
         return 4096, False
 
     except Exception as e:

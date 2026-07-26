@@ -92,27 +92,118 @@ def _read_metadata(filepath: str) -> Dict[str, Any]:
     return metadata
 
 
-def get_model_context_length(filepath: str) -> Optional[int]:
-    """Get the model's trained context length from GGUF metadata."""
+def get_model_context_length(
+    filepath: str,
+    total_memory_gb: Optional[float] = None,
+    concurrent_models: int = 1,
+    keep_system_responsive: bool = True,
+) -> Optional[int]:
+    """Get a safe runtime context length for a model, accounting for memory constraints.
+
+    Reads the model's native context from GGUF metadata, then optionally clamps
+    it to fit within the available memory budget while reserving room for model
+    weights, compute buffers, and concurrent model instances.
+
+    Args:
+        filepath: Path to the GGUF model file.
+        total_memory_gb: Total available memory in GB (RAM or VRAM).
+            If None, returns the model's native context without memory clamping.
+        concurrent_models: Number of models that will share the memory budget.
+        keep_system_responsive: Whether to reserve 15 % for OS / driver overhead.
+
+    Returns:
+        Optimal context length in tokens, or None if metadata cannot be read.
+    """
     try:
         meta = _read_metadata(filepath)
-
         arch = meta.get("general.architecture")
-        ctx = meta.get("general.context_length")
 
-        # Fallback: architecture-specific key
-        if ctx is None and arch:
+        # ── 1. Read native context length from GGUF metadata ──
+        native_ctx = meta.get("general.context_length")
+        if native_ctx is None and arch:
             prefix = get_arch_prefix(str(arch))
-            ctx = meta.get(f"{prefix}.context_length")
+            native_ctx = meta.get(f"{prefix}.context_length")
 
-        if ctx is not None:
-            ctx = int(ctx)
-            if ctx > 0:
-                logger.info(f"GGUF context_length: {ctx} (arch: {arch})")
-                return ctx
+        if native_ctx is None or int(native_ctx) <= 0:
+            logger.debug("No context_length found in GGUF metadata")
+            return None
 
-        logger.debug("No context_length found in GGUF metadata")
-        return None
+        native_ctx = int(native_ctx)
+
+        # No memory constraint → return native context as-is
+        if total_memory_gb is None or total_memory_gb <= 0:
+            logger.info(f"GGUF context_length: {native_ctx} (arch: {arch}, no memory constraint)")
+            return native_ctx
+
+        # ── 2. Architecture info for KV cache estimation ──
+        arch_info = get_model_architecture_info(filepath)
+        n_layers = arch_info.get("n_layers", 32)
+        n_embd = arch_info.get("n_embd", 4096)
+        n_head = arch_info.get("n_head", 32)
+        n_kv_heads = arch_info.get("n_kv_heads", 0)
+
+        # ── 3. Model file size ──
+        try:
+            model_size_gb = os.path.getsize(filepath) / (1024 ** 3)
+        except OSError:
+            model_size_gb = 5.0
+
+        # ── 4. Memory budget ──
+        if keep_system_responsive:
+            usable_memory = total_memory_gb * 0.85   # 15 % for OS / driver overhead
+        else:
+            usable_memory = total_memory_gb * 0.95
+
+        per_model_memory = usable_memory / max(concurrent_models, 1)
+
+        # ── 5. Compute buffer (scales linearly, capped at 2.7 GB) ──
+        compute_buf_gb = max(0.3, min(2.7, 0.3 + 0.2 * model_size_gb))
+
+        # ── 6. KV cache budget ──
+        kv_budget_gb = per_model_memory - model_size_gb - compute_buf_gb
+
+        if kv_budget_gb <= 0:
+            logger.warning(
+                f"Model ({model_size_gb:.1f} GB) + compute ({compute_buf_gb:.1f} GB) "
+                f"exceeds per-model budget ({per_model_memory:.1f} GB) — using minimal context"
+            )
+            return 4096
+
+        # ── 7. Max tokens from KV budget ──
+        # Conservative: assume f16 KV cache
+        bytes_per_elem = KV_CACHE_BYTES_PER_ELEMENT.get("f16", 2.0)
+        head_dim = n_embd // n_head if n_head > 0 else 128
+        effective_heads = n_kv_heads if n_kv_heads > 0 else n_head
+        kv_dim = effective_heads * head_dim
+
+        # KV cache formula: 2 (K + V) × layers × tokens × dim × bytes
+        max_ctx_from_memory = int(
+            (kv_budget_gb * (1024 ** 3))
+            / (2 * max(n_layers, 1) * max(kv_dim, 1) * bytes_per_elem)
+        )
+
+        # ── 8. Clamp to native or memory limit ──
+        effective_ctx = min(native_ctx, max_ctx_from_memory)
+
+        # ── 9. Snap down to nearest standard power-of-two ──
+        standard_sizes = [262144, 131072, 65536, 32768, 16384, 8192, 4096, 2048]
+        for size in standard_sizes:
+            if size <= effective_ctx:
+                effective_ctx = size
+                break
+        else:
+            effective_ctx = 2048
+
+        effective_ctx = max(2048, effective_ctx)
+
+        logger.info(
+            f"Context length: {effective_ctx} tokens "
+            f"(native={native_ctx}, memory={total_memory_gb:.1f} GB, "
+            f"concurrent={concurrent_models}, model={model_size_gb:.1f} GB, "
+            f"kv_budget={kv_budget_gb:.1f} GB)"
+        )
+
+        return effective_ctx
 
     except Exception as e:
         logger.warning(f"Could not read context length from {filepath}: {e}")
