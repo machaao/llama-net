@@ -250,7 +250,9 @@ export PYTHONWARNINGS="ignore:semaphore:UserWarning:multiprocessing.resource_tra
 export PYTHONDONTWRITEBYTECODE=1
 
 # Validate model file exists (or enter no-model mode)
-if [ -z "$DEFAULT_MODEL_PATH" ] || [ ! -f "$DEFAULT_MODEL_PATH" ]; then
+if [ -n "$HF_URL" ]; then
+    echo "📦 Model will be downloaded: $HF_URL"
+elif [ -z "$DEFAULT_MODEL_PATH" ] || [ ! -f "$DEFAULT_MODEL_PATH" ]; then
     echo "🌐 Starting in no-model mode — download a model via Web UI"
     DEFAULT_MODEL_PATH=""
 else
@@ -532,7 +534,7 @@ cleanup() {
 }
 
 # Set up signal traps - only trap in shell script, not in Python
-trap cleanup SIGINT SIGTERM
+trap cleanup INT TERM
 
 # Build command line arguments
 if [ -n "$DEFAULT_MODEL_PATH" ]; then
@@ -557,7 +559,9 @@ if [ -n "$DEFAULT_BOOTSTRAP_PEERS" ]; then
 fi
 
 echo "🔧 Configuration:"
-if [ -n "$DEFAULT_MODEL_PATH" ]; then
+if [ -n "$HF_URL" ]; then
+    echo "   Model: $HF_URL (will download)"
+elif [ -n "$DEFAULT_MODEL_PATH" ]; then
     echo "   Model: $DEFAULT_MODEL_PATH"
 else
     echo "   Model: (none - download via Web UI)"
@@ -578,7 +582,11 @@ echo "   - POST /v1/completions"
 echo "   - POST /v1/chat/completions"
 
 # Start the server in background for health check
-$PYTHON_CMD -m inference_node.server $ARGS &
+if [ -n "$HF_URL" ]; then
+    $PYTHON_CMD -m inference_node.server run "$HF_URL" $ARGS &
+else
+    $PYTHON_CMD -m inference_node.server $ARGS &
+fi
 SERVER_PID=$!
 
 # Wait for service to be ready
