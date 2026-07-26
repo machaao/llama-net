@@ -18,7 +18,7 @@ setup(
     author_email="example@example.com",
     description="Decentralized Inference Swarm for llama.cpp",
     keywords="llm, inference, decentralized",
-    url="https://github.com/yourusername/llamanet",
+    url="https://github.com/machaao/llamanet",
     license="Apache-2.0",
     classifiers=[
         "Development Status :: 3 - Alpha",

@@ -37,8 +37,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/llamanet"
-Repository = "https://github.com/yourusername/llamanet"
+Homepage = "https://github.com/machaao/llamanet"
+Repository = "https://github.com/machaao/llamanet"
 
 [project.scripts]
 llamanet = "inference_node.server:start_server"
