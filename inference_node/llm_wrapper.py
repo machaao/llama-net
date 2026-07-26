@@ -700,21 +700,9 @@ class LlamaWrapper:
                             if boundary:
                                 # Split at the marker boundary
                                 parts = accumulated_text.split(boundary, 1)
-                                reasoning_text = parts[0]
                                 remaining = parts[1] if len(parts) > 1 else ""
 
-                                # Yield cleaned reasoning
-                                cleaned_reasoning = self._clean_reasoning_content(reasoning_text)
-                                if cleaned_reasoning:
-                                    yield {
-                                        "reasoning_content": cleaned_reasoning,
-                                        "tokens_generated": total_tokens,
-                                        "generation_time": time.time() - start_time,
-                                        "finished": False,
-                                        "reasoning_phase": True
-                                    }
-
-                                # Switch to content phase
+                                # Switch to content phase (reasoning already streamed)
                                 in_reasoning_phase = False
 
                                 # Yield any content after the marker
@@ -731,8 +719,17 @@ class LlamaWrapper:
                                         "reasoning_phase": False
                                     }
                             else:
-                                # Still in reasoning phase — accumulate silently
+                                # Still in reasoning phase — accumulate and stream
                                 reasoning_buffer += content
+                                cleaned_delta = _strip_markers(content)
+                                if cleaned_delta.strip():
+                                    yield {
+                                        "reasoning_content": cleaned_delta,
+                                        "tokens_generated": total_tokens,
+                                        "generation_time": time.time() - start_time,
+                                        "finished": False,
+                                        "reasoning_phase": True
+                                    }
 
                         elif not in_reasoning_phase:
                             # Content phase — strip markers and yield
@@ -765,17 +762,7 @@ class LlamaWrapper:
                                 }
 
                         if choice.get('finish_reason') is not None:
-                            # Handle end-of-stream for reasoning models
-                            if in_reasoning_phase and self.supports_reasoning and reasoning and reasoning_buffer:
-                                cleaned_reasoning = self._clean_reasoning_content(reasoning_buffer)
-                                if cleaned_reasoning:
-                                    yield {
-                                        "reasoning_content": cleaned_reasoning,
-                                        "tokens_generated": total_tokens,
-                                        "generation_time": time.time() - start_time,
-                                        "finished": False,
-                                        "reasoning_phase": True
-                                    }
+                            # Reasoning tokens already streamed token-by-token
 
                             yield {
                                 "text": "",
