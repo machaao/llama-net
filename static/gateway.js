@@ -282,8 +282,6 @@ class LandingApp {
         
         if (!models.length) { resultsDiv.innerHTML = '<div class="col-md-8 text-center text-muted py-4"><i class="fas fa-search fa-2x mb-2"></i><p>No models found. Be the first to <a href="https://github.com/machaao/llama-net">run a node</a>!</p></div>'; return; }
         resultsDiv.innerHTML = '<div class="col-md-8">' + models.map(model => {
-            const avgLoad = model.avg_load || 0;
-            const loadClass = avgLoad < 0.3 ? 'load-low' : avgLoad < 0.7 ? 'load-med' : 'load-high';
             const nodesHtml = (model.nodes || []).map(node => {
                 const uptimeText = this.formatUptime(node.uptime);
                 return `
@@ -291,7 +289,6 @@ class LandingApp {
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
-                    <span class="node-metric ${loadClass} me-1">${(node.load || 0).toFixed(2)} load</span>
                     ${uptimeText ? `<span class="node-metric me-1"><i class="fas fa-clock"></i> ${uptimeText}</span>` : ''}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
                 </div>`;
@@ -304,7 +301,6 @@ class LandingApp {
                 <div class="model-stats">
                     <span class="model-stat"><i class="fas fa-server"></i> <span class="value">${model.node_count}</span> nodes</span>
                     <span class="model-stat"><i class="fas fa-bolt"></i> <span class="value">${(model.total_tps || 0).toFixed(1)}</span> TPS</span>
-                    <span class="model-stat"><i class="fas fa-tachometer-alt"></i> <span class="value">${(model.avg_load || 0).toFixed(2)}</span> load</span>
                     ${model.avg_ttft ? `<span class="model-stat"><i class="fas fa-stopwatch"></i> <span class="value">${(model.avg_ttft * 1000).toFixed(0)}ms</span> TTFT</span>` : ''}
                     ${(model.total_tokens || 0) > 0 ? `<span class="model-stat"><i class="fas fa-coins"></i> <span class="value">${this.formatTokens(model.total_tokens)}</span> Tokens</span>` : ''}
                 </div>${nodesHtml}</div>`;
