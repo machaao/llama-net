@@ -774,13 +774,6 @@ class LlamaWrapper:
                                 }
 
                         if choice.get('finish_reason') is not None:
-                            # Capture real usage from remaining stream chunks
-                            for _remaining in stream:
-                                _usage = _remaining.get("usage")
-                                if _usage:
-                                    total_tokens = _usage.get("completion_tokens", total_tokens)
-                                    break
-
                             yield {
                                 "text": "",
                                 "tokens_generated": total_tokens,
@@ -881,14 +874,6 @@ class LlamaWrapper:
                         accumulated_text += choice['text']
                         generation_time = time.time() - start_time
                         
-                        # Capture real usage from remaining stream chunks
-                        if choice.get('finish_reason') is not None:
-                            for _remaining in stream:
-                                _usage = _remaining.get("usage")
-                                if _usage:
-                                    total_tokens = _usage.get("completion_tokens", total_tokens)
-                                    break
-
                         yield {
                             "text": choice['text'],
                             "accumulated_text": accumulated_text,
