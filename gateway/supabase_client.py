@@ -1,4 +1,5 @@
 import os
+import json
 import hashlib
 import secrets
 import time
@@ -24,10 +25,49 @@ class SupabaseManager:
 
         self.client: Client = create_client(self.url, self.service_key)
         
-        # Node token cache for detecting restarts (in-memory is fine for ephemeral comparison)
+        # Node token cache for detecting restarts
         self._node_token_cache: Dict[str, int] = {}  # node_hash -> last known total_tokens
+        self._hydrate_token_cache()
         
         logger.info("Supabase client initialized")
+
+    def _hydrate_token_cache(self):
+        """Load current total_tokens from active nodes + persisted cache on startup.
+        
+        Ensures gateway restart doesn't lose restart-detection state.
+        """
+        try:
+            # 1. Load persisted cache snapshot (survives gateway restart)
+            result = self.client.table("global_statistics").select("value").eq(
+                "key", "node_token_cache"
+            ).execute()
+            if result.data:
+                persisted = json.loads(result.data[0]["value"])
+                if isinstance(persisted, dict):
+                    self._node_token_cache.update(persisted)
+                    logger.info(f"Hydrated token cache from persistence: {len(persisted)} entries")
+
+            # 2. Overlay with current active node data (more recent)
+            result = self.client.table("nodes").select(
+                "node_hash, total_tokens"
+            ).eq("status", "active").execute()
+            for row in (result.data or []):
+                self._node_token_cache[row["node_hash"]] = row.get("total_tokens", 0)
+
+            logger.info(f"Token cache ready: {len(self._node_token_cache)} nodes tracked")
+        except Exception as e:
+            logger.warning(f"Could not hydrate token cache: {e}")
+
+    def _persist_token_cache(self):
+        """Persist token cache snapshot so gateway restart doesn't lose it."""
+        try:
+            self.client.table("global_statistics").upsert({
+                "key": "node_token_cache",
+                "value": json.dumps(self._node_token_cache),
+                "updated_at": "now()",
+            }, on_conflict="key").execute()
+        except Exception as e:
+            logger.debug(f"Could not persist token cache: {e}")
 
     def get_or_create_user(
         self, user_id: str, email: str, full_name: str = "",
@@ -262,6 +302,10 @@ class SupabaseManager:
                 update_data["ctx_length"] = metrics["ctx_length"]
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
+
+            # Persist token cache for gateway restart resilience
+            self._persist_token_cache()
+
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error updating node metrics: {e}")
@@ -274,6 +318,7 @@ class SupabaseManager:
             if cached > 0:
                 self._add_cumulative_tokens(cached)
                 self._node_token_cache.pop(node_hash, None)
+                self._persist_token_cache()
                 logger.info(f"Accumulated {cached} tokens from departing node {node_hash}")
 
             result = self.client.table("nodes").update(
