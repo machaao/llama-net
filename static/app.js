@@ -380,11 +380,14 @@ class LlamaNetUI {
                     this.updatePoolCountBadge(data);
                     this.renderPoolModels(data);
                     this.updateChatModelSelector();
+                } else {
+                    this.renderPoolModels({ enabled: false, used_slots: 0 });
                 }
                 return data;
             }
         } catch (e) {
             console.debug('Pool status not available:', e);
+            this.renderPoolModelsError();
         }
         return null;
     }
@@ -528,6 +531,18 @@ class LlamaNetUI {
         if (source === 'pool' && modelPath) {
             this.switchPoolModel(modelName, modelPath);
         }
+    }
+
+    renderPoolModelsError() {
+        const container = document.getElementById('poolModelsList');
+        if (!container) return;
+        container.innerHTML = `<div class="text-center text-muted py-4">
+            <i class="fas fa-exclamation-circle fa-2x mb-2 text-warning"></i>
+            <p>Pool status unavailable</p>
+            <button class="btn btn-sm btn-outline-primary mt-2" onclick="llamaNetUI.loadPoolStatus()">
+                <i class="fas fa-redo"></i> Retry
+            </button>
+        </div>`;
     }
 
     renderPoolModels(poolData) {
@@ -3574,7 +3589,15 @@ class ModelDownloaderUI {
                 resultsDiv.innerHTML = '<div class="text-center text-muted py-4"><p>No models found</p></div>';
             }
         } catch (error) {
-            if (!isTrending) {
+            if (isTrending) {
+                resultsDiv.innerHTML = `<div class="text-center text-muted py-4">
+                    <i class="fas fa-exclamation-circle fa-2x mb-2 text-warning"></i>
+                    <p>Unable to load trending models</p>
+                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="modelDownloader.loadTrendingModels()">
+                        <i class="fas fa-redo"></i> Retry
+                    </button>
+                </div>`;
+            } else {
                 resultsDiv.innerHTML = `<div class="alert alert-danger">Search failed: ${error.message}</div>`;
             }
         }
@@ -4005,6 +4028,10 @@ class ModelDownloaderUI {
         await this.loadSystemInfo();
         this.loadTrendingModels();
         this._initSearchAutocomplete();
+        // Pre-load pool data so the Pool tab shows content immediately when clicked
+        if (typeof llamaNetUI !== 'undefined') {
+            llamaNetUI.loadPoolStatus();
+        }
     }
 
     showToast(type, message) {
