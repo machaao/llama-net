@@ -649,9 +649,14 @@ class LlamaWrapper:
         # Prepare stop tokens
         stop_tokens = normalize_stop_tokens(stop)
         
+        # Count prompt tokens before streaming (stream_options not supported in 0.3.34)
+        formatted_messages = self._format_messages(messages)
+        prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
+        prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
+        
         # Create streaming generator
         stream = self.llm.create_chat_completion(
-            messages=self._format_messages(messages),
+            messages=formatted_messages,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -725,6 +730,7 @@ class LlamaWrapper:
                                         "content": cleaned_content,
                                         "accumulated_text": content_buffer,
                                         "tokens_generated": total_tokens,
+                                        "prompt_tokens": prompt_tokens,
                                         "generation_time": time.time() - start_time,
                                         "finished": False,
                                         "reasoning_phase": False
@@ -737,6 +743,7 @@ class LlamaWrapper:
                                     yield {
                                         "reasoning_content": cleaned_delta,
                                         "tokens_generated": total_tokens,
+                                        "prompt_tokens": prompt_tokens,
                                         "generation_time": time.time() - start_time,
                                         "finished": False,
                                         "reasoning_phase": True
@@ -752,6 +759,7 @@ class LlamaWrapper:
                                     "content": cleaned,
                                     "accumulated_text": content_buffer,
                                     "tokens_generated": total_tokens,
+                                    "prompt_tokens": prompt_tokens,
                                     "generation_time": time.time() - start_time,
                                     "finished": False,
                                     "reasoning_phase": False
@@ -767,6 +775,7 @@ class LlamaWrapper:
                                     "content": cleaned,
                                     "accumulated_text": accumulated_text,
                                     "tokens_generated": total_tokens,
+                                    "prompt_tokens": prompt_tokens,
                                     "generation_time": time.time() - start_time,
                                     "finished": False,
                                     "reasoning_phase": False
@@ -776,6 +785,7 @@ class LlamaWrapper:
                             yield {
                                 "text": "",
                                 "tokens_generated": total_tokens,
+                                "prompt_tokens": prompt_tokens,
                                 "generation_time": time.time() - start_time,
                                 "finished": True,
                                 "reasoning_phase": False
@@ -843,6 +853,9 @@ class LlamaWrapper:
         # Normalize stop tokens for llama-cpp-python
         stop_tokens = normalize_stop_tokens(stop)
         
+        # Count prompt tokens before streaming
+        prompt_tokens = len(self.llm.tokenize(prompt.encode("utf-8")))
+        
         # Create streaming generator
         stream = self.llm(
             prompt=prompt,
@@ -877,6 +890,7 @@ class LlamaWrapper:
                             "text": choice['text'],
                             "accumulated_text": accumulated_text,
                             "tokens_generated": total_tokens,
+                            "prompt_tokens": prompt_tokens,
                             "generation_time": generation_time,
                             "finished": choice.get('finish_reason') is not None
                         }
