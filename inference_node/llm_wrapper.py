@@ -117,7 +117,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
     format_patterns = {
         'llama-3': ['llama-3', 'llama3', 'meta-llama-3'],
         'llama-2': ['llama-2', 'llama2', 'meta-llama-2'],
-        'mistral-instruct': ['mistral-instruct', 'mistral-7b-instruct', 'mixtral-instruct'],
+        'mistral-instruct': ['mistral-instruct', 'mistral-7b-instruct', 'mixtral-instruct', 'ministral'],
         'gemma': ['gemma', 'google/gemma'],
         'zephyr': ['zephyr', 'huggingfaceh4/zephyr'],
         'openchat': ['openchat', 'openchat-3'],
@@ -174,7 +174,7 @@ class LlamaWrapper:
         logger.info(f"Reasoning support: {'enabled' if self.supports_reasoning else 'disabled'}")
         
         # Chat formats that do not support system role messages
-        self._formats_without_system_role = {'gemma'}
+        self._formats_without_system_role = {'gemma', 'mistral-instruct'}
         
         logger.info(f"Loading model from {config.model_path}")
         logger.info(f"Using detected chat format: {self.detected_chat_format}")
