@@ -134,8 +134,6 @@ class LandingApp {
         this.animateCounter('stat-nodes', stats.total_nodes || 0);
         this.animateCounter('stat-models', stats.total_models || 0);
         this.animateCounter('stat-tps', stats.total_tps || 0, true);
-        const loadEl = document.getElementById('stat-load');
-        if (loadEl) loadEl.textContent = (stats.avg_load || 0).toFixed(2);
         const tokensEl = document.getElementById('stat-tokens');
         if (tokensEl) tokensEl.textContent = this.formatTokens(stats.total_tokens || 0);
     }
