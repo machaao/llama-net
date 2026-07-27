@@ -659,7 +659,6 @@ class LlamaWrapper:
             stop=stop_tokens,
             repeat_penalty=repeat_penalty,
             stream=True,
-            stream_options={"include_usage": True},
         )
         
         total_tokens = 0
