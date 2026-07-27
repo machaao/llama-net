@@ -53,16 +53,27 @@ echo   Options:
 echo     --bootstrap-peers URL Gateway URL (default: https://llamanet.app)
 echo     --port PORT           HTTP API port (default: 8000)
 echo     --host HOST           Bind address (default: 0.0.0.0)
-echo     --ctx-size N          Context window in tokens (default: 4096)
+echo     --ctx-size N          Context window in tokens (0 = auto-detect)
+echo     --batch-size N        Batch size in tokens (default: 4096)
+echo     --ubatch-size N       Physical micro-batch size in tokens (default: 512)
+echo     --n-parallel N        Number of parallel slots (default: 1)
+echo     --threads N           CPU threads for generation (0 = auto)
+echo     --threads-batch N     CPU threads for prefill processing (0 = auto)
+echo     --flash-attn          Enable FlashAttention
+echo     --cache-type-k TYPE   KV cache key type: f16, q8_0, q4_0 (default: f16)
+echo     --cache-type-v TYPE   KV cache value type: f16, q8_0, q4_0 (default: f16)
 echo     --gpu-layers N        GPU layers (-1 = all)
 echo     --no-gpu              Disable GPU acceleration
 echo     --node-id ID          Custom node identifier
+echo     --public-ip IP        Override public IP detection
 echo     --verbose             Enable verbose logging
 echo     --help                Show this help
 echo.
 echo   Examples:
 echo     llamanet
 echo     start-app.bat run hf.co/user/Model:Q4_K_M
+echo     start-app.bat run hf.co/user/Model:Q4_K_M --ctx-size 16384
+echo     start-app.bat run hf.co/user/Model:Q4_K_M --no-gpu --cache-type-k q8_0
 echo     start-app.bat --no-gpu --port 8080
 echo.
 echo   Web UI opens automatically at http://localhost:8000
