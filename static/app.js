@@ -787,6 +787,11 @@ class LlamaNetUI {
                             && normalizedNode.model !== 'unknown';
 
                         this.activeNodes.set(normalizedNode.node_id, normalizedNode);
+
+                        // Refresh tunnel badge when tunnel URL arrives via SSE
+                        if (data.node_info.tunnel_url || data.node_info.url) {
+                            this.updateTunnelBadge(data.node_info.tunnel_url || data.node_info.url);
+                        }
                         
                         // Set status based on event
                         this.nodeStatuses.set(normalizedNode.node_id, 'online');
@@ -858,6 +863,11 @@ class LlamaNetUI {
                 
             case 'node_info':
                 if (data.node_info) {
+                    // Refresh tunnel badge if URL present
+                    if (data.node_info.tunnel_url || data.node_info.url) {
+                        this.updateTunnelBadge(data.node_info.tunnel_url || data.node_info.url);
+                    }
+
                     if (data.node_info.no_model_mode) {
                         this.selectedModel = null;
                         localStorage.removeItem('llamanet_selected_model');
@@ -3305,6 +3315,23 @@ class LlamaNetUI {
         this.isConnected = false;
         this.updateConnectionIndicator(false);
         this.updateSSEStatus('disconnected', 'Unified SSE connection closed');
+    }
+
+    updateTunnelBadge(tunnelUrl) {
+        if (!tunnelUrl || !tunnelUrl.startsWith('http')) return;
+        const badge = document.getElementById('tunnel-status');
+        const urlSpan = document.getElementById('tunnel-url');
+        if (!badge || !urlSpan) return;
+
+        badge.classList.remove('d-none');
+        urlSpan.textContent = tunnelUrl.replace('https://', '');
+        badge.title = 'Tunnel: ' + tunnelUrl + '\nClick to copy';
+        badge.onclick = () => {
+            navigator.clipboard.writeText(tunnelUrl).then(() => {
+                this.showToast('success', 'Tunnel URL copied: ' + tunnelUrl);
+            });
+        };
+        console.log('🔄 Tunnel badge updated via SSE: ' + tunnelUrl);
     }
     
     updateServiceStatusIndicator(servicesData) {

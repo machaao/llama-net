@@ -480,6 +480,36 @@ async def _wait_for_tunnel_and_register():
         logger.info(f"✅ Registered with gateway: {gateway_client.own_url}")
         await gateway_client.send_event("node_joined")
         logger.info("✅ Join event sent to gateway")
+
+        # Immediately broadcast tunnel URL to local UI via SSE
+        if sse_manager and gateway_client.own_url:
+            try:
+                node_info = {
+                    "node_id": config.node_id,
+                    "url": gateway_client.own_url,
+                    "tunnel_url": gateway_client.own_url,
+                    "model": config.model_name,
+                    "no_model_mode": config.no_model_mode,
+                }
+                if llm:
+                    try:
+                        metrics = llm.get_metrics()
+                        node_info["load"] = metrics.get("load", 0)
+                        node_info["tps"] = metrics.get("tps", 0)
+                    except Exception:
+                        pass
+                if model_pool:
+                    node_info["pool"] = model_pool.get_network_info()
+
+                await sse_manager.broadcast_event("node_updated", {
+                    "node_info": node_info,
+                    "timestamp": time.time(),
+                    "source": "tunnel_registration",
+                })
+                logger.info("📡 Broadcasted tunnel URL to local UI via SSE")
+            except Exception as e:
+                logger.debug(f"SSE tunnel broadcast failed: {e}")
+
         # Start background tasks (only after successful registration)
         asyncio.create_task(gateway_client.heartbeat_loop())
         asyncio.create_task(gateway_client.peer_refresh_loop())
