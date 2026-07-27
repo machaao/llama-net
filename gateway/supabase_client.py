@@ -4,7 +4,7 @@ import secrets
 import time
 from typing import Dict, Any, Optional, List
 from common.utils import get_logger
-from landing.node_registry import model_name_to_slug
+from gateway.node_registry import model_name_to_slug
 
 logger = get_logger(__name__)
 
@@ -298,7 +298,7 @@ class SupabaseManager:
         Handles backward compat: if item is a string, wraps it.
         """
         try:
-            from landing.node_registry import model_name_to_slug
+            from gateway.node_registry import model_name_to_slug
 
             for model in models_list:
                 if isinstance(model, str):
@@ -419,7 +419,7 @@ class SupabaseManager:
 
     def list_active_models(self) -> List[Dict[str, Any]]:
         try:
-            from landing.node_registry import model_name_to_slug
+            from gateway.node_registry import model_name_to_slug
 
             # ── Primary source: node_models junction table ──
             try:

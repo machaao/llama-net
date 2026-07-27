@@ -6,7 +6,7 @@
 set -e
 
 # ── MACHAAO Cloud Detection ──
-# When running on MACHAAO cloud, default to landing/gateway mode
+# When running on MACHAAO cloud, default to gateway/gateway mode
 # because inference nodes need GPU and run on user machines
 if [ -n "$MACHAAO_APP_ID" ]; then
     export LLAMANET_MODE="landing"
@@ -80,7 +80,7 @@ if [ "$LLAMANET_MODE" = "landing" ]; then
         $PYTHON_CMD -m pip install -e .
     fi
 
-    exec $PYTHON_CMD -m landing.server
+    exec $PYTHON_CMD -m gateway.server
 fi
 
 echo "🐍 Using Python: $PYTHON_CMD ($($PYTHON_CMD --version 2>&1))"

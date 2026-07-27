@@ -249,7 +249,7 @@ class ModelRouter:
         }
 
     async def _select_node(self, model_name: str, strategy: str = "load_balanced") -> Optional[Dict[str, Any]]:
-        from landing.node_registry import model_name_to_slug
+        from gateway.node_registry import model_name_to_slug
 
         model_slug = model_name_to_slug(model_name)
         nodes = self.db.get_nodes_for_model(model_slug)

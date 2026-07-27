@@ -13,10 +13,10 @@ from contextlib import asynccontextmanager
 from common.utils import get_logger, resolve_static_dir
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
-from landing.supabase_client import SupabaseManager
-from landing.auth import AuthManager
-from landing.node_registry import NodeRegistry, CloudflareClient, model_name_to_slug
-from landing.router import ModelRouter
+from gateway.supabase_client import SupabaseManager
+from gateway.auth import AuthManager
+from gateway.node_registry import NodeRegistry, CloudflareClient, model_name_to_slug
+from gateway.router import ModelRouter
 from common.gateway_auth import NodeTokenManager
 from common.quality_gate import NodeQualityGate
 
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 
 class GatewaySSEManager:
-    """Lightweight SSE manager for real-time landing page updates"""
+    """Lightweight SSE manager for real-time gateway page updates"""
 
     def __init__(self):
         self.connections = {}
@@ -82,7 +82,7 @@ def _sanitize_models(models: list) -> list:
 
 
 async def _periodic_stats_broadcast():
-    """Broadcast aggregated network stats every 30s so landing page stays fresh."""
+    """Broadcast aggregated network stats every 30s so gateway page stays fresh."""
     while True:
         try:
             await asyncio.sleep(30)
@@ -199,7 +199,7 @@ if static_dir:
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     logger.info(f"Static files: {static_dir}")
 else:
-    logger.warning("Static files directory not found — landing page will not be available")
+    logger.warning("Static files directory not found — gateway page will not be available")
 
 
 async def _enforce_rate_limit(request: Request, endpoint_type: str = "api"):
@@ -292,7 +292,7 @@ async def network_events(request: Request):
 
 @app.get("/")
 async def landing_page():
-    path = os.path.join(static_dir, "landing.html")
+    path = os.path.join(static_dir, "gateway.html")
     if os.path.exists(path):
         return FileResponse(path)
     return JSONResponse({"message": "LlamaNet Gateway"})
@@ -396,7 +396,7 @@ async def auth_callback():
     path = os.path.join(static_dir, "auth-callback.html")
     if os.path.exists(path):
         return FileResponse(path)
-    return FileResponse(os.path.join(static_dir, "landing.html"))
+    return FileResponse(os.path.join(static_dir, "gateway.html"))
 
 
 @app.get("/auth/me")
@@ -1352,7 +1352,7 @@ def start_server():
     host = os.environ.get("HOST", "0.0.0.0")
     log_level = os.environ.get("LOG_LEVEL", "info")
     uvicorn_config = uvicorn.Config(
-        "landing.server:app", host=host, port=port, log_level=log_level,
+        "gateway.server:app", host=host, port=port, log_level=log_level,
         timeout_keep_alive=2, access_log=False, loop="asyncio",
         http="httptools", lifespan="on",
         proxy_headers=True,
