@@ -76,6 +76,21 @@ class InferenceConfig:
             parser.add_argument('--batch-size', default=4096, type=int,
                                 help='Llama Server Batch Size (in tokens)')
 
+            parser.add_argument('--ubatch-size', default=512, type=int,
+                                help='Physical µ-batch size in tokens (default: 512). '
+                                     'Primary knob for prompt processing speed on single GPU.')
+
+            parser.add_argument('--n-parallel', default=1, type=int,
+                                help='Number of parallel slots (default: 1). '
+                                     'Lower values improve TTFT; higher values improve throughput.')
+
+            parser.add_argument('--threads', default=0, type=int,
+                                help='CPU threads for generation (0 = auto)')
+
+            parser.add_argument('--threads-batch', default=0, type=int,
+                                help='CPU threads for batch/prefill processing (0 = auto). '
+                                     'Start with physical core count.')
+
             parser.add_argument('--gpu-layers', default=-1, type=int,
                                 help='Llama Server GPU Layers')
 
@@ -98,6 +113,10 @@ class InferenceConfig:
             self.n_ctx = int(load_env_var("N_CTX", args.ctx_size))
             
             self.n_batch = int(load_env_var("N_BATCH", args.batch_size))
+            self.n_ubatch = int(load_env_var("N_UBATCH", args.ubatch_size))
+            self.n_parallel = int(load_env_var("N_PARALLEL", args.n_parallel))
+            self.n_threads = int(load_env_var("N_THREADS", args.threads))
+            self.n_threads_batch = int(load_env_var("N_THREADS_BATCH", args.threads_batch))
             # LLM configuration
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", args.gpu_layers))
             self.verbose = args.verbose or bool(load_env_var("VERBOSE", True))
@@ -149,6 +168,10 @@ class InferenceConfig:
             self.n_ctx = int(load_env_var("N_CTX", 0))
             
             self.n_batch = int(load_env_var("N_BATCH", 4096))
+            self.n_ubatch = int(load_env_var("N_UBATCH", 512))
+            self.n_parallel = int(load_env_var("N_PARALLEL", 1))
+            self.n_threads = int(load_env_var("N_THREADS", 0))
+            self.n_threads_batch = int(load_env_var("N_THREADS_BATCH", 0))
             self.n_gpu_layers = int(load_env_var("N_GPU_LAYERS", -1))
             self.verbose = bool(load_env_var("VERBOSE", False))
 
@@ -333,10 +356,14 @@ class InferenceConfig:
             "n_ctx": self.n_ctx,
             "n_ctx_auto_detected": getattr(self, 'n_ctx_auto_detected', False),
             "n_batch": self.n_batch,
+            "n_ubatch": getattr(self, 'n_ubatch', 512),
+            "n_parallel": getattr(self, 'n_parallel', 1),
             "n_gpu_layers": self.n_gpu_layers,
             "flash_attn": getattr(self, 'flash_attn', False),
             "cache_type_k": getattr(self, 'cache_type_k', 'f16'),
             "cache_type_v": getattr(self, 'cache_type_v', 'f16'),
+            "n_threads": getattr(self, 'n_threads', 0),
+            "n_threads_batch": getattr(self, 'n_threads_batch', 0),
             "verbose": self.verbose,
         }
         

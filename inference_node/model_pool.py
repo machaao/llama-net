@@ -243,6 +243,10 @@ class ModelPool:
         model_config.cache_type_v = getattr(self.config, 'cache_type_v', 'f16')
         model_config.n_ctx = n_ctx
         model_config.n_batch = self.config.n_batch
+        model_config.n_ubatch = getattr(self.config, 'n_ubatch', 512)
+        model_config.n_parallel = getattr(self.config, 'n_parallel', 1)
+        model_config.n_threads = getattr(self.config, 'n_threads', 0)
+        model_config.n_threads_batch = getattr(self.config, 'n_threads_batch', 0)
         model_config.n_gpu_layers = self.config.n_gpu_layers
         model_config.verbose = self.config.verbose
         model_config.no_model_mode = False

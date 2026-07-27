@@ -40,6 +40,10 @@ class ModelRouter:
         self.db = supabase_manager
         self._node_token_manager = node_token_manager
         self._rr_index = {}
+        # Prefix affinity for KV cache reuse (sticky routing)
+        self._prefix_affinity: Dict[str, str] = {}  # prefix_hash -> node_hash
+        self._affinity_ttl: Dict[str, float] = {}   # prefix_hash -> last_used timestamp
+        self._affinity_max_age = 1800  # 30 minutes
         # Per-key in-flight request tracking for fairness
         self._key_inflight: Dict[str, int] = {}
         self._max_per_key_concurrent = int(
@@ -144,6 +148,36 @@ class ModelRouter:
             entry["used"] += cost
             self._key_hourly_compute[key_hash] = entry
 
+    def _compute_prefix_hash(self, body: Dict) -> Optional[str]:
+        """Compute a stable hash from system prompt + conversation prefix for sticky routing."""
+        messages = body.get("messages", [])
+        if not messages:
+            return None
+
+        # Hash system message + first user message for stability
+        parts = []
+        for msg in messages[:3]:
+            role = msg.get("role", "") if isinstance(msg, dict) else ""
+            content = msg.get("content", "") if isinstance(msg, dict) else ""
+            if role in ("system", "user") and content:
+                parts.append(f"{role}:{content}")
+
+        if not parts:
+            return None
+
+        combined = "|".join(parts)
+        return hashlib.sha256(combined.encode()).hexdigest()[:16]
+
+    def _cleanup_affinity(self):
+        """Remove expired prefix affinity mappings."""
+        now = time.time()
+        expired = [k for k, v in self._affinity_ttl.items() if now - v > self._affinity_max_age]
+        for k in expired:
+            self._prefix_affinity.pop(k, None)
+            self._affinity_ttl.pop(k, None)
+        if expired:
+            logger.debug(f"Cleaned up {len(expired)} expired prefix affinity mappings")
+
     def _get_auth_key(self, request: Request) -> Optional[str]:
         """Extract the API key from the request."""
         auth = request.headers.get("authorization", "")
@@ -179,13 +213,22 @@ class ModelRouter:
             if compute_err:
                 return compute_err
 
-            node = await self._select_node(model_name, strategy)
+            # ── Prefix-aware sticky routing for KV cache reuse ──
+            conversation_id = body.get("conversation_id")
+            prefix_hash = None
+            if conversation_id:
+                prefix_hash = self._compute_prefix_hash(body)
+
+            node = await self._select_node(model_name, strategy, prefix_hash=prefix_hash)
             if not node:
                 return JSONResponse(status_code=503, content={
                     "error": {"message": f"No nodes available for model '{model_name}'", "type": "server_error", "code": "no_nodes_available"}
                 })
 
-            logger.info(f"Routing chat completion for '{model_name}' to {node['node_hash'][:8]}...")
+            routing_log = f"Routing chat completion for '{model_name}' to {node['node_hash'][:8]}..."
+            if prefix_hash:
+                routing_log += f" (prefix={prefix_hash[:8]}...)"
+            logger.info(routing_log)
             url = f"{node['url'].rstrip('/')}/v1/chat/completions"
             response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost)
             await self._record_compute_usage(auth_key, estimated_cost)
@@ -219,7 +262,13 @@ class ModelRouter:
             if compute_err:
                 return compute_err
 
-            node = await self._select_node(model_name, strategy)
+            # ── Prefix-aware sticky routing for KV cache reuse ──
+            conversation_id = body.get("conversation_id")
+            prefix_hash = None
+            if conversation_id:
+                prefix_hash = self._compute_prefix_hash(body)
+
+            node = await self._select_node(model_name, strategy, prefix_hash=prefix_hash)
             if not node:
                 return JSONResponse(status_code=503, content={
                     "error": {"message": f"No nodes available for model '{model_name}'"}
@@ -248,8 +297,11 @@ class ModelRouter:
             } for m in models],
         }
 
-    async def _select_node(self, model_name: str, strategy: str = "load_balanced") -> Optional[Dict[str, Any]]:
+    async def _select_node(self, model_name: str, strategy: str = "load_balanced", prefix_hash: Optional[str] = None) -> Optional[Dict[str, Any]]:
         from gateway.node_registry import model_name_to_slug
+
+        # Periodic cleanup of stale affinity entries
+        self._cleanup_affinity()
 
         model_slug = model_name_to_slug(model_name)
         nodes = self.db.get_nodes_for_model(model_slug)
@@ -272,14 +324,38 @@ class ModelRouter:
 
         if not nodes:
             return None
+
+        # ── Prefix affinity: sticky routing for KV cache reuse ──
+        if prefix_hash and prefix_hash in self._prefix_affinity:
+            affinity_node_hash = self._prefix_affinity[prefix_hash]
+            for node in nodes:
+                if node.get("node_hash") == affinity_node_hash:
+                    self._affinity_ttl[prefix_hash] = time.time()
+                    logger.debug(f"Sticky routing: prefix={prefix_hash[:8]}... → node={affinity_node_hash[:8]}...")
+                    return node
+            # Affinity node gone — clear stale entry
+            logger.debug(f"Affinity node {affinity_node_hash[:8]}... unavailable, re-selecting")
+            self._prefix_affinity.pop(prefix_hash, None)
+            self._affinity_ttl.pop(prefix_hash, None)
+
+        # ── Normal selection ──
         if strategy == "round_robin":
             idx = self._rr_index.get(model_slug, 0) % len(nodes)
             self._rr_index[model_slug] = idx + 1
-            return nodes[idx]
+            selected = nodes[idx]
         elif strategy == "random":
             import random
-            return random.choice(nodes)
-        return min(nodes, key=lambda n: n.get("load", 1))
+            selected = random.choice(nodes)
+        else:
+            selected = min(nodes, key=lambda n: n.get("load", 1))
+
+        # ── Store affinity for future requests ──
+        if prefix_hash and selected:
+            self._prefix_affinity[prefix_hash] = selected.get("node_hash", "")
+            self._affinity_ttl[prefix_hash] = time.time()
+            logger.debug(f"Affinity set: prefix={prefix_hash[:8]}... → node={selected.get('node_hash', '')[:8]}...")
+
+        return selected
 
     async def _forward_request(self, url: str, body: Dict, stream: bool, node: Dict[str, Any], auth_key: str = "", estimated_cost: float = 0.0):
         headers = {"Content-Type": "application/json"}

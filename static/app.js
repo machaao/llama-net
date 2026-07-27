@@ -2352,6 +2352,15 @@ class LlamaNetUI {
         const chatSelect = document.getElementById('chat-model-select');
         const modelToUse = (chatSelect && chatSelect.value) ? chatSelect.value : (this.selectedModel || 'llamanet');
         
+        // Generate stable conversation_id for prefix-aware sticky routing
+        if (!this._conversationId) {
+            this._conversationId = crypto.randomUUID ? crypto.randomUUID() :
+                'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                    const r = Math.random() * 16 | 0;
+                    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                });
+        }
+
         const requestBody = {
             model: modelToUse,
             messages: messages,
@@ -2360,7 +2369,8 @@ class LlamaNetUI {
             stream: streamingEnabled,
             strategy: strategy,
             target_model: modelToUse,
-            reasoning: this.reasoningEnabled
+            reasoning: this.reasoningEnabled,
+            conversation_id: this._conversationId
         };
 
         this._currentAbortController = new AbortController();
@@ -3441,8 +3451,9 @@ class LlamaNetUI {
                 }, 150);
             }
             
-            // Clear internal chat history
+            // Clear internal chat history and reset conversation identity
             this.chatHistory = [];
+            this._conversationId = null;  // New conversation = new prefix routing
             
             // Clear any stored chat history in localStorage (future-proofing)
             try {

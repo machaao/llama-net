@@ -66,6 +66,7 @@ class OpenAICompletionRequest(BaseModel):
     strategy: Optional[str] = "round_robin"
     target_model: Optional[str] = None  # Add target model parameter
     reasoning: Optional[bool] = True  # Add reasoning parameter
+    conversation_id: Optional[str] = None  # For prefix-aware sticky routing
 
 class OpenAIChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request with reasoning support"""
@@ -85,6 +86,7 @@ class OpenAIChatCompletionRequest(BaseModel):
     target_model: Optional[str] = None
     reasoning: Optional[bool] = True  # Enable reasoning by default
     enable_reasoning: Optional[bool] = None  # Alternative parameter name for compatibility
+    conversation_id: Optional[str] = None  # For prefix-aware sticky routing
 
 class OpenAIChoice(BaseModel):
     """OpenAI choice object"""

@@ -183,7 +183,11 @@ class LlamaWrapper:
             model_path=config.model_path,
             n_ctx=config.n_ctx,
             n_batch=config.n_batch,
+            n_ubatch=getattr(config, 'n_ubatch', 512),
             n_gpu_layers=config.n_gpu_layers,
+            n_slots=getattr(config, 'n_parallel', 1),
+            n_threads=getattr(config, 'n_threads', None) or None,
+            n_threads_batch=getattr(config, 'n_threads_batch', None) or None,
             verbose=config.verbose,
             reasoning=True,
             chat_format=self.detected_chat_format,
@@ -195,6 +199,9 @@ class LlamaWrapper:
         # Detect and log the chat template being used
         self._detect_chat_template()
         logger.info(f"Model loaded successfully: {config.model_name}")
+        logger.info(f"  n_ubatch={getattr(config, 'n_ubatch', 512)}, n_slots={getattr(config, 'n_parallel', 1)}, "
+                     f"n_threads={getattr(config, 'n_threads', 'auto')}, "
+                     f"n_threads_batch={getattr(config, 'n_threads_batch', 'auto')}")
         
     def _detect_chat_template(self):
         """Detect and log the chat template being used"""
@@ -234,7 +241,11 @@ class LlamaWrapper:
             model_path=model_path,
             n_ctx=self.config.n_ctx,
             n_batch=self.config.n_batch,
+            n_ubatch=getattr(self.config, 'n_ubatch', 512),
             n_gpu_layers=self.config.n_gpu_layers,
+            n_slots=getattr(self.config, 'n_parallel', 1),
+            n_threads=getattr(self.config, 'n_threads', None) or None,
+            n_threads_batch=getattr(self.config, 'n_threads_batch', None) or None,
             verbose=self.config.verbose,
             reasoning=True,
             chat_format=self.detected_chat_format,
