@@ -111,7 +111,10 @@ class InferenceConfig:
             self.cache_type_k = load_env_var("CACHE_TYPE_K", args.cache_type_k)
             self.cache_type_v = load_env_var("CACHE_TYPE_V", args.cache_type_v)
             self.n_ctx = int(load_env_var("N_CTX", args.ctx_size))
-            
+
+            # Track whether context size was explicitly requested by user
+            _ctx_size_from_cli = args.ctx_size > 0
+
             self.n_batch = int(load_env_var("N_BATCH", args.batch_size))
             self.n_ubatch = int(load_env_var("N_UBATCH", args.ubatch_size))
             self.n_parallel = int(load_env_var("N_PARALLEL", args.n_parallel))
@@ -200,11 +203,12 @@ class InferenceConfig:
             self.model_path = ""
 
         # Auto-detect context size from model if n_ctx == 0 (or legacy default 4096)
-        # Treat 4096 as "unset" because it was the old hardcoded default and
-        # stale N_CTX=4096 in shell environments would otherwise prevent
-        # auto-detection of the model's native context length.
+        # Treat 4096 as "unset" ONLY when it came from env (not CLI)
+        # because it was the old hardcoded default and stale N_CTX=4096
+        # in shell environments would otherwise prevent auto-detection
+        # of the model's native context length.
         self.n_ctx_auto_detected = False
-        _should_auto_detect = self.n_ctx <= 0 or self.n_ctx == 4096
+        _should_auto_detect = self.n_ctx <= 0 or (self.n_ctx == 4096 and not _ctx_size_from_cli)
         if _should_auto_detect and self.model_path and not self.no_model_mode:
             self.n_ctx, self.n_ctx_auto_detected = calculate_optimal_context(
                 self.model_path, self.cache_type_k,

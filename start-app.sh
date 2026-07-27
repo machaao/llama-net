@@ -126,6 +126,13 @@ while [ $# -gt 0 ]; do
             shift
             BOOTSTRAP_PEERS_VALUE="$1"
             ;;
+        run)
+            # Capture 'run' and its URL — don't add to REMAINING_ARGS
+            if [ -n "$2" ]; then
+                HF_URL="$2"
+                shift
+            fi
+            ;;
         *) REMAINING_ARGS="$REMAINING_ARGS $1" ;;
     esac
     shift
@@ -206,16 +213,9 @@ if [ "$ENABLE_TUNNEL" = "true" ]; then
     fi
 fi
 
-# Handle 'run' command
-if [ "$1" = "run" ]; then
-    if [ -z "$2" ]; then
-        echo "❌ Usage: llamanet run <huggingface-url>"
-        echo "   Example: llamanet run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M"
-        exit 1
-    fi
-    
-    HF_URL="$2"
-    shift 2  # Remove 'run' and URL from arguments
+# Handle 'run' command (HF_URL captured during argument parsing above)
+if [ -n "$HF_URL" ]; then
+    : # HF_URL already captured
 else
     # Set default values for non-run commands
     DEFAULT_MODEL_PATH="${MODEL_PATH:-./models/model.gguf}"

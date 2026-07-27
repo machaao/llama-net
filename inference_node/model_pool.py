@@ -225,11 +225,18 @@ class ModelPool:
         # Load the new model
         logger.info(f"Loading model into pool: {model_path}")
 
-        cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
-        n_ctx, _ = calculate_optimal_context(
-            model_path, cache_type_k,
-            max_concurrent=self.max_models,
-        )
+        # Respect user's explicit context size if not auto-detected
+        config_n_ctx = getattr(self.config, 'n_ctx', 0)
+        was_auto_detected = getattr(self.config, 'n_ctx_auto_detected', False)
+        if config_n_ctx > 0 and not was_auto_detected:
+            n_ctx = config_n_ctx
+            logger.info(f"Using user-configured context size: {n_ctx}")
+        else:
+            cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
+            n_ctx, _ = calculate_optimal_context(
+                model_path, cache_type_k,
+                max_concurrent=self.max_models,
+            )
 
         from inference_node.config import InferenceConfig
         model_config = InferenceConfig.__new__(InferenceConfig)
