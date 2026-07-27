@@ -213,6 +213,69 @@ LlamaNet uses a **gateway-centric, tunnel-only** architecture:
 
 All peer discovery and communication goes through the gateway. There is no peer-to-peer networking, DHT, or distributed hash table. This keeps the system simple, reliable, and NAT-friendly.
 
+### Running Your Own Gateway
+
+You can run a private gateway for your organization or team. The gateway is a lightweight FastAPI server that handles node registration, authentication, request routing, and real-time SSE updates.
+
+#### 1. Set Up Supabase
+
+The gateway requires a [Supabase](https://supabase.com/) project for persistence:
+
+1. Create a free project at [supabase.com](https://supabase.com)
+2. Run the schema from `sql/schema.sql` in the SQL Editor
+3. Enable Google OAuth in **Authentication → Providers** (optional)
+
+#### 2. Configure Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SUPABASE_URL` | ✅ | Your Supabase project URL |
+| `SUPABASE_SECRET_KEY` | ✅ | Supabase service role secret key |
+| `SUPABASE_PUBLISHABLE_KEY` | — | Supabase anon/publishable key |
+| `PORT` | — | Gateway port (default: 8000) |
+| `LLAMANET_DAILY_TOKEN_BUDGET` | — | Daily token limit per API key (default: 500000) |
+| `LLAMANET_HOURLY_COMPUTE_BUDGET` | — | Hourly compute units per API key (default: 10000) |
+| `LLAMANET_MAX_KEY_CONCURRENT` | — | Max concurrent requests per API key (default: 3) |
+| `CF_API_TOKEN` | — | Cloudflare API token (for managed tunnels) |
+| `CF_ACCOUNT_ID` | — | Cloudflare account ID |
+| `CF_ZONE_ID` | — | Cloudflare DNS zone ID |
+| `CF_TUNNEL_DOMAIN` | — | Domain for managed tunnels (default: `llamanet.app`) |
+
+#### 3. Start the Gateway
+
+```bash
+# Set environment variables
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_SECRET_KEY="your-service-role-key"
+
+# Start gateway
+LLAMANET_MODE=landing sh start-app.sh
+```
+
+#### 4. Connect Nodes to Your Gateway
+
+```bash
+# On inference nodes, point to your gateway
+llamanet run hf.co/user/Model:Q4_K_M --bootstrap-peers https://your-gateway.com
+```
+
+#### Quality Gate
+
+The gateway includes a configurable quality gate that validates nodes at registration time. All thresholds default to disabled — set environment variables to enable:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLAMANET_REQUIRE_GPU` | `false` | Reject nodes without GPU acceleration |
+| `LLAMANET_REQUIRE_TUNNEL` | `false` | Reject nodes without a tunnel URL |
+| `LLAMANET_EXCLUDE_HARDWARE` | — | Comma-separated hardware patterns to reject (e.g. `intel-mac,cpu-only`) |
+| `LLAMANET_MAX_TTFT` | `0` | Maximum time-to-first-token in seconds (0 = disabled) |
+| `LLAMANET_MAX_LATENCY` | `0` | Maximum latency in seconds (0 = disabled) |
+| `LLAMANET_MIN_TPS` | `0` | Minimum tokens-per-second (0 = disabled) |
+
+Quality gate operates in two phases:
+1. **Hardware check** — Instant, no network call (platform, GPU, tunnel URL)
+2. **Performance check** — Uses self-reported native probe metrics from the inference node
+
 ## Web UI
 
 Every inference node serves a built-in web UI at `http://localhost:8000`:
@@ -263,17 +326,67 @@ The URL persists across restarts.
 
 ## Environment Variables
 
+### Inference Node
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEL_PATH` | — | Path to GGUF model file |
 | `PORT` | `8000` | HTTP API port |
 | `HOST` | `0.0.0.0` | Bind address |
-| `N_GPU_LAYERS` | `-1` | GPU layers (-1 = all) |
-| `N_CTX` | `4096` | Context window in tokens |
-| `N_BATCH` | `4096` | Batch size |
+| `N_GPU_LAYERS` | `-1` | GPU layers (-1 = all, 0 = CPU only) |
+| `N_CTX` | `0` | Context window in tokens (0 = auto-detect from model) |
+| `N_BATCH` | `4096` | Batch size in tokens |
+| `N_UBATCH` | `512` | Physical micro-batch size in tokens |
+| `N_PARALLEL` | `1` | Number of parallel slots |
+| `N_THREADS` | `0` | CPU threads for generation (0 = auto) |
+| `N_THREADS_BATCH` | `0` | CPU threads for prefill (0 = auto) |
+| `FLASH_ATTN` | `false` | Enable FlashAttention |
+| `CACHE_TYPE_K` | `f16` | KV cache key type: f16, q8_0, q4_0 |
+| `CACHE_TYPE_V` | `f16` | KV cache value type: f16, q8_0, q4_0 |
+| `MAX_MODELS` | `0` | Max models in pool (0 = auto-detect from RAM) |
+| `MEMORY_BUDGET_GB` | `0` | Max RAM for models (0 = auto-detect) |
 | `BOOTSTRAP_PEERS` | `https://llamanet.app` | Gateway URL (auto-set by installer) |
 | `PUBLIC_IP` | — | Override public IP detection |
 | `LLAMANET_TUNNEL_URL` | — | Override tunnel URL |
+| `NODE_ID` | — | Override auto-generated node ID |
+| `VERBOSE` | `false` | Enable verbose llama-cpp-python logging |
+
+### Gateway
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPABASE_URL` | — | Supabase project URL (required) |
+| `SUPABASE_SECRET_KEY` | — | Supabase service role key (required) |
+| `SUPABASE_PUBLISHABLE_KEY` | — | Supabase anon key |
+| `LLAMANET_DAILY_TOKEN_BUDGET` | `500000` | Daily token limit per API key |
+| `LLAMANET_HOURLY_COMPUTE_BUDGET` | `10000` | Hourly compute units per API key |
+| `LLAMANET_MAX_KEY_CONCURRENT` | `3` | Max concurrent requests per API key |
+| `LLAMANET_REQUIRE_GPU` | `false` | Quality gate: require GPU |
+| `LLAMANET_REQUIRE_TUNNEL` | `false` | Quality gate: require tunnel URL |
+| `LLAMANET_EXCLUDE_HARDWARE` | — | Quality gate: excluded hardware patterns |
+| `LLAMANET_MAX_TTFT` | `0` | Quality gate: max TTFT in seconds |
+| `LLAMANET_MAX_LATENCY` | `0` | Quality gate: max latency in seconds |
+| `LLAMANET_MIN_TPS` | `0` | Quality gate: min tokens per second |
+
+## Token Budget & Rate Limiting
+
+The gateway enforces several rate limits and budgets to ensure fair usage:
+
+| Limit | Default | Scope |
+|-------|---------|-------|
+| Daily token budget | 500,000 tokens | Per API key (resets midnight UTC) |
+| Hourly compute budget | 10,000 units | Per API key |
+| Concurrent requests | 3 | Per API key |
+| API RPM | 60 | Per API key |
+| Global RPM | 500 | All keys combined |
+
+Compute units are estimated based on model size and `max_tokens`:
+- Small models (≤3B): 1× multiplier
+- Medium models (7-8B): 2× multiplier
+- Large models (13-20B): 4-6× multiplier
+- Very large models (≥35B): 8× multiplier
+
+Check your usage at **/auth/token-usage** (requires authentication).
 
 ## API Reference
 
@@ -283,26 +396,45 @@ The URL persists across restarts.
 |----------|--------|-------------|
 | `/v1/chat/completions` | POST | Chat completion (streaming supported) |
 | `/v1/completions` | POST | Text completion (streaming supported) |
-| `/v1/models` | GET | List local model |
-| `/v1/models/network` | GET | List all models across the network |
+| `/v1/models` | GET | List all models in the pool |
+| `/v1/models/network` | GET | List local models with node metadata |
 | `/models/search` | GET | Search Hugging Face for GGUF models |
+| `/models/details/{repo_id}` | GET | Get model details including GGUF files |
 | `/models/download` | POST | Start downloading a model |
-| `/models/select` | POST | Switch to a different model |
+| `/models/download/status` | GET | SSE stream for download progress |
+| `/models/download/{id}` | DELETE | Cancel an active download |
+| `/models/local` | GET | List locally cached models |
+| `/models/local/{id}` | DELETE | Delete a local model |
+| `/models/select` | POST | Switch or load a model (pool or replace mode) |
+| `/models/pool` | GET | Current pool status |
+| `/models/pool/evict` | POST | Manually evict a model from the pool |
+| `/models/pool/capacity` | GET | Pool capacity info |
+| `/models/statistics` | GET | Local model statistics |
+| `/models/system-info` | GET | Hardware specs for client-side filtering |
 | `/events/network` | GET | SSE stream for real-time network events |
 | `/health` | GET | Health check |
+| `/status` | GET | Node status and metrics |
+| `/info` | GET | Node configuration info |
 | `/tunnel/status` | GET | Tunnel status and URL |
 
 ### Gateway (`llamanet.app`)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/v1/chat/completions` | POST | Route chat completion to best node |
-| `/v1/completions` | POST | Route completion to best node |
-| `/v1/models` | GET | List all available models |
+| `/v1/chat/completions` | POST | Route chat completion to best node (requires API key) |
+| `/v1/completions` | POST | Route completion to best node (requires API key) |
+| `/v1/models` | GET | List all available models (requires API key) |
 | `/api/models` | GET | Public model listing |
+| `/api/models/{slug}` | GET | Get nodes for a specific model |
 | `/api/network/stats` | GET | Network statistics |
 | `/events/network` | GET | SSE stream for network events |
 | `/auth/google` | GET | Google OAuth login |
+| `/auth/me` | GET | Current authenticated user |
+| `/auth/api-keys` | GET | List user's API keys |
+| `/auth/api-keys` | POST | Create a new API key |
+| `/auth/api-keys/{id}` | DELETE | Revoke an API key |
+| `/auth/token-usage` | GET | Today's token usage for user's API keys |
+| `/health` | GET | Gateway health check |
 
 ## Setup
 
@@ -476,6 +608,8 @@ docker run -p 8000:8000 \
   -e N_GPU_LAYERS=0 \
   machaao/llamanet:latest
 ```
+
+> **Note:** The MACHAAO cloud platform handles containerization automatically — a `Dockerfile` is not required for cloud deployment. Use `start-app.sh` as the entrypoint and deploy via the `/deploy` command.
 
 ### Build & Push Your Own Image
 
