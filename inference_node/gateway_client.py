@@ -42,7 +42,7 @@ class GatewayClient:
         self.port = port
         self.metrics_callback = metrics_callback
         self.tunnel_url = tunnel_url or self._detect_tunnel_url()
-        self.public_ip = public_ip  # Only use explicitly provided IP; no auto-detection needed (tunnel-only)
+        self.public_ip = public_ip or get_host_ip()
         self.own_url = self.tunnel_url  # Tunnel-only — no IP:port fallback
         self.model_pool = model_pool
 
@@ -268,6 +268,7 @@ class GatewayClient:
                             json={
                                 "node_hash": self.node_hash,
                                 "url": self.own_url,
+                                "ip": self.public_ip,
                                 "metrics": metrics,
                                 "models": self._get_models_with_context(),
                                 "ctx_length": self._get_active_context_length_value(),

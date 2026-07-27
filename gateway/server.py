@@ -514,26 +514,33 @@ async def node_heartbeat(request: Request):
             logger.warning(f"Rejected heartbeat URL from {node_hash}: {reason}")
             return JSONResponse(status_code=400, content={"error": f"Invalid URL: {reason}"})
 
-    # Update URL in DB unconditionally (tunnel URL rotation)
+    # Update URL and IP in DB unconditionally (tunnel URL rotation)
+    node_ip = body.get("ip", "")
+    update_fields = {}
     if node_url:
+        update_fields["url"] = node_url
+    if node_ip:
+        update_fields["ip"] = node_ip
+
+    if update_fields:
         try:
             result = supabase_mgr.client.table("nodes").update(
-                {"url": node_url}
+                update_fields
             ).eq("node_hash", node_hash).eq("status", "active").execute()
 
             if result.data:
-                logger.info(f"🔄 Updated URL for node {node_hash}: {node_url}")
+                logger.info(f"🔄 Updated node {node_hash}: {update_fields}")
             else:
                 # Node might not exist yet — re-register
-                logger.warning(f"⚠️ URL update returned no rows for {node_hash}, attempting upsert")
+                logger.warning(f"⚠️ Update returned no rows for {node_hash}, attempting upsert")
                 supabase_mgr.client.table("nodes").upsert({
                     "node_hash": node_hash,
-                    "url": node_url,
                     "status": "active",
                     "last_heartbeat": "now()",
+                    **update_fields,
                 }, on_conflict="node_hash").execute()
         except Exception as e:
-            logger.error(f"URL update failed for {node_hash}: {e}")
+            logger.error(f"Node update failed for {node_hash}: {e}")
 
     # Read previous metrics from Supabase for change detection
     should_broadcast = False
@@ -945,19 +952,26 @@ async def publish_node_event(request: Request):
             logger.info(f"📡 Node left via event: {node_hash} model={model_name}")
 
         elif event_type == "node_updated":
-            # Update URL unconditionally (tunnel rotation)
+            # Update URL and IP unconditionally (tunnel rotation)
             event_url = body.get("url", "")
+            event_ip = body.get("ip", "")
+            update_fields = {}
             if event_url:
+                update_fields["url"] = event_url
+            if event_ip:
+                update_fields["ip"] = event_ip
+
+            if update_fields:
                 try:
                     result = supabase_mgr.client.table("nodes").update(
-                        {"url": event_url}
+                        update_fields
                     ).eq("node_hash", node_hash).eq("status", "active").execute()
                     if result.data:
-                        logger.info(f"🔄 Updated URL for node {node_hash}: {event_url}")
+                        logger.info(f"🔄 Updated node {node_hash}: {update_fields}")
                     else:
-                        logger.warning(f"⚠️ node_updated URL update: no active node found for {node_hash}")
+                        logger.warning(f"⚠️ node_updated: no active node found for {node_hash}")
                 except Exception as e:
-                    logger.error(f"URL update in node_updated failed: {e}")
+                    logger.error(f"Node update in node_updated failed: {e}")
 
             # Extract metrics early for logging
             event_metrics = body.get("metrics", {})
