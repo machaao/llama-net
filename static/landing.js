@@ -145,6 +145,15 @@ class LandingApp {
         if (tokens >= 1000) return (tokens / 1000).toFixed(1) + 'K';
         return tokens.toString();
     }
+    formatUptime(seconds) {
+        if (!seconds || seconds <= 0) return '';
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        if (d > 0) return d + 'd ' + h + 'h';
+        if (h > 0) return h + 'h ' + m + 'm';
+        return m + 'm';
+    }
     _handleAuthCallback() {
         const hash = window.location.hash;
         if (hash) {
@@ -278,12 +287,14 @@ class LandingApp {
             const avgLoad = model.avg_load || 0;
             const loadClass = avgLoad < 0.3 ? 'load-low' : avgLoad < 0.7 ? 'load-med' : 'load-high';
             const nodesHtml = (model.nodes || []).map(node => {
+                const uptimeText = this.formatUptime(node.uptime);
                 return `
                 <div class="node-row">
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
                     <span class="node-metric ${loadClass} me-1">${(node.load || 0).toFixed(2)} load</span>
+                    ${uptimeText ? `<span class="node-metric me-1"><i class="fas fa-clock"></i> ${uptimeText}</span>` : ''}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
                 </div>`;
             }).join('');
