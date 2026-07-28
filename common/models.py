@@ -25,6 +25,8 @@ class NodeInfo(BaseModel):
     latency: Optional[float] = None
     gpu_info: Optional[str] = None
     total_tokens: Optional[int] = None
+    incoming_tokens: Optional[int] = None
+    generated_tokens: Optional[int] = None
     context_length: Optional[int] = None
 
 # OpenAI-compatible models with reasoning support

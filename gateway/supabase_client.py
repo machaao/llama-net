@@ -49,10 +49,13 @@ class SupabaseManager:
 
             # 2. Overlay with current active node data (more recent)
             result = self.client.table("nodes").select(
-                "node_hash, total_tokens"
+                "node_hash, total_tokens, incoming_tokens, generated_tokens"
             ).eq("status", "active").execute()
             for row in (result.data or []):
-                self._node_token_cache[row["node_hash"]] = row.get("total_tokens", 0)
+                self._node_token_cache[row["node_hash"]] = {
+                    "incoming": row.get("incoming_tokens", 0) or 0,
+                    "generated": row.get("generated_tokens", 0) or 0,
+                }
 
             logger.info(f"Token cache ready: {len(self._node_token_cache)} nodes tracked")
         except Exception as e:
@@ -220,9 +223,33 @@ class SupabaseManager:
 
             incoming_tokens = metrics.get("total_tokens", 0)
 
-            # ── Handle restart: if tokens decreased, accumulate old value ──
-            if incoming_tokens < existing_tokens and existing_tokens > 0:
-                self._add_cumulative_tokens(existing_tokens)
+            # Read existing incoming/generated tokens
+            existing_incoming = 0
+            existing_generated = 0
+            try:
+                existing_incoming = row.get("incoming_tokens", 0) or 0
+                existing_generated = row.get("generated_tokens", 0) or 0
+            except Exception:
+                pass
+
+            incoming_prompt = metrics.get("incoming_tokens", 0)
+            incoming_generated = metrics.get("generated_tokens", 0)
+
+            # If tokens decreased, accumulate old values
+            if incoming_generated < existing_generated and existing_generated > 0:
+                self._add_cumulative_tokens(existing_incoming, existing_generated)
+                logger.info(
+                    f"Node {node_hash} rejoining — accumulated {existing_incoming} incoming + "
+                    f"{existing_generated} generated tokens to cumulative totals"
+                )
+
+            effective_incoming = max(incoming_prompt, existing_incoming)
+            effective_generated = max(incoming_generated, existing_generated)
+            effective_total = effective_incoming + effective_generated
+
+            # Also handle legacy total_tokens field
+            if incoming_tokens < existing_tokens and existing_tokens > 0 and effective_generated == 0:
+                self._add_cumulative_tokens(0, existing_tokens)
                 self._node_token_cache.pop(node_hash, None)
                 logger.info(
                     f"Node {node_hash} rejoining — accumulated {existing_tokens} "
@@ -230,7 +257,7 @@ class SupabaseManager:
                 )
 
             # ── Merge: cumulative = max, instantaneous = incoming if non-zero ──
-            effective_tokens = max(incoming_tokens, existing_tokens)
+            effective_tokens = max(incoming_tokens, effective_total)
             effective_load = metrics.get("load", 0) or existing_load
             effective_tps = metrics.get("tps", 0) or existing_tps
             effective_ttft = metrics.get("ttft") if metrics.get("ttft") is not None else existing_ttft
@@ -240,7 +267,10 @@ class SupabaseManager:
             )
             effective_uptime = metrics.get("uptime", 0) or existing_uptime
 
-            self._node_token_cache[node_hash] = effective_tokens
+            self._node_token_cache[node_hash] = {
+                "incoming": effective_incoming,
+                "generated": effective_generated,
+            }
 
             node_data = {
                 "node_hash": node_hash, "user_id": user_id,
@@ -249,6 +279,8 @@ class SupabaseManager:
                 "ttft": effective_ttft, "latency": effective_latency,
                 "uptime": effective_uptime,
                 "total_tokens": effective_tokens,
+                "incoming_tokens": effective_incoming,
+                "generated_tokens": effective_generated,
                 "ctx_length": ctx_length,
                 "status": "active", "last_heartbeat": "now()",
             }
@@ -277,37 +309,58 @@ class SupabaseManager:
             logger.debug(f"Could not read cumulative tokens: {e}")
             return 0
 
-    def _add_cumulative_tokens(self, amount: int) -> None:
-        """Atomically add to cumulative total tokens in the statistics table."""
+    def _get_cumulative_stat(self, key: str) -> int:
         try:
-            current = self._get_cumulative_tokens()
-            new_value = current + amount
+            result = self.client.table("global_statistics").select("value").eq("key", key).execute()
+            return int(result.data[0]["value"]) if result.data else 0
+        except Exception:
+            return 0
+
+    def _set_cumulative_stat(self, key: str, value: int) -> None:
+        try:
             self.client.table("global_statistics").upsert(
-                {"key": "cumulative_total_tokens", "value": str(new_value)},
+                {"key": key, "value": str(value)},
                 on_conflict="key"
             ).execute()
-            logger.debug(f"Accumulated {amount} tokens → cumulative total: {new_value}")
+        except Exception as e:
+            logger.debug(f"Could not set {key}: {e}")
+
+    def _add_cumulative_tokens(self, incoming: int = 0, generated: int = 0) -> None:
+        """Atomically add to cumulative token totals in the statistics table."""
+        try:
+            current_in = self._get_cumulative_stat("cumulative_incoming_tokens")
+            current_gen = self._get_cumulative_stat("cumulative_generated_tokens")
+            self._set_cumulative_stat("cumulative_incoming_tokens", current_in + incoming)
+            self._set_cumulative_stat("cumulative_generated_tokens", current_gen + generated)
+            self._set_cumulative_stat("cumulative_total_tokens", current_in + incoming + current_gen + generated)
+            logger.debug(f"Accumulated {incoming} incoming + {generated} generated tokens")
         except Exception as e:
             logger.error(f"Error updating cumulative tokens: {e}")
 
     def update_node_metrics(self, node_hash: str, metrics: Dict[str, Any]) -> bool:
         try:
-            new_tokens = metrics.get("total_tokens", 0)
-            old_tokens = self._node_token_cache.get(node_hash, 0)
+            new_incoming = metrics.get("incoming_tokens", 0)
+            new_generated = metrics.get("generated_tokens", 0)
+            new_total = metrics.get("total_tokens", 0) or (new_incoming + new_generated)
 
-            # If tokens decreased, the node restarted — accumulate the old value
-            if new_tokens < old_tokens and old_tokens > 0:
-                self._add_cumulative_tokens(old_tokens)
-                logger.info(f"Node {node_hash} restarted — accumulated {old_tokens} tokens to cumulative total")
+            cached = self._node_token_cache.get(node_hash, {})
+            old_incoming = cached.get("incoming", 0) if isinstance(cached, dict) else 0
+            old_generated = cached.get("generated", 0) if isinstance(cached, dict) else 0
 
-            # Update cache
-            self._node_token_cache[node_hash] = new_tokens
+            # If generated tokens decreased, node restarted — accumulate old values
+            if new_generated < old_generated and old_generated > 0:
+                self._add_cumulative_tokens(old_incoming, old_generated)
+                logger.info(f"Node {node_hash} restarted — accumulated {old_incoming} in + {old_generated} gen tokens")
+
+            self._node_token_cache[node_hash] = {"incoming": new_incoming, "generated": new_generated}
 
             update_data = {
                 "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                 "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
                 "uptime": metrics.get("uptime", 0),
-                "total_tokens": new_tokens,
+                "total_tokens": new_total,
+                "incoming_tokens": new_incoming,
+                "generated_tokens": new_generated,
                 "last_heartbeat": "now()", "status": "active",
             }
 
@@ -346,12 +399,18 @@ class SupabaseManager:
     def deregister_node(self, node_hash: str) -> bool:
         try:
             # Accumulate tokens before deactivating
-            cached = self._node_token_cache.get(node_hash, 0)
-            if cached > 0:
-                self._add_cumulative_tokens(cached)
+            cached = self._node_token_cache.get(node_hash, {})
+            if isinstance(cached, dict):
+                cin = cached.get("incoming", 0)
+                cgen = cached.get("generated", 0)
+            else:
+                cin, cgen = 0, cached if isinstance(cached, int) else 0
+
+            if cin > 0 or cgen > 0:
+                self._add_cumulative_tokens(cin, cgen)
                 self._node_token_cache.pop(node_hash, None)
                 self._persist_token_cache()
-                logger.info(f"Accumulated {cached} tokens from departing node {node_hash}")
+                logger.info(f"Accumulated {cin} incoming + {cgen} generated tokens from departing node {node_hash}")
 
             result = self.client.table("nodes").update(
                 {"status": "inactive"}
@@ -432,6 +491,16 @@ class SupabaseManager:
                     else existing.get("latency")
                 )
                 effective_uptime = model_metrics.get("uptime", 0) or existing.get("uptime", 0) or 0
+
+                # ── Preserve incoming/generated tokens ──
+                existing_incoming = existing.get("incoming_tokens", 0) or 0
+                existing_generated = existing.get("generated_tokens", 0) or 0
+                incoming_inc = model_metrics.get("incoming_tokens", 0)
+                incoming_gen = model_metrics.get("generated_tokens", 0)
+
+                effective_incoming = max(incoming_inc, existing_incoming)
+                effective_generated = max(incoming_gen, existing_generated)
+                effective_total = effective_incoming + effective_generated
 
                 self.client.table("node_models").upsert({
                     "node_hash": node_hash,
@@ -658,6 +727,8 @@ class SupabaseManager:
                             full_node["ttft"] = nm_node.get("ttft")
                             full_node["latency"] = nm_node.get("latency")
                             full_node["total_tokens"] = nm_node.get("total_tokens", 0)
+                            full_node["incoming_tokens"] = nm_node.get("incoming_tokens", 0)
+                            full_node["generated_tokens"] = nm_node.get("generated_tokens", 0)
                             full_node["uptime"] = nm_node.get("uptime", 0)
                             enriched_nodes.append(full_node)
 
@@ -673,6 +744,8 @@ class SupabaseManager:
                             if enriched_nodes else 0
                         )
                         model["total_tokens"] = sum(n.get("total_tokens", 0) for n in enriched_nodes)
+                        model["incoming_tokens"] = sum(n.get("incoming_tokens", 0) for n in enriched_nodes)
+                        model["generated_tokens"] = sum(n.get("generated_tokens", 0) for n in enriched_nodes)
                         model["best_node"] = (
                             min(enriched_nodes, key=lambda n: n.get("load", 1))
                             if enriched_nodes else None
@@ -730,12 +803,20 @@ class SupabaseManager:
     def get_network_stats(self) -> Dict[str, Any]:
         try:
             result = self.client.table("nodes").select(
-                "node_hash, load, tps, total_tokens"
+                "node_hash, load, tps, total_tokens, incoming_tokens, generated_tokens"
             ).eq("status", "active").execute()
             nodes = result.data or []
-            cumulative = self._get_cumulative_tokens()
+            cum_in = self._get_cumulative_stat("cumulative_incoming_tokens")
+            cum_gen = self._get_cumulative_stat("cumulative_generated_tokens")
+            cumulative = cum_in + cum_gen
+
             if not nodes:
-                return {"total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0, "total_tokens": cumulative}
+                return {
+                    "total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0,
+                    "total_tokens": cumulative,
+                    "incoming_tokens": cum_in,
+                    "generated_tokens": cum_gen,
+                }
 
             # Count models from node_models junction table
             try:
@@ -744,12 +825,15 @@ class SupabaseManager:
             except Exception:
                 models = set()
 
-            active_tokens = sum(n.get("total_tokens", 0) for n in nodes)
+            active_incoming = sum(n.get("incoming_tokens", 0) for n in nodes)
+            active_generated = sum(n.get("generated_tokens", 0) for n in nodes)
             return {
                 "total_nodes": len(nodes), "total_models": len(models),
                 "total_tps": round(sum(n.get("tps", 0) for n in nodes), 1),
                 "avg_load": round(sum(n.get("load", 0) for n in nodes) / len(nodes), 3),
-                "total_tokens": cumulative + active_tokens,
+                "total_tokens": cumulative + active_incoming + active_generated,
+                "incoming_tokens": cum_in + active_incoming,
+                "generated_tokens": cum_gen + active_generated,
             }
         except Exception as e:
             logger.error(f"Error getting network stats: {e}")

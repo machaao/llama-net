@@ -592,6 +592,8 @@ async def _broadcast_current_node_metrics():
             "ttft": metrics.get("ttft", 0),
             "latency": metrics.get("latency", 0),
             "total_tokens": metrics.get("total_tokens", 0),
+            "incoming_tokens": metrics.get("incoming_tokens", 0),
+            "generated_tokens": metrics.get("generated_tokens", 0),
             "context_length": _get_active_context_length(),
             "last_seen": int(time.time()),
         }
@@ -793,6 +795,8 @@ async def list_network_models():
             "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
             "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
             "total_tokens": metrics.get("total_tokens", 0),
+            "incoming_tokens": metrics.get("incoming_tokens", 0),
+            "generated_tokens": metrics.get("generated_tokens", 0),
             "gpu_info": system_info.get("gpu") if system_info else "",
             "context_length": _get_active_context_length(),
             "pool_models": pool_models_list,
@@ -817,6 +821,8 @@ async def list_network_models():
                     "uptime": slot_metrics.get("uptime", 0), "last_seen": int(time.time()),
                     "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
                     "total_tokens": slot_metrics.get("total_tokens", 0),
+                    "incoming_tokens": slot_metrics.get("incoming_tokens", 0),
+                    "generated_tokens": slot_metrics.get("generated_tokens", 0),
                     "gpu_info": system_info.get("gpu") if system_info else "",
                     "context_length": slot.n_ctx,
                     "pool_models": pool_models_list,
@@ -852,6 +858,8 @@ async def get_models_statistics():
         "uptime": metrics.get("uptime", 0), "last_seen": int(time.time()),
         "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
         "total_tokens": metrics.get("total_tokens", 0),
+        "incoming_tokens": metrics.get("incoming_tokens", 0),
+        "generated_tokens": metrics.get("generated_tokens", 0),
         "context_length": _get_active_context_length(),
     })
 
@@ -874,6 +882,8 @@ async def get_models_statistics():
                 "uptime": slot_metrics.get("uptime", 0), "last_seen": int(time.time()),
                 "ttft": slot_metrics.get("ttft"), "latency": slot_metrics.get("latency"),
                 "total_tokens": slot_metrics.get("total_tokens", 0),
+                "incoming_tokens": slot_metrics.get("incoming_tokens", 0),
+                "generated_tokens": slot_metrics.get("generated_tokens", 0),
                 "context_length": slot.n_ctx,
             })
             models_dict[name] = {"nodes": [pool_node]}

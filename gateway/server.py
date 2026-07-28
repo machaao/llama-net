@@ -649,6 +649,8 @@ async def node_heartbeat(request: Request):
                     "model_name": active_model_name,
                     "metrics": metrics,
                     "pool_models": pool_models,
+                    "incoming_tokens": metrics.get("incoming_tokens", 0),
+                    "generated_tokens": metrics.get("generated_tokens", 0),
                 })
         except Exception:
             pass

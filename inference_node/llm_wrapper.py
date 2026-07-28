@@ -825,7 +825,7 @@ class LlamaWrapper:
 
         finally:
             final_time = time.time() - start_time
-            self.metrics_manager.record_request_end(total_tokens, final_time)
+            self.metrics_manager.record_request_end(total_tokens, final_time, incoming_tokens=prompt_tokens)
             self.metrics_manager.record_latency(final_time)
         
     def generate(self, 
