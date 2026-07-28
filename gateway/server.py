@@ -282,7 +282,7 @@ async def network_events(request: Request):
                     node_metrics = {}
                     try:
                         nm = supabase_mgr.client.table("node_models").select(
-                            "model_name, load, tps, ttft, latency, total_tokens, uptime"
+                            "model_name, load, tps, ttft, latency, total_tokens, prompt_tokens, completion_tokens, uptime"
                         ).eq(
                             "node_hash", node_hash
                         ).eq("is_active", True).eq("status", "active").execute()

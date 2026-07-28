@@ -311,12 +311,28 @@ class LandingApp {
         resultsDiv.innerHTML = '<div class="col-md-8">' + models.map(model => {
             const nodesHtml = (model.nodes || []).map(node => {
                 const uptimeText = this.formatUptime(node.uptime);
+                const totalTokens = node.total_tokens || 0;
+                const promptTokens = node.prompt_tokens || 0;
+                const completionTokens = node.completion_tokens || 0;
+
+                let tokenBadges = '';
+                if (totalTokens > 0) {
+                    tokenBadges += `<span class="node-model-metric me-1"><i class="fas fa-coins"></i> ${this.formatTokens(totalTokens)} tokens</span>`;
+                }
+                if (promptTokens > 0) {
+                    tokenBadges += `<span class="node-model-metric me-1"><i class="fas fa-arrow-down"></i> ${this.formatTokens(promptTokens)} in</span>`;
+                }
+                if (completionTokens > 0) {
+                    tokenBadges += `<span class="node-model-metric me-1"><i class="fas fa-arrow-up"></i> ${this.formatTokens(completionTokens)} out</span>`;
+                }
+
                 return `
                 <div class="node-row">
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-model-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
                     ${uptimeText ? `<span class="node-model-metric me-1"><i class="fas fa-clock"></i> ${uptimeText}</span>` : ''}
+                    ${tokenBadges}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
                 </div>`;
             }).join('');

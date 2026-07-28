@@ -673,7 +673,7 @@ class SupabaseManager:
             # ── Primary source: node_models junction table ──
             try:
                 nm_result = self.client.table("node_models").select(
-                    "node_hash, model_name, model_slug, ctx_length, is_active, load, tps, ttft, latency, total_tokens, uptime"
+                    "node_hash, model_name, model_slug, ctx_length, is_active, load, tps, ttft, latency, total_tokens, prompt_tokens, completion_tokens, uptime"
                 ).eq("status", "active").execute()
 
                 if nm_result.data:
