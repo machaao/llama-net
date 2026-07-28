@@ -242,7 +242,7 @@ $activateScript = Join-Path $VenvDir "Scripts\Activate.ps1"
 . $activateScript
 
 $pip = Join-Path $VenvDir "Scripts\pip.exe"
-& $pip install --upgrade pip setuptools wheel 2>$null | Out-Null
+& $venvPython -m pip install --upgrade pip setuptools wheel 2>$null | Out-Null
 
 # ── Step 6: Install LlamaNet ──
 Write-Step "Installing LlamaNet (this may take a few minutes)..."
