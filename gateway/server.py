@@ -521,21 +521,6 @@ async def node_heartbeat(request: Request):
         active_ctx = body.get("ctx_length", 0)
         if active_ctx > 0:
             metrics["ctx_length"] = active_ctx
-        # Upsert node_models junction table
-        try:
-            # Derive active slug from existing node_models (preserves is_active flag)
-            active_slug = ""
-            try:
-                nm_check = supabase_mgr.client.table("node_models").select("model_slug").eq(
-                    "node_hash", node_hash
-                ).eq("is_active", True).eq("status", "active").limit(1).execute()
-                if nm_check.data:
-                    active_slug = nm_check.data[0].get("model_slug", "")
-            except Exception:
-                pass
-            supabase_mgr.upsert_node_models(node_hash, pool_models, active_slug)
-        except Exception as e:
-            logger.debug(f"node_models upsert in heartbeat failed: {e}")
 
     # Validate URL before processing
     if node_url:
@@ -572,9 +557,13 @@ async def node_heartbeat(request: Request):
         except Exception as e:
             logger.error(f"Node update failed for {node_hash}: {e}")
 
-    # Read previous metrics from Supabase for change detection
+    # ── Change detection: read PREVIOUS metrics BEFORE upserting new ones ──
     should_broadcast = False
     try:
+        prev_load = 0
+        prev_tps = 0
+
+        # Read previous node-level metrics
         existing_node = supabase_mgr.client.table("nodes").select("load, tps").eq(
             "node_hash", node_hash
         ).eq("status", "active").execute()
@@ -582,15 +571,16 @@ async def node_heartbeat(request: Request):
             prev = existing_node.data[0]
             prev_load = prev.get("load", 0) or 0
             prev_tps = prev.get("tps", 0) or 0
-            new_load = metrics.get("load", 0) or 0
-            new_tps = metrics.get("tps", 0) or 0
-            for old_val, new_val in [(prev_load, new_load), (prev_tps, new_tps)]:
-                if old_val == 0 and new_val == 0:
-                    continue
-                denom = max(abs(old_val), 0.01)
-                if abs(new_val - old_val) / denom > 0.05:
-                    should_broadcast = True
-                    break
+
+        new_load = metrics.get("load", 0) or 0
+        new_tps = metrics.get("tps", 0) or 0
+        for old_val, new_val in [(prev_load, new_load), (prev_tps, new_tps)]:
+            if old_val == 0 and new_val == 0:
+                continue
+            denom = max(abs(old_val), 0.01)
+            if abs(new_val - old_val) / denom > 0.05:
+                should_broadcast = True
+                break
 
         # Also broadcast if pool size changed
         if not should_broadcast and pool_models:
@@ -599,6 +589,22 @@ async def node_heartbeat(request: Request):
                 should_broadcast = True
     except Exception as e:
         logger.debug(f"Could not read previous metrics for {node_hash}: {e}")
+
+    # ── NOW upsert node_models with new per-model metrics ──
+    if pool_models:
+        try:
+            active_slug = ""
+            try:
+                nm_check = supabase_mgr.client.table("node_models").select("model_slug").eq(
+                    "node_hash", node_hash
+                ).eq("is_active", True).eq("status", "active").limit(1).execute()
+                if nm_check.data:
+                    active_slug = nm_check.data[0].get("model_slug", "")
+            except Exception:
+                pass
+            supabase_mgr.upsert_node_models(node_hash, pool_models, active_slug)
+        except Exception as e:
+            logger.debug(f"node_models upsert in heartbeat failed: {e}")
 
     if should_broadcast and sse_mgr:
         try:
