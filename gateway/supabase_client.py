@@ -274,7 +274,7 @@ class SupabaseManager:
                 try:
                     nm_result = self.client.table("node_models").select("model_slug").eq(
                         "node_hash", node_hash
-                    ).eq("is_active", True).execute()
+                    ).eq("is_active", True).eq("status", "active").execute()
                     if nm_result.data:
                         active_slug = nm_result.data[0].get("model_slug", "")
                 except Exception:
@@ -312,11 +312,15 @@ class SupabaseManager:
                 {"status": "inactive"}
             ).eq("node_hash", node_hash).execute()
 
-            # Also clean up node_models
+            # Mark all node_models as evicted
             try:
-                self.client.table("node_models").delete().eq("node_hash", node_hash).execute()
+                self.client.table("node_models").update({
+                    "status": "evicted",
+                    "is_active": False,
+                    "updated_at": "now()",
+                }).eq("node_hash", node_hash).eq("status", "active").execute()
             except Exception as e:
-                logger.debug(f"Error cleaning node_models: {e}")
+                logger.debug(f"Error evicting node_models: {e}")
 
             return len(result.data) > 0
         except Exception as e:
@@ -354,6 +358,7 @@ class SupabaseManager:
                     "model_slug": model_slug,
                     "ctx_length": ctx_length,
                     "is_active": is_active,
+                    "status": "active",
                     "updated_at": "now()",
                 }, on_conflict="node_hash,model_slug").execute()
 
@@ -361,35 +366,42 @@ class SupabaseManager:
         except Exception as e:
             logger.error(f"Error upserting node_models: {e}")
 
-    def get_node_models(self, node_hash: str) -> list:
-        """Get all model entries for a node."""
+    def get_node_models(self, node_hash: str, status: str = "active") -> list:
+        """Get model entries for a node, filtered by status."""
         try:
-            result = self.client.table("node_models").select("*").eq(
+            q = self.client.table("node_models").select("*").eq(
                 "node_hash", node_hash
-            ).execute()
+            )
+            if status:
+                q = q.eq("status", status)
+            result = q.execute()
             return result.data or []
         except Exception as e:
             logger.error(f"Error getting node_models: {e}")
             return []
 
-    def delete_stale_node_models(self, node_hash: str, valid_slugs: list) -> None:
-        """Remove node_models entries that are no longer in the pool."""
+    def evict_stale_node_models(self, node_hash: str, valid_slugs: list) -> None:
+        """Mark node_models entries no longer in the pool as evicted."""
         try:
             if not valid_slugs:
                 return
             result = self.client.table("node_models").select("model_slug").eq(
                 "node_hash", node_hash
-            ).execute()
+            ).eq("status", "active").execute()
             if not result.data:
                 return
             for row in result.data:
                 if row["model_slug"] not in valid_slugs:
-                    self.client.table("node_models").delete().eq(
+                    self.client.table("node_models").update({
+                        "status": "evicted",
+                        "is_active": False,
+                        "updated_at": "now()",
+                    }).eq(
                         "node_hash", node_hash
                     ).eq("model_slug", row["model_slug"]).execute()
-                    logger.debug(f"Removed stale node_model {row['model_slug']} for {node_hash}")
+                    logger.debug(f"Evicted stale node_model {row['model_slug']} for {node_hash}")
         except Exception as e:
-            logger.error(f"Error deleting stale node_models: {e}")
+            logger.error(f"Error evicting stale node_models: {e}")
 
     def get_user_nodes(self, user_id: str) -> List[Dict[str, Any]]:
         try:
@@ -404,7 +416,7 @@ class SupabaseManager:
                     try:
                         nm = self.client.table("node_models").select("model_name").eq(
                             "node_hash", node_hash
-                        ).eq("is_active", True).execute()
+                        ).eq("is_active", True).eq("status", "active").execute()
                         if nm.data:
                             node["model_name"] = nm.data[0].get("model_name", "unknown")
                         else:
@@ -424,7 +436,7 @@ class SupabaseManager:
             if model_slug:
                 nm = self.client.table("node_models").select("node_hash").eq(
                     "model_slug", model_slug
-                ).execute()
+                ).eq("status", "active").execute()
                 hashes = [r["node_hash"] for r in (nm.data or [])]
                 if not hashes:
                     return []
@@ -434,7 +446,7 @@ class SupabaseManager:
             elif query:
                 nm = self.client.table("node_models").select("node_hash").ilike(
                     "model_name", f"%{query}%"
-                ).execute()
+                ).eq("status", "active").execute()
                 hashes = [r["node_hash"] for r in (nm.data or [])]
                 if not hashes:
                     return []
@@ -455,7 +467,7 @@ class SupabaseManager:
         try:
             nm_result = self.client.table("node_models").select(
                 "node_hash, ctx_length"
-            ).eq("model_slug", model_slug).execute()
+            ).eq("model_slug", model_slug).eq("status", "active").execute()
 
             if not nm_result.data:
                 return []
@@ -483,7 +495,7 @@ class SupabaseManager:
             try:
                 nm_result = self.client.table("node_models").select(
                     "node_hash, model_name, model_slug, ctx_length, is_active"
-                ).execute()
+                ).eq("status", "active").execute()
 
                 if nm_result.data:
                     models: Dict[str, Dict] = {}
@@ -597,7 +609,7 @@ class SupabaseManager:
 
             # Count models from node_models junction table
             try:
-                nm_result = self.client.table("node_models").select("model_slug").execute()
+                nm_result = self.client.table("node_models").select("model_slug").eq("status", "active").execute()
                 models = set(r["model_slug"] for r in (nm_result.data or []))
             except Exception:
                 models = set()

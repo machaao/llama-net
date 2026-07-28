@@ -442,20 +442,26 @@ class GatewayClient:
 
     def _get_models_with_context(self) -> list:
         """Build models list with ctx_length for each model in pool."""
-        models = [{"name": self.model_name, "ctx_length": 0}]
         if self.model_pool:
             try:
                 pool_info = self.model_pool.get_network_info()
-                models = pool_info.get("models", [])
+                pool_models = pool_info.get("models", [])
+                if not pool_models:
+                    return []  # Pool empty — don't include stale model_name
                 active_name = self.model_name
-                names = {m["name"] for m in models}
-                if active_name not in names:
-                    active_slot = self.model_pool.get_active()
-                    ctx = active_slot.n_ctx if active_slot else 0
-                    models.insert(0, {"name": active_name, "ctx_length": ctx})
+                if active_name and active_name != "No Model Loaded":
+                    names = {m["name"] for m in pool_models}
+                    if active_name not in names:
+                        active_slot = self.model_pool.get_active()
+                        ctx = active_slot.n_ctx if active_slot else 0
+                        pool_models.insert(0, {"name": active_name, "ctx_length": ctx})
+                return pool_models
             except Exception:
                 pass
-        return models
+        # Fallback: only return model_name if it's a real model
+        if self.model_name and self.model_name != "No Model Loaded":
+            return [{"name": self.model_name, "ctx_length": 0}]
+        return []
 
     def _get_active_context_length_value(self) -> int:
         """Get ctx_length for the active model."""

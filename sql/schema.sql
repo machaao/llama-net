@@ -108,6 +108,10 @@ CREATE TABLE IF NOT EXISTS node_models (
 CREATE INDEX IF NOT EXISTS idx_node_models_slug ON node_models(model_slug);
 CREATE INDEX IF NOT EXISTS idx_node_models_ctx ON node_models(ctx_length);
 
+-- 8b. Add status column to node_models for soft-delete tracking
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+CREATE INDEX IF NOT EXISTS idx_node_models_status ON node_models(node_hash, status);
+
 -- 9. Add context length to nodes table for primary model
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ctx_length INTEGER DEFAULT 0;
 
