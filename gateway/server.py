@@ -1042,10 +1042,21 @@ async def publish_node_event(request: Request):
                 elif isinstance(m, str):
                     event_pool_models.append({"name": m, "ctx_length": 0})
 
-            if event_pool_models:
-                event_metrics["pool_models"] = event_pool_models
-                event_metrics["pool_size"] = len(event_pool_models)
+            # Always track pool state — even when empty
+            event_metrics["pool_models"] = event_pool_models
+            event_metrics["pool_size"] = len(event_pool_models)
 
+            if not event_pool_models:
+                # Pool drained — clean up ALL node_models entries for this node
+                try:
+                    supabase_mgr.client.table("node_models").delete().eq(
+                        "node_hash", node_hash
+                    ).execute()
+                    logger.info(f"🧹 Pool empty — cleaned all node_models for {node_hash}")
+                except Exception as e:
+                    logger.debug(f"Pool empty cleanup failed: {e}")
+
+            if event_pool_models:
                 # Active model is tracked via node_models.is_active — no nodes table update needed
                 active_model = next(
                     (m for m in event_pool_models if isinstance(m, dict) and m.get("is_active")),
@@ -1080,7 +1091,7 @@ async def publish_node_event(request: Request):
                 # Detect empty pool state from node event
                 is_pool_empty = (
                     not event_pool_models
-                    and body.get("pool_empty", False)
+                    or body.get("metrics", {}).get("pool_empty", False)
                 )
 
                 await sse_mgr.broadcast("node_updated", {

@@ -341,10 +341,11 @@ class GatewayClient:
             if self.model_pool:
                 pool_info = self.model_pool.get_network_info()
                 models_list = pool_info.get("models", [])
-                if models_list:
-                    # Object format: [{"name": "model", "ctx_length": N}]
-                    metrics["pool_models"] = models_list
-                    metrics["pool_size"] = len(models_list)
+                # Always include pool_models — even when empty (signals pool drained)
+                metrics["pool_models"] = models_list
+                metrics["pool_size"] = len(models_list)
+                if not models_list:
+                    metrics["pool_empty"] = True
 
             payload = {
                 "event_type": event_type,
