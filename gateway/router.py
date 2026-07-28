@@ -396,7 +396,7 @@ class ModelRouter:
                 await session.close()
                 await self._track_response_tokens(auth_key, data)
                 if "node_info" not in data:
-                    data["node_info"] = {"node_id": node["node_hash"], "model": node["model_name"], "processing_node": "routed"}
+                    data["node_info"] = {"node_id": node["node_hash"], "model": effective_model, "processing_node": "routed"}
                 return JSONResponse(content=data, headers=extra_headers)
         except asyncio.TimeoutError:
             logger.warning(f"Timeout forwarding to peer {node.get('node_hash', '')[:8]}")
