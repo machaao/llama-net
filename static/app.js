@@ -3987,7 +3987,7 @@ class ModelDownloaderUI {
                         </div>
                     </div>
                     <div class="d-flex gap-2">
-                        ${model.exists ? `<button class="btn btn-sm btn-primary" onclick="modelDownloader.selectModel('${this.escapeHtml(model.local_path)}')"><i class="fas fa-check"></i> Use</button>` : ''}
+                        ${model.exists ? `<button class="btn btn-sm btn-primary" onclick="modelDownloader.selectModel('${this.escapeHtml(model.local_path.replace(/\\/g, '\\\\'))}')"><i class="fas fa-check"></i> Use</button>` : ''}
                         <button class="btn btn-sm btn-outline-danger" onclick="modelDownloader.deleteModel('${this.escapeHtml(model.id)}')"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
