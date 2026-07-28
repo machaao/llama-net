@@ -540,7 +540,10 @@ class SupabaseManager:
                         models[slug]["node_count"] = len(models[slug]["nodes"])
 
                     if node_hashes_needed:
-                        nodes_result = self.client.table("nodes").select("*").eq(
+                        nodes_result = self.client.table("nodes").select(
+                            "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
+                            "uptime, total_tokens, status, last_heartbeat, created_at, ctx_length"
+                        ).eq(
                             "status", "active"
                         ).in_("node_hash", list(node_hashes_needed)).execute()
                         nodes_by_hash = {
