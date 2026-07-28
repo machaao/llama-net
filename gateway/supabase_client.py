@@ -197,7 +197,6 @@ class SupabaseManager:
             metrics = metrics or {}
             node_data = {
                 "node_hash": node_hash, "user_id": user_id,
-                "model_name": model_name, "model_slug": model_slug,
                 "url": url, "ip": ip, "port": port, "gpu_info": gpu_info,
                 "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                 "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
@@ -270,32 +269,20 @@ class SupabaseManager:
                 pool_models = metrics["pool_models"]
                 update_data["pool_models"] = pool_models
                 update_data["metrics"] = {"pool_models": pool_models}
-                # Extract ctx_length from pool models for nodes table
+                # Extract active model slug from node_models junction table
                 active_slug = ""
                 try:
-                    node_result = self.client.table("nodes").select("model_slug").eq(
+                    nm_result = self.client.table("node_models").select("model_slug").eq(
                         "node_hash", node_hash
-                    ).execute()
-                    if node_result.data:
-                        active_slug = node_result.data[0].get("model_slug", "")
+                    ).eq("is_active", True).execute()
+                    if nm_result.data:
+                        active_slug = nm_result.data[0].get("model_slug", "")
                 except Exception:
                     pass
                 self.upsert_node_models(node_hash, pool_models, active_slug)
-                # Update primary model ctx_length from active model in pool
-                primary = next(
-                    (m for m in pool_models if isinstance(m, dict) and m.get("model_name") == active_slug),
-                    None
-                )
-                if not primary:
-                    primary = next(
-                        (m for m in pool_models if isinstance(m, dict) and m.get("name") == active_slug),
-                        None
-                    )
-                if primary:
-                    update_data["ctx_length"] = primary.get("ctx_length", 0)
-                elif pool_models:
-                    # Fallback: use first model's ctx_length
-                    update_data["ctx_length"] = pool_models[0].get("ctx_length", 0) if isinstance(pool_models[0], dict) else 0
+                # Use ctx_length from first pool model or direct metric
+                if pool_models and isinstance(pool_models[0], dict):
+                    update_data["ctx_length"] = pool_models[0].get("ctx_length", 0)
 
             # Also accept ctx_length directly from metrics (for event payload)
             if "ctx_length" in metrics and isinstance(metrics["ctx_length"], int):
@@ -419,11 +406,30 @@ class SupabaseManager:
         status: str = "active", limit: int = 50
     ) -> List[Dict[str, Any]]:
         try:
-            q = self.client.table("nodes").select("*").eq("status", status).limit(limit)
             if model_slug:
-                q = q.eq("model_slug", model_slug)
+                nm = self.client.table("node_models").select("node_hash").eq(
+                    "model_slug", model_slug
+                ).execute()
+                hashes = [r["node_hash"] for r in (nm.data or [])]
+                if not hashes:
+                    return []
+                q = self.client.table("nodes").select("*").in_(
+                    "node_hash", hashes
+                ).eq("status", status).limit(limit)
             elif query:
-                q = q.ilike("model_name", f"%{query}%")
+                nm = self.client.table("node_models").select("node_hash").ilike(
+                    "model_name", f"%{query}%"
+                ).execute()
+                hashes = [r["node_hash"] for r in (nm.data or [])]
+                if not hashes:
+                    return []
+                q = self.client.table("nodes").select("*").in_(
+                    "node_hash", hashes
+                ).eq("status", status).limit(limit)
+            else:
+                q = self.client.table("nodes").select("*").eq(
+                    "status", status
+                ).limit(limit)
             result = q.execute()
             return result.data or []
         except Exception as e:
@@ -432,32 +438,24 @@ class SupabaseManager:
 
     def get_nodes_for_model(self, model_slug: str) -> List[Dict[str, Any]]:
         try:
-            # Try node_models junction for ctx_length
-            try:
-                nm_result = self.client.table("node_models").select(
-                    "node_hash, ctx_length"
-                ).eq("model_slug", model_slug).execute()
+            nm_result = self.client.table("node_models").select(
+                "node_hash, ctx_length"
+            ).eq("model_slug", model_slug).execute()
 
-                if nm_result.data:
-                    node_hashes = [r["node_hash"] for r in nm_result.data]
-                    ctx_map = {r["node_hash"]: r.get("ctx_length", 0) for r in nm_result.data}
+            if not nm_result.data:
+                return []
 
-                    nodes_result = self.client.table("nodes").select("*").in_(
-                        "node_hash", node_hashes
-                    ).eq("status", "active").order("load").execute()
+            node_hashes = [r["node_hash"] for r in nm_result.data]
+            ctx_map = {r["node_hash"]: r.get("ctx_length", 0) for r in nm_result.data}
 
-                    for node in (nodes_result.data or []):
-                        node["ctx_length"] = ctx_map.get(node["node_hash"], 0)
-
-                    return nodes_result.data or []
-            except Exception as e:
-                logger.debug(f"node_models join failed for get_nodes_for_model: {e}")
-
-            # Fallback
-            result = self.client.table("nodes").select("*").eq(
-                "model_slug", model_slug
+            nodes_result = self.client.table("nodes").select("*").in_(
+                "node_hash", node_hashes
             ).eq("status", "active").order("load").execute()
-            return result.data or []
+
+            for node in (nodes_result.data or []):
+                node["ctx_length"] = ctx_map.get(node["node_hash"], 0)
+
+            return nodes_result.data or []
         except Exception as e:
             logger.error(f"Error getting nodes for model: {e}")
             return []
@@ -533,82 +531,8 @@ class SupabaseManager:
                     return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
 
             except Exception as e:
-                logger.warning(f"node_models query failed, falling back to legacy: {e}")
-
-            # ── Fallback: legacy JSONB pool_models parsing ──
-            result = self.client.table("nodes").select(
-                "model_name, model_slug, ctx_length"
-            ).eq("status", "active").execute()
-            if not result.data:
+                logger.warning(f"node_models query failed: {e}")
                 return []
-            models = {}
-            for node in result.data:
-                slug = node["model_slug"]
-                if slug not in models:
-                    models[slug] = {
-                        "model_name": node["model_name"],
-                        "model_slug": slug,
-                        "node_count": 0,
-                    }
-                models[slug]["node_count"] += 1
-
-            all_nodes_result = self.client.table("nodes").select("*").eq(
-                "status", "active"
-            ).execute()
-            all_nodes = all_nodes_result.data or []
-
-            if all_nodes:
-                for node in all_nodes:
-                    node_hash = node.get("node_hash", "")
-                    node_metrics = node.get("metrics", {}) or {}
-                    all_model_names = node_metrics.get("pool_models", []) or node.get("pool_models", [])
-                    seen_slugs = set()
-                    for pool_model in all_model_names:
-                        if isinstance(pool_model, dict):
-                            pool_model_name = pool_model.get("name", "")
-                        else:
-                            pool_model_name = str(pool_model)
-                        if not pool_model_name:
-                            continue
-                        pool_slug = model_name_to_slug(pool_model_name)
-                        if pool_slug in seen_slugs:
-                            continue
-                        seen_slugs.add(pool_slug)
-                        if pool_slug not in models:
-                            models[pool_slug] = {
-                                "model_name": pool_model_name,
-                                "model_slug": pool_slug,
-                                "node_count": 0,
-                                "pool_discovered": True,
-                                "nodes": [],
-                            }
-                        if "nodes" not in models[pool_slug]:
-                            models[pool_slug]["nodes"] = []
-                        node_hashes = [n.get("node_hash", "") for n in models[pool_slug]["nodes"]]
-                        if node_hash not in node_hashes:
-                            models[pool_slug]["nodes"].append(node)
-                            models[pool_slug]["node_count"] = len(models[pool_slug]["nodes"])
-
-            for slug, model in models.items():
-                existing_nodes = model.get("nodes", [])
-                existing_hashes = {n.get("node_hash") for n in existing_nodes}
-                primary_nodes = self.get_nodes_for_model(slug)
-                for node in primary_nodes:
-                    nh = node.get("node_hash")
-                    if nh and nh not in existing_hashes:
-                        existing_nodes.append(node)
-                        existing_hashes.add(nh)
-                nodes = existing_nodes
-                model["nodes"] = nodes
-                model["node_count"] = len(nodes)
-                model["total_tps"] = sum(n.get("tps", 0) for n in nodes)
-                model["avg_load"] = sum(n.get("load", 0) for n in nodes) / len(nodes) if nodes else 0
-                model["avg_ttft"] = sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes) if nodes else 0
-                model["total_tokens"] = sum(n.get("total_tokens", 0) for n in nodes)
-                model["best_node"] = min(nodes, key=lambda n: n.get("load", 1)) if nodes else None
-
-            models = {slug: m for slug, m in models.items() if m["node_count"] > 0}
-            return sorted(models.values(), key=lambda m: m["node_count"], reverse=True)
         except Exception as e:
             logger.error(f"Error listing active models: {e}")
             return []
@@ -656,20 +580,12 @@ class SupabaseManager:
             if not nodes:
                 return {"total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0, "total_tokens": cumulative}
 
-            models = set(n["model_slug"] for n in nodes)
-
-            # Also count pool models from persisted DB metrics column
-            for n in nodes:
-                node_metrics = n.get("metrics", {}) or {}
-                pool_list = node_metrics.get("pool_models", []) or n.get("pool_models", []) or []
-                for pool_model in pool_list:
-                    if isinstance(pool_model, dict):
-                        pool_model_name = pool_model.get("name", "")
-                    else:
-                        pool_model_name = str(pool_model)
-                    if pool_model_name and isinstance(pool_model_name, str):
-                        slug = model_name_to_slug(pool_model_name)
-                        models.add(slug)
+            # Count models from node_models junction table
+            try:
+                nm_result = self.client.table("node_models").select("model_slug").execute()
+                models = set(r["model_slug"] for r in (nm_result.data or []))
+            except Exception:
+                models = set()
 
             active_tokens = sum(n.get("total_tokens", 0) for n in nodes)
             return {
