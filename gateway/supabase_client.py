@@ -542,6 +542,12 @@ class SupabaseManager:
                             "node_hash": nm["node_hash"],
                             "ctx_length": nm.get("ctx_length", 0),
                             "is_active": nm.get("is_active", False),
+                            "load": nm.get("load", 0),
+                            "tps": nm.get("tps", 0),
+                            "ttft": nm.get("ttft"),
+                            "latency": nm.get("latency"),
+                            "total_tokens": nm.get("total_tokens", 0),
+                            "uptime": nm.get("uptime", 0),
                         })
                         models[slug]["node_count"] = len(models[slug]["nodes"])
 
