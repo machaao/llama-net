@@ -309,21 +309,30 @@ class LlamaWrapper:
         return formatted
 
     def _cap_max_tokens(self, max_tokens: int, formatted_messages: list) -> int:
-        """Cap max_tokens so prompt + completion fits within n_ctx."""
+        """Cap max_tokens based only on available context window.
+
+        The requested max_tokens from the API is ignored — let llama.cpp
+        auto-determine the optimal generation length.  Only cap to ensure
+        prompt + completion fits within n_ctx.
+        """
         try:
             n_ctx = self.llm.n_ctx() if self.llm else 4096
             prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
             prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
-            available = n_ctx - prompt_tokens - 64  # 64-token safety margin
-            capped = min(max_tokens, max(1, available))
-            if capped < max_tokens:
-                logger.info(
-                    f"max_tokens capped: {max_tokens} → {capped} "
-                    f"(prompt={prompt_tokens}, n_ctx={n_ctx})"
+            # 64-token safety margin for internal processing
+            available = n_ctx - prompt_tokens - 64
+            if available <= 0:
+                logger.warning(
+                    f"No context space for completion: prompt={prompt_tokens}, n_ctx={n_ctx}"
                 )
-            return capped
+                return 1
+            logger.info(
+                f"max_tokens auto-set: {available} tokens available "
+                f"(prompt={prompt_tokens}, n_ctx={n_ctx}, requested={max_tokens} ignored)"
+            )
+            return available
         except Exception:
-            return max_tokens
+            return 2048
 
     def _adapt_messages_for_format(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Adapt messages for chat formats that don't support system roles.
