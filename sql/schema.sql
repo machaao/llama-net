@@ -113,5 +113,6 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ctx_length INTEGER DEFAULT 0;
 
 -- 10. Remove redundant model columns from nodes table
 -- node_models junction table is now the single source of truth for model info
+DROP INDEX IF EXISTS idx_nodes_model_slug;
 ALTER TABLE nodes DROP COLUMN IF EXISTS model_name;
 ALTER TABLE nodes DROP COLUMN IF EXISTS model_slug;

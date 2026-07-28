@@ -306,21 +306,7 @@ class ModelRouter:
         model_slug = model_name_to_slug(model_name)
         nodes = self.db.get_nodes_for_model(model_slug)
 
-        if not nodes:
-            all_active = self.db.search_nodes(status="active", limit=100)
-            for node in all_active:
-                node_metrics = node.get("metrics", {}) or {}
-                pool_models = node_metrics.get("pool_models", []) or node.get("pool_models", [])
-                pool_slugs = [model_name_to_slug(m) for m in pool_models]
-                if model_slug in pool_slugs:
-                    nodes.append(node)
-
-        if not nodes:
-            all_models = self.db.list_active_models()
-            for m in all_models:
-                if model_slug in m["model_slug"] or m["model_slug"] in model_slug:
-                    nodes = m.get("nodes", [])
-                    break
+        # node_models is the single source of truth — no fallback needed
 
         if not nodes:
             return None

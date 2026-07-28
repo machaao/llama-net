@@ -65,34 +65,56 @@ class LandingApp {
                 if (data.stats) this.updateStatsDisplay(data.stats);
                 break;
             case 'node_joined':
-                // Track pool models for this node
                 if (!this._lastKnownNodes) this._lastKnownNodes = {};
                 if (!this._nodePoolModels) this._nodePoolModels = {};
-                this._lastKnownNodes[data.node_hash] = data.model_name;
-                if (data.pool_models && data.pool_models.length > 0) {
-                    this._nodePoolModels[data.node_hash] = data.pool_models;
+                if (data.pool_empty) {
+                    this._lastPoolData = null;
+                    this.selectedModel = null;
+                    localStorage.removeItem('llamanet_selected_model');
+                    this.updateChatInterface('No Model Loaded');
+                    this.updateChatModelSelector();
+                    const banner = document.getElementById('no-model-banner');
+                    if (banner) banner.style.display = 'block';
+                } else {
+                    this._lastKnownNodes[data.node_hash] = data.model_name;
+                    if (data.pool_models && data.pool_models.length > 0) {
+                        this._nodePoolModels[data.node_hash] = data.pool_models;
+                    }
                 }
                 this.debouncedRefresh();
-                this.showToast(`🆕 New node online: ${this.escapeHtml(data.model_name || '')}`);
+                this.showToast('success', '🆕 New node online: ' + this.escapeHtml(data.model_name || ''));
                 break;
             case 'node_updated':
-                // Detect model name change (hot-reload)
                 if (!this._lastKnownNodes) this._lastKnownNodes = {};
                 if (!this._nodePoolModels) this._nodePoolModels = {};
-                const prevNode = this._lastKnownNodes?.[data.node_hash];
-                const modelChanged = prevNode && prevNode !== data.model_name && data.model_name;
+
+                // Pool drained — clear all local state
+                if (data.pool_empty) {
+                    this._lastPoolData = null;
+                    delete this._nodePoolModels[data.node_hash];
+                    delete this._lastKnownNodes[data.node_hash];
+                    this.selectedModel = null;
+                    localStorage.removeItem('llamanet_selected_model');
+                    this.updateChatInterface('No Model Loaded');
+                    this.updateChatModelSelector();
+                    const banner = document.getElementById('no-model-banner');
+                    if (banner) banner.style.display = 'block';
+                    this.debouncedRefresh();
+                    this.showToast('info', 'Model unloaded — pool empty');
+                    break;
+                }
+
+                const prevNodeModel = this._lastKnownNodes?.[data.node_hash];
+                const modelChanged = prevNodeModel && prevNodeModel !== data.model_name && data.model_name;
                 this._lastKnownNodes[data.node_hash] = data.model_name;
-                // Track pool models
                 if (data.pool_models && data.pool_models.length > 0) {
                     const prevPool = this._nodePoolModels[data.node_hash];
                     const poolChanged = !prevPool || JSON.stringify(prevPool) !== JSON.stringify(data.pool_models);
                     this._nodePoolModels[data.node_hash] = data.pool_models;
-                    if (poolChanged) {
-                        this.debouncedRefresh();
-                    }
+                    if (poolChanged) this.debouncedRefresh();
                 }
                 if (modelChanged) {
-                    this.showToast(`🔄 Node ${data.node_hash?.substring(0, 8)}... switched to ${this.escapeHtml(data.model_name)}`);
+                    this.showToast('success', '🔄 Node ' + (data.node_hash?.substring(0, 8) || '') + '... switched to ' + this.escapeHtml(data.model_name));
                     this._lastKnownNodes[data.node_hash] = data.model_name;
                 }
                 this.debouncedRefresh();

@@ -374,6 +374,16 @@ class LlamaNetUI {
             if (resp.ok) {
                 const data = await resp.json();
                 if (data.enabled) {
+                    // Pool empty — clear cached state
+                    if (data.used_slots === 0) {
+                        this._lastPoolData = null;
+                        this.selectedModel = null;
+                        localStorage.removeItem('llamanet_selected_model');
+                        this.updateChatInterface('No Model Loaded');
+                        this.updateChatModelSelector();
+                        const banner = document.getElementById('no-model-banner');
+                        if (banner) banner.style.display = 'block';
+                    }
                     this._lastPoolData = data;
                     this.updatePoolStatusBar(data);
                     this.updateModelSwitcher(data);
