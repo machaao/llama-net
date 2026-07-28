@@ -195,13 +195,60 @@ class SupabaseManager:
     ) -> Dict[str, Any]:
         try:
             metrics = metrics or {}
+
+            # ── Read existing node to preserve cumulative metrics on rejoin ──
+            existing_tokens = 0
+            existing_load = 0.0
+            existing_tps = 0.0
+            existing_ttft = None
+            existing_latency = None
+            existing_uptime = 0
+            try:
+                existing_result = self.client.table("nodes").select(
+                    "total_tokens, load, tps, ttft, latency, uptime"
+                ).eq("node_hash", node_hash).execute()
+                if existing_result.data:
+                    row = existing_result.data[0]
+                    existing_tokens = row.get("total_tokens", 0) or 0
+                    existing_load = row.get("load", 0) or 0
+                    existing_tps = row.get("tps", 0) or 0
+                    existing_ttft = row.get("ttft")
+                    existing_latency = row.get("latency")
+                    existing_uptime = row.get("uptime", 0) or 0
+            except Exception:
+                pass
+
+            incoming_tokens = metrics.get("total_tokens", 0)
+
+            # ── Handle restart: if tokens decreased, accumulate old value ──
+            if incoming_tokens < existing_tokens and existing_tokens > 0:
+                self._add_cumulative_tokens(existing_tokens)
+                self._node_token_cache.pop(node_hash, None)
+                logger.info(
+                    f"Node {node_hash} rejoining — accumulated {existing_tokens} "
+                    f"tokens to cumulative total"
+                )
+
+            # ── Merge: cumulative = max, instantaneous = incoming if non-zero ──
+            effective_tokens = max(incoming_tokens, existing_tokens)
+            effective_load = metrics.get("load", 0) or existing_load
+            effective_tps = metrics.get("tps", 0) or existing_tps
+            effective_ttft = metrics.get("ttft") if metrics.get("ttft") is not None else existing_ttft
+            effective_latency = (
+                metrics.get("latency") if metrics.get("latency") is not None
+                else existing_latency
+            )
+            effective_uptime = metrics.get("uptime", 0) or existing_uptime
+
+            self._node_token_cache[node_hash] = effective_tokens
+
             node_data = {
                 "node_hash": node_hash, "user_id": user_id,
                 "url": url, "ip": ip, "port": port, "gpu_info": gpu_info,
-                "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
-                "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
-                "uptime": metrics.get("uptime", 0),
-                "total_tokens": metrics.get("total_tokens", 0),
+                "load": effective_load, "tps": effective_tps,
+                "ttft": effective_ttft, "latency": effective_latency,
+                "uptime": effective_uptime,
+                "total_tokens": effective_tokens,
                 "ctx_length": ctx_length,
                 "status": "active", "last_heartbeat": "now()",
             }
@@ -211,7 +258,7 @@ class SupabaseManager:
             all_models = models_list or [{"name": model_name, "ctx_length": ctx_length}]
             self.upsert_node_models(node_hash, all_models, model_slug)
 
-            logger.info(f"Registered node {node_hash[:12]}... model={model_name}")
+            logger.info(f"Registered node {node_hash[:12]}... model={model_name} tokens={effective_tokens}")
             return result.data[0] if result.data else node_data
         except Exception as e:
             logger.error(f"Error registering node: {e}")
@@ -330,9 +377,25 @@ class SupabaseManager:
 
         models_list: [{"name": "model-a", "ctx_length": 8192, "tps": 12.5, ...}, ...]
         Handles backward compat: if item is a string, wraps it.
+
+        Cumulative metrics (total_tokens) are preserved via max(existing, incoming).
+        Instantaneous metrics (load, tps, ttft, latency, uptime) use incoming if
+        non-zero, otherwise keep existing — prevents a zero-valued join payload
+        from wiping out the last known state.
         """
         try:
             from gateway.node_registry import model_name_to_slug
+
+            # ── Read all existing node_models once for metric preservation ──
+            existing_map: Dict[str, Dict] = {}
+            try:
+                existing_result = self.client.table("node_models").select(
+                    "model_slug, total_tokens, load, tps, ttft, latency, uptime"
+                ).eq("node_hash", node_hash).eq("status", "active").execute()
+                for row in (existing_result.data or []):
+                    existing_map[row["model_slug"]] = row
+            except Exception:
+                pass
 
             for model in models_list:
                 if isinstance(model, str):
@@ -352,6 +415,24 @@ class SupabaseManager:
                 model_slug = model_name_to_slug(model_name)
                 is_active = (model_slug == active_model_slug) if active_model_slug else (len(models_list) == 1)
 
+                # ── Preserve cumulative metrics from existing row ──
+                existing = existing_map.get(model_slug, {})
+                existing_tokens = existing.get("total_tokens", 0) or 0
+                incoming_tokens = model_metrics.get("total_tokens", 0)
+
+                effective_tokens = max(incoming_tokens, existing_tokens)
+                effective_load = model_metrics.get("load", 0) or existing.get("load", 0) or 0
+                effective_tps = model_metrics.get("tps", 0) or existing.get("tps", 0) or 0
+                effective_ttft = (
+                    model_metrics.get("ttft") if model_metrics.get("ttft") is not None
+                    else existing.get("ttft")
+                )
+                effective_latency = (
+                    model_metrics.get("latency") if model_metrics.get("latency") is not None
+                    else existing.get("latency")
+                )
+                effective_uptime = model_metrics.get("uptime", 0) or existing.get("uptime", 0) or 0
+
                 self.client.table("node_models").upsert({
                     "node_hash": node_hash,
                     "model_name": model_name,
@@ -360,12 +441,12 @@ class SupabaseManager:
                     "is_active": is_active,
                     "status": "active",
                     "updated_at": "now()",
-                    "load": model_metrics.get("load", 0),
-                    "tps": model_metrics.get("tps", 0),
-                    "ttft": model_metrics.get("ttft"),
-                    "latency": model_metrics.get("latency"),
-                    "total_tokens": model_metrics.get("total_tokens", 0),
-                    "uptime": model_metrics.get("uptime", 0),
+                    "load": effective_load,
+                    "tps": effective_tps,
+                    "ttft": effective_ttft,
+                    "latency": effective_latency,
+                    "total_tokens": effective_tokens,
+                    "uptime": effective_uptime,
                 }, on_conflict="node_hash,model_slug").execute()
 
             logger.debug(f"Upserted {len(models_list)} node_models for {node_hash}")
