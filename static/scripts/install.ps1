@@ -293,6 +293,29 @@ if (-not $existingBootstrap) {
     Write-Ok "Bootstrap peers already configured: $existingBootstrap"
 }
 
+# ── Step 7b: Install Cloudflare Tunnel ──
+Write-Step "Checking cloudflared..."
+$cloudflaredCmd = Get-Command cloudflared -ErrorAction SilentlyContinue
+if ($cloudflaredCmd) {
+    Write-Ok "cloudflared found at $($cloudflaredCmd.Source)"
+} else {
+    Write-Host "  Downloading cloudflared for Windows..." -ForegroundColor DarkGray
+    $cfArch = if ($arch -eq "ARM64") { "arm64" } else { "amd64" }
+    $cfUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-${cfArch}.exe"
+    $cfDest = Join-Path $BinDir "cloudflared.exe"
+    try {
+        Invoke-WebRequest -Uri $cfUrl -OutFile $cfDest -UseBasicParsing -ErrorAction Stop
+        Write-Ok "cloudflared installed to $cfDest"
+        # Add to PATH if not already there
+        if ($env:Path -notlike "*$BinDir*") {
+            $env:Path = "$BinDir;$env:Path"
+        }
+    } catch {
+        Write-Warn "Failed to download cloudflared: $($_.Exception.Message)"
+        Write-Host "  Install manually from: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/" -ForegroundColor Yellow
+    }
+}
+
 # ── Step 8: Create CLI Launcher ──
 Write-Step "Creating launcher..."
 
