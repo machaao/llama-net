@@ -295,6 +295,8 @@ async def network_events(request: Request):
                                 "ttft": nm_row.get("ttft"),
                                 "latency": nm_row.get("latency"),
                                 "total_tokens": nm_row.get("total_tokens", 0),
+                                "incoming_tokens": nm_row.get("incoming_tokens", 0),
+                                "generated_tokens": nm_row.get("generated_tokens", 0),
                                 "uptime": nm_row.get("uptime", 0),
                             }
                     except Exception:
@@ -994,6 +996,8 @@ async def publish_node_event(request: Request):
                     "ttft": body.get("metrics", {}).get("ttft"),
                     "latency": body.get("metrics", {}).get("latency"),
                     "total_tokens": body.get("metrics", {}).get("total_tokens", 0),
+                    "incoming_tokens": body.get("metrics", {}).get("incoming_tokens", 0),
+                    "generated_tokens": body.get("metrics", {}).get("generated_tokens", 0),
                 })
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
 
@@ -1146,6 +1150,8 @@ async def publish_node_event(request: Request):
                     "ttft": event_metrics.get("ttft"),
                     "latency": event_metrics.get("latency"),
                     "total_tokens": event_metrics.get("total_tokens", 0),
+                    "incoming_tokens": event_metrics.get("incoming_tokens", 0),
+                    "generated_tokens": event_metrics.get("generated_tokens", 0),
                 })
 
         elif event_type == "peer_discovered":
