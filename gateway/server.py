@@ -123,9 +123,19 @@ async def _heartbeat_monitor_loop():
                         logger.info(f"🕐 Node {node_hash} stale (no heartbeat for {elapsed:.0f}s)")
                         supabase_mgr.deregister_node(node_hash)
                         if sse_mgr:
+                            # Derive model_name from node_models junction table
+                            stale_model = "unknown"
+                            try:
+                                nm = supabase_mgr.client.table("node_models").select("model_name").eq(
+                                    "node_hash", node_hash
+                                ).eq("is_active", True).execute()
+                                if nm.data:
+                                    stale_model = nm.data[0].get("model_name", "unknown")
+                            except Exception:
+                                pass
                             await sse_mgr.broadcast("node_left", {
                                 "node_hash": node_hash,
-                                "model_name": node.get("model_name", "unknown"),
+                                "model_name": stale_model,
                                 "reason": "heartbeat_timeout",
                             })
                             logger.info(f"📡 Broadcast node_left for stale node {node_hash[:8]}")
@@ -261,7 +271,17 @@ async def network_events(request: Request):
                 recent_nodes = supabase_mgr.search_nodes(status="active", limit=50)
                 for node in recent_nodes:
                     node_hash = node.get("node_hash", "")
-                    yield f"data: {json.dumps({'type': 'node_updated', 'node_hash': node_hash, 'model_name': node.get('model_name', 'unknown'), 'metrics': node.get('metrics', {})})}\n\n"
+                    # Derive model_name from node_models junction table
+                    active_model = "unknown"
+                    try:
+                        nm = supabase_mgr.client.table("node_models").select("model_name").eq(
+                            "node_hash", node_hash
+                        ).eq("is_active", True).execute()
+                        if nm.data:
+                            active_model = nm.data[0].get("model_name", "unknown")
+                    except Exception:
+                        pass
+                    yield f"data: {json.dumps({'type': 'node_updated', 'node_hash': node_hash, 'model_name': active_model, 'metrics': node.get('metrics', {})})}\n\n"
             except Exception:
                 pass
 

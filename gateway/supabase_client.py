@@ -396,7 +396,22 @@ class SupabaseManager:
             result = self.client.table("nodes").select("*").eq(
                 "user_id", user_id
             ).order("created_at", desc=True).execute()
-            return result.data or []
+            nodes = result.data or []
+            # Enrich with model_name from node_models junction table
+            for node in nodes:
+                node_hash = node.get("node_hash", "")
+                if node_hash:
+                    try:
+                        nm = self.client.table("node_models").select("model_name").eq(
+                            "node_hash", node_hash
+                        ).eq("is_active", True).execute()
+                        if nm.data:
+                            node["model_name"] = nm.data[0].get("model_name", "unknown")
+                        else:
+                            node["model_name"] = "unknown"
+                    except Exception:
+                        node["model_name"] = "unknown"
+            return nodes
         except Exception as e:
             logger.error(f"Error getting user nodes: {e}")
             return []
