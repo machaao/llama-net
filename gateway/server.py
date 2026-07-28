@@ -748,7 +748,6 @@ async def publish_node(request: Request):
             await sse_mgr.broadcast(event_type, {
                 "node_hash": node_hash,
                 "model_name": model_name,
-                "model_slug": model_slug,
                 "pool_models": models_list,
                 "ctx_length": ctx_length,
                 "load": reg_metrics.get("load", 0),
