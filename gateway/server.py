@@ -65,8 +65,14 @@ node_token_manager = None
 
 
 def _sanitize_node(node: dict) -> dict:
-    """Remove sensitive fields (url, ip, port) from a node dict for public API responses."""
-    sanitized = {k: v for k, v in node.items() if k not in ("url", "ip", "port")}
+    """Remove sensitive and redundant fields from a node dict for public API responses."""
+    sanitized = {k: v for k, v in node.items() if k not in (
+        "url", "ip", "port",           # network addresses
+        "node_token",                   # sensitive bearer token
+        "user_id",                      # internal user reference
+        "pool_models", "metrics",       # redundant JSONB (now tracked via node_models)
+        "id",                           # internal UUID
+    )}
     return sanitized
 
 
