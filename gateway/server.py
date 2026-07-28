@@ -576,13 +576,13 @@ async def node_heartbeat(request: Request):
                 "node_hash", node_hash
             ).eq("status", "active").execute()
             # Derive model name from node_models junction table
-            active_model_name = model_name  # fallback to heartbeat payload
+            active_model_name = body.get("model", "unknown")  # fallback to heartbeat payload
             try:
                 nm_result = supabase_mgr.client.table("node_models").select("model_name").eq(
                     "node_hash", node_hash
                 ).eq("is_active", True).execute()
                 if nm_result.data:
-                    active_model_name = nm_result.data[0].get("model_name", model_name)
+                    active_model_name = nm_result.data[0].get("model_name", active_model_name)
             except Exception:
                 pass
             if node.data:
@@ -695,6 +695,7 @@ async def publish_node(request: Request):
         ).execute()
         is_new = len(existing.data) == 0 or existing.data[0].get("status") != "active"
 
+        model_slug = model_name_to_slug(model_name)
         result = supabase_mgr.register_node(
             user_id=system_user_id, node_hash=node_hash, model_name=model_name,
             model_slug=model_slug, url=tunnel_url or body.get("url", ""),
@@ -859,6 +860,7 @@ async def publish_node_event(request: Request):
             except Exception:
                 pass
 
+            model_slug = model_name_to_slug(model_name)
             supabase_mgr.register_node(
                 user_id=system_user_id, node_hash=node_hash, model_name=model_name,
                 model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
@@ -890,7 +892,7 @@ async def publish_node_event(request: Request):
 
             if event_pool_models:
                 try:
-                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, model_slug)
+                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, model_name_to_slug(model_name))
                 except Exception as e:
                     logger.debug(f"node_models upsert in event failed: {e}")
 
