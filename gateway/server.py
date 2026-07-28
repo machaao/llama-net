@@ -277,17 +277,29 @@ async def network_events(request: Request):
                 recent_nodes = supabase_mgr.search_nodes(status="active", limit=50)
                 for node in recent_nodes:
                     node_hash = node.get("node_hash", "")
-                    # Derive model_name from node_models junction table
+                    # Derive model_name and per-model metrics from node_models junction table
                     active_model = "unknown"
+                    node_metrics = {}
                     try:
-                        nm = supabase_mgr.client.table("node_models").select("model_name").eq(
+                        nm = supabase_mgr.client.table("node_models").select(
+                            "model_name, load, tps, ttft, latency, total_tokens, uptime"
+                        ).eq(
                             "node_hash", node_hash
                         ).eq("is_active", True).eq("status", "active").execute()
                         if nm.data:
-                            active_model = nm.data[0].get("model_name", "unknown")
+                            nm_row = nm.data[0]
+                            active_model = nm_row.get("model_name", "unknown")
+                            node_metrics = {
+                                "load": nm_row.get("load", 0),
+                                "tps": nm_row.get("tps", 0),
+                                "ttft": nm_row.get("ttft"),
+                                "latency": nm_row.get("latency"),
+                                "total_tokens": nm_row.get("total_tokens", 0),
+                                "uptime": nm_row.get("uptime", 0),
+                            }
                     except Exception:
                         pass
-                    yield f"data: {json.dumps({'type': 'node_updated', 'node_hash': node_hash, 'model_name': active_model, 'metrics': node.get('metrics', {})})}\n\n"
+                    yield f"data: {json.dumps({'type': 'node_updated', 'node_hash': node_hash, 'model_name': active_model, 'metrics': node_metrics})}\n\n"
             except Exception:
                 pass
 
