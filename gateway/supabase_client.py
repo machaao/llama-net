@@ -584,9 +584,11 @@ class SupabaseManager:
                             {"status": "inactive"}
                         ).eq("node_hash", node["node_hash"]).execute()
                         try:
-                            self.client.table("node_models").delete().eq(
-                                "node_hash", node["node_hash"]
-                            ).execute()
+                            self.client.table("node_models").update({
+                                "status": "evicted",
+                                "is_active": False,
+                                "updated_at": "now()",
+                            }).eq("node_hash", node["node_hash"]).eq("status", "active").execute()
                         except Exception:
                             pass
                         stale_count += 1
