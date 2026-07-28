@@ -124,6 +124,11 @@ if "%~1"=="--tunnel" (
     shift
     goto :parse_args
 )
+if "%~1"=="--no-tunnel" (
+    set ENABLE_TUNNEL=false
+    shift
+    goto :parse_args
+)
 if "%~1"=="--bootstrap-peers" (
     set BOOTSTRAP_PEERS_VALUE=%~2
     shift
