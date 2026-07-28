@@ -411,7 +411,10 @@ class SupabaseManager:
 
     def get_user_nodes(self, user_id: str) -> List[Dict[str, Any]]:
         try:
-            result = self.client.table("nodes").select("*").eq(
+            result = self.client.table("nodes").select(
+                "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
+                "uptime, total_tokens, status, last_heartbeat, created_at, ctx_length"
+            ).eq(
                 "user_id", user_id
             ).order("created_at", desc=True).execute()
             nodes = result.data or []
@@ -446,7 +449,10 @@ class SupabaseManager:
                 hashes = [r["node_hash"] for r in (nm.data or [])]
                 if not hashes:
                     return []
-                q = self.client.table("nodes").select("*").in_(
+                q = self.client.table("nodes").select(
+                    "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
+                    "uptime, total_tokens, status, last_heartbeat, created_at, ctx_length"
+                ).in_(
                     "node_hash", hashes
                 ).eq("status", status).limit(limit)
             elif query:
@@ -456,11 +462,17 @@ class SupabaseManager:
                 hashes = [r["node_hash"] for r in (nm.data or [])]
                 if not hashes:
                     return []
-                q = self.client.table("nodes").select("*").in_(
+                q = self.client.table("nodes").select(
+                    "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
+                    "uptime, total_tokens, status, last_heartbeat, created_at, ctx_length"
+                ).in_(
                     "node_hash", hashes
                 ).eq("status", status).limit(limit)
             else:
-                q = self.client.table("nodes").select("*").eq(
+                q = self.client.table("nodes").select(
+                    "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
+                    "uptime, total_tokens, status, last_heartbeat, created_at, ctx_length"
+                ).eq(
                     "status", status
                 ).limit(limit)
             result = q.execute()
@@ -481,7 +493,10 @@ class SupabaseManager:
             node_hashes = [r["node_hash"] for r in nm_result.data]
             ctx_map = {r["node_hash"]: r.get("ctx_length", 0) for r in nm_result.data}
 
-            nodes_result = self.client.table("nodes").select("*").in_(
+            nodes_result = self.client.table("nodes").select(
+                "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
+                "uptime, total_tokens, status, last_heartbeat, created_at, ctx_length"
+            ).in_(
                 "node_hash", node_hashes
             ).eq("status", "active").order("load").execute()
 
@@ -579,7 +594,9 @@ class SupabaseManager:
 
     def cleanup_stale(self, max_age_seconds: int = 120) -> int:
         try:
-            result = self.client.table("nodes").select("*").eq("status", "active").execute()
+            result = self.client.table("nodes").select(
+                "node_hash, last_heartbeat, total_tokens"
+            ).eq("status", "active").execute()
             if not result.data:
                 return 0
             now = time.time()
