@@ -276,7 +276,7 @@ async def network_events(request: Request):
                     try:
                         nm = supabase_mgr.client.table("node_models").select("model_name").eq(
                             "node_hash", node_hash
-                        ).eq("is_active", True).execute()
+                        ).eq("is_active", True).eq("status", "active").execute()
                         if nm.data:
                             active_model = nm.data[0].get("model_name", "unknown")
                     except Exception:
