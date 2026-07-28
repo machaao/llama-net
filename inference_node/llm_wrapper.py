@@ -125,7 +125,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
         'functionary-v1': ['functionary-v1'],
         'functionary': ['functionary', 'meetkai/functionary'],
         'chatglm3': ['chatglm3', 'chatglm-3'],
-        'qwen': ['qwen-', 'qwen1.5', 'alibaba/qwen'],
+        'qwen': ['qwen-', 'qwen1.5', 'alibaba/qwen', 'qwen3.5'],
         'baichuan-2': ['baichuan-2', 'baichuan2'],
         'baichuan': ['baichuan'],
         'phind': ['phind', 'phind-codellama'],

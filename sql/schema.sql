@@ -110,3 +110,8 @@ CREATE INDEX IF NOT EXISTS idx_node_models_ctx ON node_models(ctx_length);
 
 -- 9. Add context length to nodes table for primary model
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ctx_length INTEGER DEFAULT 0;
+
+-- 10. Remove redundant model columns from nodes table
+-- node_models junction table is now the single source of truth for model info
+ALTER TABLE nodes DROP COLUMN IF EXISTS model_name;
+ALTER TABLE nodes DROP COLUMN IF EXISTS model_slug;
