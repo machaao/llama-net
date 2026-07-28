@@ -283,7 +283,7 @@ class HFModelDownloader:
         if tag:
             model_name += f"@{tag}"
         if quantization:
-            model_name += f":{quantization}"
+            model_name += f"_{quantization}"
         
         model_dir = self.cache_dir / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
