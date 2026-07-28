@@ -258,8 +258,10 @@ class SupabaseManager:
 
             # ── Merge: cumulative = max, instantaneous = incoming if non-zero ──
             effective_tokens = max(incoming_total_tokens, effective_total)
-            effective_load = metrics.get("load", 0) or existing_load
-            effective_tps = metrics.get("tps", 0) or existing_tps
+            incoming_load = metrics.get("load", 0)
+            incoming_tps = metrics.get("tps", 0)
+            effective_load = incoming_load if incoming_load > 0 else existing_load
+            effective_tps = incoming_tps if incoming_tps > 0 else existing_tps
             effective_ttft = metrics.get("ttft") if metrics.get("ttft") is not None else existing_ttft
             effective_latency = (
                 metrics.get("latency") if metrics.get("latency") is not None
@@ -480,8 +482,10 @@ class SupabaseManager:
                 incoming_total = model_metrics.get("total_tokens", 0)
 
                 effective_tokens = max(incoming_total, existing_tokens)
-                effective_load = model_metrics.get("load", 0) or existing.get("load", 0) or 0
-                effective_tps = model_metrics.get("tps", 0) or existing.get("tps", 0) or 0
+                incoming_load = model_metrics.get("load", 0)
+                incoming_tps = model_metrics.get("tps", 0)
+                effective_load = incoming_load if incoming_load > 0 else (existing.get("load", 0) or 0)
+                effective_tps = incoming_tps if incoming_tps > 0 else (existing.get("tps", 0) or 0)
                 effective_ttft = (
                     model_metrics.get("ttft") if model_metrics.get("ttft") is not None
                     else existing.get("ttft")
