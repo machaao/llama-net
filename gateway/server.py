@@ -595,7 +595,7 @@ async def node_heartbeat(request: Request):
             # Also broadcast if pool_models changed
             if not should_broadcast and pool_models:
                 prev_pool = (prev.get("metrics", {}) or {}).get("pool_models", [])
-                if sorted(prev_pool) != sorted(pool_models):
+                if json.dumps(prev_pool, sort_keys=True) != json.dumps(pool_models, sort_keys=True):
                     should_broadcast = True
     except Exception as e:
         logger.debug(f"Could not read previous metrics for {node_hash}: {e}")
@@ -1023,10 +1023,6 @@ async def publish_node_event(request: Request):
 
             # Model changes are tracked via node_models junction table (is_active flag)
             # No need to update nodes table directly
-
-            # Extract metrics and ctx_length from event payload
-            event_metrics = body.get("metrics", {})
-            event_ctx_length = body.get("ctx_length", 0)
             if event_ctx_length > 0:
                 event_metrics["ctx_length"] = event_ctx_length
 
@@ -1198,7 +1194,6 @@ async def handle_peer_notification(request: Request):
                 if sse_mgr:
                     await sse_mgr.broadcast("node_joined", {
                         "node_hash": peer_hash, "model_name": peer_model,
-                        "model_slug": model_slug,
                         "discovered_by": notifier_node_id
                     })
 
