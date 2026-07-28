@@ -977,6 +977,8 @@ class LlamaNetUI {
                 ttft: parseFloat(nodeData.ttft) || null,
                 latency: parseFloat(nodeData.latency) || null,
                 total_tokens: parseInt(nodeData.total_tokens) || 0,
+                prompt_tokens: parseInt(nodeData.prompt_tokens) || 0,
+                completion_tokens: parseInt(nodeData.completion_tokens) || 0,
                 context_length: parseInt(nodeData.context_length) || 0,
                 
                 // UI validation metadata
