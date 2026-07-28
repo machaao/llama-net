@@ -523,7 +523,17 @@ async def node_heartbeat(request: Request):
             metrics["ctx_length"] = active_ctx
         # Upsert node_models junction table
         try:
-            supabase_mgr.upsert_node_models(node_hash, pool_models)
+            # Derive active slug from existing node_models (preserves is_active flag)
+            active_slug = ""
+            try:
+                nm_check = supabase_mgr.client.table("node_models").select("model_slug").eq(
+                    "node_hash", node_hash
+                ).eq("is_active", True).eq("status", "active").limit(1).execute()
+                if nm_check.data:
+                    active_slug = nm_check.data[0].get("model_slug", "")
+            except Exception:
+                pass
+            supabase_mgr.upsert_node_models(node_hash, pool_models, active_slug)
         except Exception as e:
             logger.debug(f"node_models upsert in heartbeat failed: {e}")
 
@@ -948,8 +958,6 @@ async def publish_node_event(request: Request):
                     "tps": event_probe_metrics.get("tps", 0),
                 })
 
-            event_pool_models = body.get("metrics", {}).get("pool_models", [])
-
             if sse_mgr:
                 await sse_mgr.broadcast("node_joined", {
                     "node_hash": node_hash, "model_name": model_name,
@@ -1071,9 +1079,18 @@ async def publish_node_event(request: Request):
                     if active_name:
                         model_name = active_name
 
-                # Upsert node_models junction table
+                # Upsert node_models junction table — preserve existing active slug
                 try:
-                    supabase_mgr.upsert_node_models(node_hash, event_pool_models)
+                    existing_slug = ""
+                    try:
+                        nm_check = supabase_mgr.client.table("node_models").select("model_slug").eq(
+                            "node_hash", node_hash
+                        ).eq("is_active", True).eq("status", "active").limit(1).execute()
+                        if nm_check.data:
+                            existing_slug = nm_check.data[0].get("model_slug", "")
+                    except Exception:
+                        pass
+                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, existing_slug)
                 except Exception as e:
                     logger.debug(f"node_models upsert in node_updated failed: {e}")
 

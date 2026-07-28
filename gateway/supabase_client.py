@@ -350,7 +350,7 @@ class SupabaseManager:
                     continue
 
                 model_slug = model_name_to_slug(model_name)
-                is_active = (model_slug == active_model_slug)
+                is_active = (model_slug == active_model_slug) if active_model_slug else (len(models_list) == 1)
 
                 self.client.table("node_models").upsert({
                     "node_hash": node_hash,

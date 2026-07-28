@@ -88,6 +88,11 @@ class LandingApp {
                 if (!this._lastKnownNodes) this._lastKnownNodes = {};
                 if (!this._nodePoolModels) this._nodePoolModels = {};
 
+                // Derive model_name from pool_models if event model_name is missing
+                if ((!data.model_name || data.model_name === 'unknown') && data.pool_models && data.pool_models.length > 0) {
+                    data.model_name = data.pool_models[0].name || data.pool_models[0].model_name || 'unknown';
+                }
+
                 // Pool drained — clear all local state
                 if (data.pool_empty) {
                     this._lastPoolData = null;
