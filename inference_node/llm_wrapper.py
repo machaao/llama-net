@@ -658,7 +658,7 @@ class LlamaWrapper:
             generation_time = time.time() - start_time
             tokens_generated = output.get('usage', {}).get('completion_tokens', 0) if 'output' in locals() else 0
             prompt_tokens_est = sum(len(m.get("content", "").split()) for m in formatted_messages) if 'formatted_messages' in locals() else 0
-            self.metrics_manager.record_request_end(tokens_generated, generation_time, incoming_tokens=prompt_tokens_est)
+            self.metrics_manager.record_request_end(tokens_generated, generation_time, prompt_tokens=prompt_tokens_est)
     
     def generate_chat_stream(self,
                            messages: List[Dict[str, str]],
@@ -932,15 +932,15 @@ class LlamaWrapper:
         finally:
             # Update metrics using consolidated manager
             final_time = time.time() - start_time
-            self.metrics_manager.record_request_end(total_tokens, final_time, incoming_tokens=prompt_tokens)
+            self.metrics_manager.record_request_end(total_tokens, final_time, prompt_tokens=prompt_tokens)
             self.metrics_manager.record_latency(final_time)
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get metrics about the model using consolidated manager"""
         metrics = self.metrics_manager.get_comprehensive_metrics()
         metrics["model"] = self.config.model_name
-        metrics["incoming_tokens"] = self.metrics_manager.total_incoming_tokens
-        metrics["generated_tokens"] = self.metrics_manager.total_generated_tokens
+        metrics["prompt_tokens"] = self.metrics_manager.total_prompt_tokens
+        metrics["completion_tokens"] = self.metrics_manager.total_completion_tokens
         
         # Add chat template info
         template_info = self.get_chat_template_info()

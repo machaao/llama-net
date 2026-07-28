@@ -49,12 +49,12 @@ class SupabaseManager:
 
             # 2. Overlay with current active node data (more recent)
             result = self.client.table("nodes").select(
-                "node_hash, total_tokens, incoming_tokens, generated_tokens"
+                "node_hash, total_tokens, prompt_tokens, completion_tokens"
             ).eq("status", "active").execute()
             for row in (result.data or []):
                 self._node_token_cache[row["node_hash"]] = {
-                    "incoming": row.get("incoming_tokens", 0) or 0,
-                    "generated": row.get("generated_tokens", 0) or 0,
+                    "prompt": row.get("prompt_tokens", 0) or 0,
+                    "completion": row.get("completion_tokens", 0) or 0,
                 }
 
             logger.info(f"Token cache ready: {len(self._node_token_cache)} nodes tracked")
@@ -223,32 +223,32 @@ class SupabaseManager:
 
             incoming_tokens = metrics.get("total_tokens", 0)
 
-            # Read existing incoming/generated tokens
-            existing_incoming = 0
-            existing_generated = 0
+            # Read existing prompt/completion tokens
+            existing_prompt = 0
+            existing_completion = 0
             try:
-                existing_incoming = row.get("incoming_tokens", 0) or 0
-                existing_generated = row.get("generated_tokens", 0) or 0
+                existing_prompt = row.get("prompt_tokens", 0) or 0
+                existing_completion = row.get("completion_tokens", 0) or 0
             except Exception:
                 pass
 
-            incoming_prompt = metrics.get("incoming_tokens", 0)
-            incoming_generated = metrics.get("generated_tokens", 0)
+            incoming_prompt = metrics.get("prompt_tokens", 0)
+            incoming_completion = metrics.get("completion_tokens", 0)
 
             # If tokens decreased, accumulate old values
-            if incoming_generated < existing_generated and existing_generated > 0:
-                self._add_cumulative_tokens(existing_incoming, existing_generated)
+            if incoming_completion < existing_completion and existing_completion > 0:
+                self._add_cumulative_tokens(existing_prompt, existing_completion)
                 logger.info(
-                    f"Node {node_hash} rejoining — accumulated {existing_incoming} incoming + "
-                    f"{existing_generated} generated tokens to cumulative totals"
+                    f"Node {node_hash} rejoining — accumulated {existing_prompt} prompt + "
+                    f"{existing_completion} completion tokens to cumulative totals"
                 )
 
-            effective_incoming = max(incoming_prompt, existing_incoming)
-            effective_generated = max(incoming_generated, existing_generated)
-            effective_total = effective_incoming + effective_generated
+            effective_prompt = max(incoming_prompt, existing_prompt)
+            effective_completion = max(incoming_completion, existing_completion)
+            effective_total = effective_prompt + effective_completion
 
             # Also handle legacy total_tokens field
-            if incoming_tokens < existing_tokens and existing_tokens > 0 and effective_generated == 0:
+            if incoming_tokens < existing_tokens and existing_tokens > 0 and effective_completion == 0:
                 self._add_cumulative_tokens(0, existing_tokens)
                 self._node_token_cache.pop(node_hash, None)
                 logger.info(
@@ -268,8 +268,8 @@ class SupabaseManager:
             effective_uptime = metrics.get("uptime", 0) or existing_uptime
 
             self._node_token_cache[node_hash] = {
-                "incoming": effective_incoming,
-                "generated": effective_generated,
+                "prompt": effective_prompt,
+                "completion": effective_completion,
             }
 
             node_data = {
@@ -279,8 +279,8 @@ class SupabaseManager:
                 "ttft": effective_ttft, "latency": effective_latency,
                 "uptime": effective_uptime,
                 "total_tokens": effective_tokens,
-                "incoming_tokens": effective_incoming,
-                "generated_tokens": effective_generated,
+                "prompt_tokens": effective_prompt,
+                "completion_tokens": effective_completion,
                 "ctx_length": ctx_length,
                 "status": "active", "last_heartbeat": "now()",
             }
@@ -325,42 +325,42 @@ class SupabaseManager:
         except Exception as e:
             logger.debug(f"Could not set {key}: {e}")
 
-    def _add_cumulative_tokens(self, incoming: int = 0, generated: int = 0) -> None:
+    def _add_cumulative_tokens(self, prompt: int = 0, completion: int = 0) -> None:
         """Atomically add to cumulative token totals in the statistics table."""
         try:
-            current_in = self._get_cumulative_stat("cumulative_incoming_tokens")
-            current_gen = self._get_cumulative_stat("cumulative_generated_tokens")
-            self._set_cumulative_stat("cumulative_incoming_tokens", current_in + incoming)
-            self._set_cumulative_stat("cumulative_generated_tokens", current_gen + generated)
-            self._set_cumulative_stat("cumulative_total_tokens", current_in + incoming + current_gen + generated)
-            logger.debug(f"Accumulated {incoming} incoming + {generated} generated tokens")
+            current_in = self._get_cumulative_stat("cumulative_prompt_tokens")
+            current_gen = self._get_cumulative_stat("cumulative_completion_tokens")
+            self._set_cumulative_stat("cumulative_prompt_tokens", current_in + prompt)
+            self._set_cumulative_stat("cumulative_completion_tokens", current_gen + completion)
+            self._set_cumulative_stat("cumulative_total_tokens", current_in + prompt + current_gen + completion)
+            logger.debug(f"Accumulated {prompt} prompt + {completion} completion tokens")
         except Exception as e:
             logger.error(f"Error updating cumulative tokens: {e}")
 
     def update_node_metrics(self, node_hash: str, metrics: Dict[str, Any]) -> bool:
         try:
-            new_incoming = metrics.get("incoming_tokens", 0)
-            new_generated = metrics.get("generated_tokens", 0)
-            new_total = metrics.get("total_tokens", 0) or (new_incoming + new_generated)
+            new_prompt = metrics.get("prompt_tokens", 0)
+            new_completion = metrics.get("completion_tokens", 0)
+            new_total = metrics.get("total_tokens", 0) or (new_prompt + new_completion)
 
             cached = self._node_token_cache.get(node_hash, {})
-            old_incoming = cached.get("incoming", 0) if isinstance(cached, dict) else 0
-            old_generated = cached.get("generated", 0) if isinstance(cached, dict) else 0
+            old_prompt = cached.get("prompt", 0) if isinstance(cached, dict) else 0
+            old_completion = cached.get("completion", 0) if isinstance(cached, dict) else 0
 
-            # If generated tokens decreased, node restarted — accumulate old values
-            if new_generated < old_generated and old_generated > 0:
-                self._add_cumulative_tokens(old_incoming, old_generated)
-                logger.info(f"Node {node_hash} restarted — accumulated {old_incoming} in + {old_generated} gen tokens")
+            # If completion tokens decreased, node restarted — accumulate old values
+            if new_completion < old_completion and old_completion > 0:
+                self._add_cumulative_tokens(old_prompt, old_completion)
+                logger.info(f"Node {node_hash} restarted — accumulated {old_prompt} prompt + {old_completion} completion tokens")
 
-            self._node_token_cache[node_hash] = {"incoming": new_incoming, "generated": new_generated}
+            self._node_token_cache[node_hash] = {"prompt": new_prompt, "completion": new_completion}
 
             update_data = {
                 "load": metrics.get("load", 0), "tps": metrics.get("tps", 0),
                 "ttft": metrics.get("ttft"), "latency": metrics.get("latency"),
                 "uptime": metrics.get("uptime", 0),
                 "total_tokens": new_total,
-                "incoming_tokens": new_incoming,
-                "generated_tokens": new_generated,
+                "prompt_tokens": new_prompt,
+                "completion_tokens": new_completion,
                 "last_heartbeat": "now()", "status": "active",
             }
 
@@ -401,16 +401,16 @@ class SupabaseManager:
             # Accumulate tokens before deactivating
             cached = self._node_token_cache.get(node_hash, {})
             if isinstance(cached, dict):
-                cin = cached.get("incoming", 0)
-                cgen = cached.get("generated", 0)
+                c_prompt = cached.get("prompt", 0)
+                c_completion = cached.get("completion", 0)
             else:
-                cin, cgen = 0, cached if isinstance(cached, int) else 0
+                c_prompt, c_completion = 0, cached if isinstance(cached, int) else 0
 
-            if cin > 0 or cgen > 0:
-                self._add_cumulative_tokens(cin, cgen)
+            if c_prompt > 0 or c_completion > 0:
+                self._add_cumulative_tokens(c_prompt, c_completion)
                 self._node_token_cache.pop(node_hash, None)
                 self._persist_token_cache()
-                logger.info(f"Accumulated {cin} incoming + {cgen} generated tokens from departing node {node_hash}")
+                logger.info(f"Accumulated {c_prompt} prompt + {c_completion} completion tokens from departing node {node_hash}")
 
             result = self.client.table("nodes").update(
                 {"status": "inactive"}
@@ -495,8 +495,8 @@ class SupabaseManager:
                 # ── Preserve incoming/generated tokens ──
                 existing_incoming = existing.get("incoming_tokens", 0) or 0
                 existing_generated = existing.get("generated_tokens", 0) or 0
-                incoming_inc = model_metrics.get("incoming_tokens", 0)
-                incoming_gen = model_metrics.get("generated_tokens", 0)
+                incoming_inc = model_metrics.get("prompt_tokens", 0)
+                incoming_gen = model_metrics.get("completion_tokens", 0)
 
                 effective_incoming = max(incoming_inc, existing_incoming)
                 effective_generated = max(incoming_gen, existing_generated)
@@ -727,8 +727,8 @@ class SupabaseManager:
                             full_node["ttft"] = nm_node.get("ttft")
                             full_node["latency"] = nm_node.get("latency")
                             full_node["total_tokens"] = nm_node.get("total_tokens", 0)
-                            full_node["incoming_tokens"] = nm_node.get("incoming_tokens", 0)
-                            full_node["generated_tokens"] = nm_node.get("generated_tokens", 0)
+                            full_node["prompt_tokens"] = nm_node.get("prompt_tokens", 0)
+                            full_node["completion_tokens"] = nm_node.get("completion_tokens", 0)
                             full_node["uptime"] = nm_node.get("uptime", 0)
                             enriched_nodes.append(full_node)
 
@@ -744,8 +744,8 @@ class SupabaseManager:
                             if enriched_nodes else 0
                         )
                         model["total_tokens"] = sum(n.get("total_tokens", 0) for n in enriched_nodes)
-                        model["incoming_tokens"] = sum(n.get("incoming_tokens", 0) for n in enriched_nodes)
-                        model["generated_tokens"] = sum(n.get("generated_tokens", 0) for n in enriched_nodes)
+                        model["prompt_tokens"] = sum(n.get("prompt_tokens", 0) for n in enriched_nodes)
+                        model["completion_tokens"] = sum(n.get("completion_tokens", 0) for n in enriched_nodes)
                         model["best_node"] = (
                             min(enriched_nodes, key=lambda n: n.get("load", 1))
                             if enriched_nodes else None
@@ -806,16 +806,16 @@ class SupabaseManager:
                 "node_hash, load, tps, total_tokens, incoming_tokens, generated_tokens"
             ).eq("status", "active").execute()
             nodes = result.data or []
-            cum_in = self._get_cumulative_stat("cumulative_incoming_tokens")
-            cum_gen = self._get_cumulative_stat("cumulative_generated_tokens")
+            cum_in = self._get_cumulative_stat("cumulative_prompt_tokens")
+            cum_gen = self._get_cumulative_stat("cumulative_completion_tokens")
             cumulative = cum_in + cum_gen
 
             if not nodes:
                 return {
                     "total_nodes": 0, "total_models": 0, "total_tps": 0, "avg_load": 0,
                     "total_tokens": cumulative,
-                    "incoming_tokens": cum_in,
-                    "generated_tokens": cum_gen,
+                    "prompt_tokens": cum_in,
+                    "completion_tokens": cum_gen,
                 }
 
             # Count models from node_models junction table
@@ -825,15 +825,15 @@ class SupabaseManager:
             except Exception:
                 models = set()
 
-            active_incoming = sum(n.get("incoming_tokens", 0) for n in nodes)
-            active_generated = sum(n.get("generated_tokens", 0) for n in nodes)
+            active_prompt = sum(n.get("prompt_tokens", 0) for n in nodes)
+            active_completion = sum(n.get("completion_tokens", 0) for n in nodes)
             return {
                 "total_nodes": len(nodes), "total_models": len(models),
                 "total_tps": round(sum(n.get("tps", 0) for n in nodes), 1),
                 "avg_load": round(sum(n.get("load", 0) for n in nodes) / len(nodes), 3),
-                "total_tokens": cumulative + active_incoming + active_generated,
-                "incoming_tokens": cum_in + active_incoming,
-                "generated_tokens": cum_gen + active_generated,
+                "total_tokens": cumulative + active_prompt + active_completion,
+                "prompt_tokens": cum_in + active_prompt,
+                "completion_tokens": cum_gen + active_completion,
             }
         except Exception as e:
             logger.error(f"Error getting network stats: {e}")

@@ -649,8 +649,8 @@ async def node_heartbeat(request: Request):
                     "model_name": active_model_name,
                     "metrics": metrics,
                     "pool_models": pool_models,
-                    "incoming_tokens": metrics.get("incoming_tokens", 0),
-                    "generated_tokens": metrics.get("generated_tokens", 0),
+                    "prompt_tokens": metrics.get("prompt_tokens", 0),
+                    "completion_tokens": metrics.get("completion_tokens", 0),
                 })
         except Exception:
             pass
@@ -998,8 +998,8 @@ async def publish_node_event(request: Request):
                     "ttft": body.get("metrics", {}).get("ttft"),
                     "latency": body.get("metrics", {}).get("latency"),
                     "total_tokens": body.get("metrics", {}).get("total_tokens", 0),
-                    "incoming_tokens": body.get("metrics", {}).get("incoming_tokens", 0),
-                    "generated_tokens": body.get("metrics", {}).get("generated_tokens", 0),
+                    "prompt_tokens": body.get("metrics", {}).get("prompt_tokens", 0),
+                    "completion_tokens": body.get("metrics", {}).get("completion_tokens", 0),
                 })
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
 
@@ -1152,8 +1152,8 @@ async def publish_node_event(request: Request):
                     "ttft": event_metrics.get("ttft"),
                     "latency": event_metrics.get("latency"),
                     "total_tokens": event_metrics.get("total_tokens", 0),
-                    "incoming_tokens": event_metrics.get("incoming_tokens", 0),
-                    "generated_tokens": event_metrics.get("generated_tokens", 0),
+                    "prompt_tokens": event_metrics.get("prompt_tokens", 0),
+                    "completion_tokens": event_metrics.get("completion_tokens", 0),
                 })
 
         elif event_type == "peer_discovered":
