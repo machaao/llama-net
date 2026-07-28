@@ -308,6 +308,23 @@ class LlamaWrapper:
 
         return formatted
 
+    def _cap_max_tokens(self, max_tokens: int, formatted_messages: list) -> int:
+        """Cap max_tokens so prompt + completion fits within n_ctx."""
+        try:
+            n_ctx = self.llm.n_ctx() if self.llm else 4096
+            prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
+            prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
+            available = n_ctx - prompt_tokens - 64  # 64-token safety margin
+            capped = min(max_tokens, max(1, available))
+            if capped < max_tokens:
+                logger.info(
+                    f"max_tokens capped: {max_tokens} → {capped} "
+                    f"(prompt={prompt_tokens}, n_ctx={n_ctx})"
+                )
+            return capped
+        except Exception:
+            return max_tokens
+
     def _adapt_messages_for_format(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Adapt messages for chat formats that don't support system roles.
         
@@ -572,8 +589,11 @@ class LlamaWrapper:
         start_time = time.time()
         
         try:
+            formatted_messages = self._format_messages(messages)
+            max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
+
             output = self.llm.create_chat_completion(
-                messages=self._format_messages(messages),
+                messages=formatted_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
@@ -653,6 +673,7 @@ class LlamaWrapper:
         formatted_messages = self._format_messages(messages)
         prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
         prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
+        max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
         
         # Create streaming generator
         stream = self.llm.create_chat_completion(
