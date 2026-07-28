@@ -94,6 +94,12 @@ class InferenceConfig:
             parser.add_argument('--gpu-layers', default=-1, type=int,
                                 help='Llama Server GPU Layers')
 
+            parser.add_argument('--max-models', default=0, type=int,
+                                help='Max models in pool (0 = auto-detect from RAM, default: 0)')
+
+            parser.add_argument('--memory-budget-gb', default=0, type=float,
+                                help='Max RAM for models in GB (0 = auto-detect, default: 0)')
+
             parser.add_argument('--verbose', action='store_true',
                                 help='Enable verbose logging for llama-cpp-python')
 
@@ -125,8 +131,8 @@ class InferenceConfig:
             self.verbose = args.verbose or bool(load_env_var("VERBOSE", True))
 
             # Pool configuration
-            self.max_models = int(load_env_var("MAX_MODELS", "0"))
-            self.memory_budget_gb = float(load_env_var("MEMORY_BUDGET_GB", "0"))
+            self.max_models = int(load_env_var("MAX_MODELS", args.max_models))
+            self.memory_budget_gb = float(load_env_var("MEMORY_BUDGET_GB", args.memory_budget_gb))
 
             # Handle --no-gpu flag (overrides GPU layers and disables Metal)
             if args.no_gpu:

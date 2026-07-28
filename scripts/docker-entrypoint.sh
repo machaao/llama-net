@@ -16,6 +16,8 @@
 #   FLASH_ATTN      Enable FlashAttention (true/false, default: false)
 #   CACHE_TYPE_K    KV cache key type: f16, q8_0, q4_0 (default: f16)
 #   CACHE_TYPE_V    KV cache value type: f16, q8_0, q4_0 (default: f16)
+#   MAX_MODELS      Max models in pool (0 = auto-detect from RAM, default: 0)
+#   MEMORY_BUDGET_GB  Max RAM for models in GB (0 = auto-detect, default: 0)
 #   BOOTSTRAP_PEERS Gateway URL (default: https://llamanet.app)
 #   PORT            HTTP API port (default: 8000)
 # ═══════════════════════════════════════════════════════════════
@@ -53,6 +55,8 @@ export N_THREADS_BATCH="${N_THREADS_BATCH:-0}"
 export FLASH_ATTN="${FLASH_ATTN:-false}"
 export CACHE_TYPE_K="${CACHE_TYPE_K:-f16}"
 export CACHE_TYPE_V="${CACHE_TYPE_V:-f16}"
+export MAX_MODELS="${MAX_MODELS:-0}"
+export MEMORY_BUDGET_GB="${MEMORY_BUDGET_GB:-0}"
 
 # ── Build start-app.sh arguments ──
 ARGS=""
@@ -81,6 +85,8 @@ fi
 [ "$FLASH_ATTN" = "true" ] && ARGS="$ARGS --flash-attn"
 [ "$CACHE_TYPE_K" != "f16" ] && ARGS="$ARGS --cache-type-k $CACHE_TYPE_K"
 [ "$CACHE_TYPE_V" != "f16" ] && ARGS="$ARGS --cache-type-v $CACHE_TYPE_V"
+[ -n "$MAX_MODELS" ] && [ "$MAX_MODELS" != "0" ] && ARGS="$ARGS --max-models $MAX_MODELS"
+[ -n "$MEMORY_BUDGET_GB" ] && [ "$MEMORY_BUDGET_GB" != "0" ] && ARGS="$ARGS --memory-budget-gb $MEMORY_BUDGET_GB"
 
 # ── Handle model URL ──
 if [ -n "$MODEL_URL" ]; then
@@ -92,6 +98,7 @@ if [ -n "$MODEL_URL" ]; then
     echo "⚡ Parallel slots: ${N_PARALLEL:-1}"
     echo "🧠 FlashAttn: ${FLASH_ATTN:-false}"
     echo "💾 KV Cache: K=${CACHE_TYPE_K:-f16} V=${CACHE_TYPE_V:-f16}"
+    echo "🏊 Pool: max=${MAX_MODELS:-0} models, budget=${MEMORY_BUDGET_GB:-0} GB"
     echo "🌐 Tunnel: ${ENABLE_TUNNEL}"
     echo "📡 Gateway: ${BOOTSTRAP_PEERS:-https://llamanet.app}"
     echo ""
