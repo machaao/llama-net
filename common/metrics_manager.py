@@ -94,7 +94,7 @@ class MetricsManager:
     def _calculate_tps(self) -> float:
         """Calculate tokens per second"""
         if self.total_generation_time > 0:
-            return self.total_tokens_generated / self.total_generation_time
+            return self.total_completion_tokens / self.total_generation_time
         return 0.0
     
     def record_request_start(self):
