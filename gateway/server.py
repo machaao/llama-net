@@ -128,7 +128,7 @@ async def _heartbeat_monitor_loop():
                             try:
                                 nm = supabase_mgr.client.table("node_models").select("model_name").eq(
                                     "node_hash", node_hash
-                                ).eq("is_active", True).execute()
+                                ).eq("is_active", True).eq("status", "active").execute()
                                 if nm.data:
                                     stale_model = nm.data[0].get("model_name", "unknown")
                             except Exception:
@@ -600,7 +600,7 @@ async def node_heartbeat(request: Request):
             try:
                 nm_result = supabase_mgr.client.table("node_models").select("model_name").eq(
                     "node_hash", node_hash
-                ).eq("is_active", True).execute()
+                ).eq("is_active", True).eq("status", "active").execute()
                 if nm_result.data:
                     active_model_name = nm_result.data[0].get("model_name", active_model_name)
             except Exception:
@@ -1047,14 +1047,16 @@ async def publish_node_event(request: Request):
             event_metrics["pool_size"] = len(event_pool_models)
 
             if not event_pool_models:
-                # Pool drained — clean up ALL node_models entries for this node
+                # Pool drained — mark all node_models as evicted
                 try:
-                    supabase_mgr.client.table("node_models").delete().eq(
-                        "node_hash", node_hash
-                    ).execute()
-                    logger.info(f"🧹 Pool empty — cleaned all node_models for {node_hash}")
+                    supabase_mgr.client.table("node_models").update({
+                        "status": "evicted",
+                        "is_active": False,
+                        "updated_at": "now()",
+                    }).eq("node_hash", node_hash).eq("status", "active").execute()
+                    logger.info(f"🧹 Pool empty — evicted all node_models for {node_hash}")
                 except Exception as e:
-                    logger.debug(f"Pool empty cleanup failed: {e}")
+                    logger.debug(f"Pool empty eviction failed: {e}")
 
             if event_pool_models:
                 # Active model is tracked via node_models.is_active — no nodes table update needed
@@ -1081,7 +1083,7 @@ async def publish_node_event(request: Request):
                     for m in event_pool_models if isinstance(m, dict) and m.get("name")
                 ]
                 try:
-                    supabase_mgr.delete_stale_node_models(node_hash, pool_slugs)
+                    supabase_mgr.evict_stale_node_models(node_hash, pool_slugs)
                 except Exception as e:
                     logger.debug(f"Stale node_models cleanup failed: {e}")
 
