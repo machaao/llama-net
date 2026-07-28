@@ -230,7 +230,7 @@ class ModelRouter:
                 routing_log += f" (prefix={prefix_hash[:8]}...)"
             logger.info(routing_log)
             url = f"{node['url'].rstrip('/')}/v1/chat/completions"
-            response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost)
+            response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost, model_name=model_name)
             await self._record_compute_usage(auth_key, estimated_cost)
             return response
         finally:
@@ -275,7 +275,7 @@ class ModelRouter:
                 })
 
             url = f"{node['url'].rstrip('/')}/v1/completions"
-            response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost)
+            response = await self._forward_request(url, body, stream, node, auth_key, estimated_cost, model_name=model_name)
             await self._record_compute_usage(auth_key, estimated_cost)
             return response
         finally:
@@ -357,9 +357,10 @@ class ModelRouter:
 
         return selected
 
-    async def _forward_request(self, url: str, body: Dict, stream: bool, node: Dict[str, Any], auth_key: str = "", estimated_cost: float = 0.0):
+    async def _forward_request(self, url: str, body: Dict, stream: bool, node: Dict[str, Any], auth_key: str = "", estimated_cost: float = 0.0, model_name: str = ""):
         headers = {"Content-Type": "application/json"}
-        extra_headers = {"X-LLamaNet-Node": node["node_hash"], "X-LLamaNet-Model": node["model_name"]}
+        effective_model = model_name or node.get("model_name", "unknown")
+        extra_headers = {"X-LLamaNet-Node": node["node_hash"], "X-LLamaNet-Model": effective_model}
 
         # ── Per-node bearer token for gateway→node auth ──
         node_hash = node.get("node_hash", "")
