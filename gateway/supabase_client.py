@@ -484,7 +484,7 @@ class SupabaseManager:
     def get_nodes_for_model(self, model_slug: str) -> List[Dict[str, Any]]:
         try:
             nm_result = self.client.table("node_models").select(
-                "node_hash, ctx_length"
+                "node_hash, ctx_length, load, tps, ttft, latency"
             ).eq("model_slug", model_slug).eq("status", "active").execute()
 
             if not nm_result.data:
@@ -492,6 +492,7 @@ class SupabaseManager:
 
             node_hashes = [r["node_hash"] for r in nm_result.data]
             ctx_map = {r["node_hash"]: r.get("ctx_length", 0) for r in nm_result.data}
+            nm_metrics_map = {r["node_hash"]: r for r in nm_result.data}
 
             nodes_result = self.client.table("nodes").select(
                 "node_hash, url, ip, port, gpu_info, load, tps, ttft, latency, "
@@ -502,6 +503,11 @@ class SupabaseManager:
 
             for node in (nodes_result.data or []):
                 node["ctx_length"] = ctx_map.get(node["node_hash"], 0)
+                nm = nm_metrics_map.get(node["node_hash"], {})
+                node["load"] = nm.get("load", node.get("load", 0))
+                node["tps"] = nm.get("tps", node.get("tps", 0))
+                node["ttft"] = nm.get("ttft", node.get("ttft"))
+                node["latency"] = nm.get("latency", node.get("latency"))
 
             return nodes_result.data or []
         except Exception as e:
@@ -636,7 +642,9 @@ class SupabaseManager:
 
     def get_network_stats(self) -> Dict[str, Any]:
         try:
-            result = self.client.table("nodes").select("*").eq("status", "active").execute()
+            result = self.client.table("nodes").select(
+                "node_hash, load, tps, total_tokens"
+            ).eq("status", "active").execute()
             nodes = result.data or []
             cumulative = self._get_cumulative_tokens()
             if not nodes:

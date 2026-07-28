@@ -614,7 +614,9 @@ async def node_heartbeat(request: Request):
 
     if should_broadcast and sse_mgr:
         try:
-            node = supabase_mgr.client.table("nodes").select("*").eq(
+            node = supabase_mgr.client.table("nodes").select(
+                "node_hash, load, tps, status"
+            ).eq(
                 "node_hash", node_hash
             ).eq("status", "active").execute()
             # Derive model name from node_models junction table
