@@ -16,11 +16,11 @@ body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:var(--text)}
 .model-card .model-stat .value{font-weight:600;color:var(--text)}
 .node-row{display:flex;align-items:center;padding:.5rem 0;border-top:1px solid #f0f0f0;font-size:.85rem}
 .node-row .node-hash{font-family:'Courier New',monospace;font-size:.8rem;color:var(--primary)}
-.node-row .node-metric{font-size:.75rem;padding:.15rem .4rem;border-radius:.75rem;background-color:#f8f9fa;border:1px solid #dee2e6;color:#495057}
-.node-metric.tps{border-color:rgba(25,135,84,.3);color:#198754}
-.node-metric.load-low{border-color:rgba(25,135,84,.3);color:#198754}
-.node-metric.load-med{border-color:rgba(255,193,7,.4);color:#997404}
-.node-metric.load-high{border-color:rgba(220,53,69,.3);color:#dc3545}
+.node-row .node-model-metric{font-size:.75rem;padding:.15rem .4rem;border-radius:.75rem;background-color:#f8f9fa;border:1px solid #dee2e6;color:#495057}
+.node-model-metric.tps{border-color:rgba(25,135,84,.3);color:#198754}
+.node-model-metric.load-low{border-color:rgba(25,135,84,.3);color:#198754}
+.node-model-metric.load-med{border-color:rgba(255,193,7,.4);color:#997404}
+.node-model-metric.load-high{border-color:rgba(220,53,69,.3);color:#dc3545}
 .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:.5rem}
 .status-dot.online{background-color:#198754;box-shadow:0 0 4px rgba(25,135,84,.4)}
 .status-dot.busy{background-color:#ffc107}
