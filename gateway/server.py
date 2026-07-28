@@ -575,10 +575,20 @@ async def node_heartbeat(request: Request):
             node = supabase_mgr.client.table("nodes").select("*").eq(
                 "node_hash", node_hash
             ).eq("status", "active").execute()
+            # Derive model name from node_models junction table
+            active_model_name = model_name  # fallback to heartbeat payload
+            try:
+                nm_result = supabase_mgr.client.table("node_models").select("model_name").eq(
+                    "node_hash", node_hash
+                ).eq("is_active", True).execute()
+                if nm_result.data:
+                    active_model_name = nm_result.data[0].get("model_name", model_name)
+            except Exception:
+                pass
             if node.data:
                 await sse_mgr.broadcast("node_updated", {
                     "node_hash": node_hash,
-                    "model_name": node.data[0].get("model_name", "unknown"),
+                    "model_name": active_model_name,
                     "metrics": metrics,
                     "pool_models": pool_models,
                 })
@@ -648,8 +658,6 @@ async def publish_node(request: Request):
                 },
             )
         model_name = body.get("model", "unknown")
-        model_slug = model_name_to_slug(model_name)
-
         # Accept pool models list (objects with ctx_length or legacy strings)
         models_list = body.get("models", [{"name": model_name, "ctx_length": ctx_length}])
         # Normalize models_list to object format
@@ -820,7 +828,6 @@ async def publish_node_event(request: Request):
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
         model_name = body.get("model", "unknown")
-        model_slug = model_name_to_slug(model_name)
 
         if event_type == "node_joined":
             ctx_length = body.get("ctx_length", 0)
@@ -925,7 +932,6 @@ async def publish_node_event(request: Request):
             if sse_mgr:
                 await sse_mgr.broadcast("node_joined", {
                     "node_hash": node_hash, "model_name": model_name,
-                    "model_slug": model_slug,
                     "pool_models": event_pool_models,
                     "ctx_length": body.get("ctx_length", 0),
                     "load": body.get("metrics", {}).get("load", 0),
@@ -986,24 +992,8 @@ async def publish_node_event(request: Request):
                 f"total_tokens={event_metrics.get('total_tokens', 0)}"
             )
 
-            # Update model name if it changed (hot-reload)
-            new_model = body.get("model", "")
-            if new_model and new_model != "unknown":
-                existing_node = supabase_mgr.client.table("nodes").select("model_name").eq(
-                    "node_hash", node_hash
-                ).eq("status", "active").execute()
-                if existing_node.data and existing_node.data[0].get("model_name") != new_model:
-                    new_slug = model_name_to_slug(new_model)
-                    supabase_mgr.client.table("nodes").update({
-                        "model_name": new_model,
-                        "model_slug": new_slug,
-                    }).eq("node_hash", node_hash).eq("status", "active").execute()
-                    model_name = new_model
-                    model_slug = new_slug
-                    logger.info(
-                        f"📡 Node {node_hash} model changed → {new_model} "
-                        f"(pool={[m.get('name', '?') for m in body.get('metrics', {}).get('pool_models', [])]})"
-                    )
+            # Model changes are tracked via node_models junction table (is_active flag)
+            # No need to update nodes table directly
 
             # Extract metrics and ctx_length from event payload
             event_metrics = body.get("metrics", {})
@@ -1035,28 +1025,17 @@ async def publish_node_event(request: Request):
                 event_metrics["pool_models"] = event_pool_models
                 event_metrics["pool_size"] = len(event_pool_models)
 
-                # Update nodes.model_slug to match active model from pool
+                # Active model is tracked via node_models.is_active — no nodes table update needed
                 active_model = next(
                     (m for m in event_pool_models if isinstance(m, dict) and m.get("is_active")),
                     None
                 )
                 if not active_model:
-                    # First model in list is the active one (from get_network_info)
                     active_model = event_pool_models[0] if event_pool_models else None
-
                 if active_model and isinstance(active_model, dict):
                     active_name = active_model.get("name", "")
                     if active_name:
-                        active_slug = model_name_to_slug(active_name)
-                        try:
-                            supabase_mgr.client.table("nodes").update({
-                                "model_name": active_name,
-                                "model_slug": active_slug,
-                            }).eq("node_hash", node_hash).eq("status", "active").execute()
-                            model_name = active_name
-                            model_slug = active_slug
-                        except Exception as e:
-                            logger.debug(f"Active model update in node_updated failed: {e}")
+                        model_name = active_name
 
                 # Upsert node_models junction table
                 try:
