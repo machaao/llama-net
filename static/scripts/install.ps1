@@ -376,10 +376,36 @@ echo     llamanet                                  Start (no-model mode)
 echo     llamanet run ^<hf-url^> [OPTIONS]           Download and run a model
 echo.
 echo   Options:
-echo     --bootstrap-peers URL Gateway URL
+echo     --tunnel              Enable Cloudflare tunnel (default on Windows)
+echo     --no-tunnel           Disable Cloudflare tunnel
+echo     --bootstrap-peers URL Gateway URL (default: https://llamanet.app)
 echo     --port PORT           HTTP API port (default: 8000)
+echo     --host HOST           Bind address (default: 0.0.0.0)
+echo     --ctx-size N          Context window in tokens (0 = auto-detect)
+echo     --batch-size N        Batch size in tokens (default: 4096)
+echo     --ubatch-size N       Physical micro-batch size in tokens (default: 512)
+echo     --n-parallel N        Number of parallel slots (default: 1)
+echo     --threads N           CPU threads for generation (0 = auto)
+echo     --threads-batch N     CPU threads for prefill processing (0 = auto)
+echo     --flash-attn          Enable FlashAttention
+echo     --cache-type-k TYPE   KV cache key type: f16, q8_0, q4_0 (default: f16)
+echo     --cache-type-v TYPE   KV cache value type: f16, q8_0, q4_0 (default: f16)
+echo     --gpu-layers N        GPU layers (-1 = all)
 echo     --no-gpu              Disable GPU acceleration
+echo     --max-models N        Max models in pool (0 = auto-detect from RAM, default: 0)
+echo     --memory-budget-gb N  Max RAM for models in GB (0 = auto-detect, default: 0)
+echo     --node-id ID          Custom node identifier
+echo     --public-ip IP        Override public IP detection
+echo     --verbose             Enable verbose logging
 echo     --help                Show this help
+echo.
+echo   Examples:
+echo     llamanet
+echo     llamanet run hf.co/user/Model:Q4_K_M
+echo     llamanet run hf.co/user/Model:Q4_K_M --ctx-size 16384 --flash-attn
+echo     llamanet run hf.co/user/Model:Q4_K_M --no-gpu --cache-type-k q8_0
+echo     llamanet run hf.co/user/Model:Q4_K_M --max-models 3 --memory-budget-gb 24
+echo     llamanet --no-gpu --port 8080
 echo.
 echo   Web UI: http://localhost:8000
 echo.
