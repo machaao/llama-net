@@ -109,7 +109,7 @@ if "%LLAMANET_MODE%"=="landing" (
 echo Starting LlamaNet OpenAI-Compatible Inference Node...
 
 REM ── Parse Arguments ──
-set ENABLE_TUNNEL=false
+set ENABLE_TUNNEL=true
 set REMAINING_ARGS=
 set BOOTSTRAP_PEERS_VALUE=
 set RUN_MODE=false
@@ -150,7 +150,39 @@ if defined BOOTSTRAP_PEERS_VALUE (
     set BOOTSTRAP_PEERS=%BOOTSTRAP_PEERS_VALUE%
 )
 
+REM ── Cloudflared Auto-Install ──
+REM Mirrors start-app.sh logic: if tunnel enabled and cloudflared missing, download it
+if "%ENABLE_TUNNEL%"=="true" (
+    where cloudflared >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo.
+        echo   Installing cloudflared...
+        set CF_ARCH=amd64
+        if "%PROCESSOR_ARCHITECTURE%"=="ARM64" set CF_ARCH=arm64
+        set CF_URL=https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-!CF_ARCH!.exe
+        set CF_DEST=%LOCALAPPDATA%\LlamaNet\bin\cloudflared.exe
+
+        if not exist "%LOCALAPPDATA%\LlamaNet\bin" mkdir "%LOCALAPPDATA%\LlamaNet\bin"
+
+        echo   Downloading cloudflared for Windows !CF_ARCH!...
+        powershell -Command "try { Invoke-WebRequest -Uri '!CF_URL!' -OutFile '!CF_DEST!' -UseBasicParsing -ErrorAction Stop; exit 0 } catch { exit 1 }"
+        if !errorlevel! equ 0 (
+            echo   OK: cloudflared installed to !CF_DEST!
+            set "PATH=%LOCALAPPDATA%\LlamaNet\bin;!PATH!"
+        ) else (
+            echo   WARNING: Failed to download cloudflared
+            echo   Install manually from: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/
+            echo   Continuing without tunnel...
+            set ENABLE_TUNNEL=false
+        )
+    ) else (
+        echo   OK: cloudflared found
+    )
+)
+
 REM ── Default Configuration ──
+set TUNNEL_PID=
+set TUNNEL_URL=
 if not defined MODEL_PATH set MODEL_PATH=
 if not defined HOST set HOST=0.0.0.0
 if not defined PORT set PORT=8000
@@ -195,7 +227,48 @@ if "%RUN_MODE%"=="true" (
     echo.
     echo Running model from Hugging Face: %HF_URL%
     echo.
-    %PYTHON_CMD% -m inference_node.server run !ARGS!
+
+    REM Start inference node in background
+    start "" /B %PYTHON_CMD% -m inference_node.server run !ARGS! > "%TEMP%\llamanet_server.log" 2>&1
+
+    REM Wait for service to be ready
+    echo   Waiting for service on port %PORT%...
+    set READY=0
+    for /L %%i in (1,1,60) do (
+        if !READY!==0 (
+            curl -s http://localhost:%PORT%/health >nul 2>&1
+            if !errorlevel!==0 (
+                set READY=1
+            ) else (
+                timeout /t 1 /nobreak >nul
+            )
+        )
+    )
+
+    if !READY!==1 (
+        echo   OK: Service is ready!
+
+        REM Start cloudflare tunnel if enabled
+        if "%ENABLE_TUNNEL%"=="true" (
+            call :start_tunnel %PORT%
+        )
+
+        echo.
+        echo   Web UI: http://localhost:%PORT%
+        echo   API:    http://localhost:%PORT%/v1/chat/completions
+        echo.
+        echo   Press Ctrl+C to stop
+        echo.
+
+        start http://localhost:%PORT% 2>nul
+
+        REM Keep running and show logs
+        powershell -Command "Get-Content '%TEMP%\llamanet_server.log' -Wait"
+    ) else (
+        echo   ERROR: Service failed to start
+        type "%TEMP%\llamanet_server.log"
+        pause
+    )
 ) else (
     if defined MODEL_PATH (
         set ARGS=--model-path %MODEL_PATH%
@@ -228,8 +301,117 @@ if "%RUN_MODE%"=="true" (
     echo   POST /v1/chat/completions
     echo.
 
-    %PYTHON_CMD% -m inference_node.server !ARGS!
+    REM Start inference node in background
+    start "" /B %PYTHON_CMD% -m inference_node.server !ARGS! > "%TEMP%\llamanet_server.log" 2>&1
+
+    REM Wait for service to be ready
+    echo   Waiting for service on port %PORT%...
+    set READY=0
+    for /L %%i in (1,1,60) do (
+        if !READY!==0 (
+            curl -s http://localhost:%PORT%/health >nul 2>&1
+            if !errorlevel!==0 (
+                set READY=1
+            ) else (
+                timeout /t 1 /nobreak >nul
+            )
+        )
+    )
+
+    if !READY!==1 (
+        echo   OK: Service is ready!
+
+        REM Start cloudflare tunnel if enabled
+        if "%ENABLE_TUNNEL%"=="true" (
+            call :start_tunnel %PORT%
+        )
+
+        echo.
+        echo   Web UI: http://localhost:%PORT%
+        echo   API:    http://localhost:%PORT%/v1/chat/completions
+        echo   Network: %BOOTSTRAP_PEERS%
+        echo.
+        echo   Press Ctrl+C to stop
+        echo.
+
+        start http://localhost:%PORT% 2>nul
+
+        REM Keep running and show logs
+        powershell -Command "Get-Content '%TEMP%\llamanet_server.log' -Wait"
+    ) else (
+        echo   ERROR: Service failed to start
+        type "%TEMP%\llamanet_server.log"
+        pause
+    )
 )
+
+goto :end
+
+REM ═══════════════════════════════════════════════════════
+REM  Cloudflare Tunnel Subroutine
+REM ═══════════════════════════════════════════════════════
+:start_tunnel
+set TUNNEL_PORT=%~1
+set TUNNEL_LOG=%TEMP%\llamanet_tunnel.log
+
+REM Check for existing named tunnel config
+set CF_CONFIG=%USERPROFILE%\.cloudflared\config.yml
+if exist "%CF_CONFIG%" (
+    echo   Starting named Cloudflare tunnel...
+    start "" /B cloudflared tunnel --config "%CF_CONFIG%" run > "%TUNNEL_LOG%" 2>&1
+
+    REM Wait for tunnel to connect (look for domain in log)
+    set TUNNEL_URL=
+    for /L %%i in (1,1,30) do (
+        if not defined TUNNEL_URL (
+            powershell -Command "Select-String -Path '%TUNNEL_LOG%' -Pattern 'Registered' -Quiet" >nul 2>&1
+            if !errorlevel! equ 0 (
+                REM Extract hostname from config
+                for /f "tokens=2 delims=: " %%h in ('findstr /C:"hostname:" "%CF_CONFIG%"') do (
+                    set TUNNEL_URL=https://%%h
+                )
+            )
+            if not defined TUNNEL_URL timeout /t 1 /nobreak >nul
+        )
+    )
+) else (
+    echo   Starting quick Cloudflare tunnel on port %TUNNEL_PORT%...
+    start "" /B cloudflared tunnel --url http://localhost:%TUNNEL_PORT% > "%TUNNEL_LOG%" 2>&1
+
+    REM Wait for trycloudflare.com URL to appear in log
+    set TUNNEL_URL=
+    for /L %%i in (1,1,30) do (
+        if not defined TUNNEL_URL (
+            for /f "delims=" %%u in ('powershell -Command "Select-String -Path '%TUNNEL_LOG%' -Pattern 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | ForEach-Object { $_.Matches[0].Value } | Select-Object -First 1"') do (
+                set TUNNEL_URL=%%u
+            )
+            if not defined TUNNEL_URL timeout /t 1 /nobreak >nul
+        )
+    )
+)
+
+if defined TUNNEL_URL (
+    echo.
+    echo   ====================================================
+    echo     Cloudflare Tunnel Active
+    echo.
+    echo     Public URL: %TUNNEL_URL%
+    echo.
+    echo     Share this URL to access LlamaNet from anywhere.
+    echo   ====================================================
+    echo.
+
+    REM Write tunnel URL to file for Python process to discover
+    echo %TUNNEL_URL% > "%TEMP%\llamanet_tunnel_url"
+
+    REM Set environment variable for child process
+    set LLAMANET_TUNNEL_URL=%TUNNEL_URL%
+) else (
+    echo   WARNING: Tunnel URL not detected after 30s
+    echo   Check log: %TUNNEL_LOG%
+)
+
+goto :eof
 
 :end
 endlocal
