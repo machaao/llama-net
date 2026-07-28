@@ -514,7 +514,9 @@ class SupabaseManager:
                     "tps": effective_tps,
                     "ttft": effective_ttft,
                     "latency": effective_latency,
-                    "total_tokens": effective_tokens,
+                    "total_tokens": effective_total,
+                    "prompt_tokens": effective_prompt,
+                    "completion_tokens": effective_completion,
                     "uptime": effective_uptime,
                 }, on_conflict="node_hash,model_slug").execute()
 
