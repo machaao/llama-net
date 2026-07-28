@@ -343,10 +343,19 @@ class ModelPool:
         return history
 
     def get_network_info(self) -> Dict[str, Any]:
-        models = [
-            {"name": name, "ctx_length": slot.n_ctx}
-            for name, slot in self.slots.items()
-        ]
+        models = []
+        for name, slot in self.slots.items():
+            perf = slot.metrics.get_performance_metrics()
+            models.append({
+                "name": name,
+                "ctx_length": slot.n_ctx,
+                "load": perf.get("load", 0),
+                "tps": perf.get("tps", 0),
+                "ttft": perf.get("ttft", 0),
+                "latency": perf.get("latency", 0),
+                "total_tokens": perf.get("total_tokens", 0),
+                "uptime": perf.get("uptime", 0),
+            })
         return {
             "models": models,
             "active_model": self.active_model,

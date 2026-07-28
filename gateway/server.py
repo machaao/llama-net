@@ -575,7 +575,7 @@ async def node_heartbeat(request: Request):
     # Read previous metrics from Supabase for change detection
     should_broadcast = False
     try:
-        existing_node = supabase_mgr.client.table("nodes").select("metrics, load, tps").eq(
+        existing_node = supabase_mgr.client.table("nodes").select("load, tps").eq(
             "node_hash", node_hash
         ).eq("status", "active").execute()
         if existing_node.data:
@@ -592,11 +592,11 @@ async def node_heartbeat(request: Request):
                     should_broadcast = True
                     break
 
-            # Also broadcast if pool_models changed
-            if not should_broadcast and pool_models:
-                prev_pool = (prev.get("metrics", {}) or {}).get("pool_models", [])
-                if json.dumps(prev_pool, sort_keys=True) != json.dumps(pool_models, sort_keys=True):
-                    should_broadcast = True
+        # Also broadcast if pool size changed
+        if not should_broadcast and pool_models:
+            prev_nm = supabase_mgr.get_node_models(node_hash, status="active")
+            if len(prev_nm) != len(pool_models):
+                should_broadcast = True
     except Exception as e:
         logger.debug(f"Could not read previous metrics for {node_hash}: {e}")
 

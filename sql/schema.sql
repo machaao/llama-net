@@ -28,8 +28,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS nodes (
     node_hash VARCHAR(12) PRIMARY KEY,
     user_id UUID REFERENCES users(id),
-    model_name TEXT NOT NULL,
-    model_slug TEXT NOT NULL,
     url TEXT DEFAULT '',
     ip TEXT DEFAULT '',
     port INTEGER DEFAULT 8000,
@@ -42,8 +40,6 @@ CREATE TABLE IF NOT EXISTS nodes (
     total_tokens BIGINT DEFAULT 0,
     status TEXT DEFAULT 'active',
     last_heartbeat TIMESTAMPTZ DEFAULT now(),
-    pool_models JSONB DEFAULT '[]'::jsonb,
-    metrics JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -120,3 +116,16 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ctx_length INTEGER DEFAULT 0;
 DROP INDEX IF EXISTS idx_nodes_model_slug;
 ALTER TABLE nodes DROP COLUMN IF EXISTS model_name;
 ALTER TABLE nodes DROP COLUMN IF EXISTS model_slug;
+
+-- 11. Per-node-model metrics (three-level metrics architecture)
+--     node_models now carries its own load/tps/ttft/latency/total_tokens/uptime
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS load FLOAT DEFAULT 0;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS tps FLOAT DEFAULT 0;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS ttft FLOAT;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS latency FLOAT;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS total_tokens BIGINT DEFAULT 0;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS uptime INTEGER DEFAULT 0;
+
+-- 12. Drop redundant JSONB columns from nodes (now tracked via node_models)
+ALTER TABLE nodes DROP COLUMN IF EXISTS pool_models;
+ALTER TABLE nodes DROP COLUMN IF EXISTS metrics;

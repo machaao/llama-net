@@ -264,11 +264,9 @@ class SupabaseManager:
                 "last_heartbeat": "now()", "status": "active",
             }
 
-            # Persist pool_models and upsert node_models
+            # Upsert per-node-model metrics via junction table
             if "pool_models" in metrics:
                 pool_models = metrics["pool_models"]
-                update_data["pool_models"] = pool_models
-                update_data["metrics"] = {"pool_models": pool_models}
                 # Extract active model slug from node_models junction table
                 active_slug = ""
                 try:
@@ -328,9 +326,9 @@ class SupabaseManager:
             return False
 
     def upsert_node_models(self, node_hash: str, models_list: list, active_model_slug: str = "") -> None:
-        """Upsert node_models entries for a node's pool.
+        """Upsert node_models entries for a node's pool with per-model metrics.
 
-        models_list: [{"name": "model-a", "ctx_length": 8192}, ...]
+        models_list: [{"name": "model-a", "ctx_length": 8192, "tps": 12.5, ...}, ...]
         Handles backward compat: if item is a string, wraps it.
         """
         try:
@@ -340,9 +338,11 @@ class SupabaseManager:
                 if isinstance(model, str):
                     model_name = model
                     ctx_length = 0
+                    model_metrics: dict = {}
                 elif isinstance(model, dict):
                     model_name = model.get("name", model.get("model_name", ""))
                     ctx_length = model.get("ctx_length", 0)
+                    model_metrics = model
                 else:
                     continue
 
@@ -360,6 +360,12 @@ class SupabaseManager:
                     "is_active": is_active,
                     "status": "active",
                     "updated_at": "now()",
+                    "load": model_metrics.get("load", 0),
+                    "tps": model_metrics.get("tps", 0),
+                    "ttft": model_metrics.get("ttft"),
+                    "latency": model_metrics.get("latency"),
+                    "total_tokens": model_metrics.get("total_tokens", 0),
+                    "uptime": model_metrics.get("uptime", 0),
                 }, on_conflict="node_hash,model_slug").execute()
 
             logger.debug(f"Upserted {len(models_list)} node_models for {node_hash}")
@@ -494,7 +500,7 @@ class SupabaseManager:
             # ── Primary source: node_models junction table ──
             try:
                 nm_result = self.client.table("node_models").select(
-                    "node_hash, model_name, model_slug, ctx_length, is_active"
+                    "node_hash, model_name, model_slug, ctx_length, is_active, load, tps, ttft, latency, total_tokens, uptime"
                 ).eq("status", "active").execute()
 
                 if nm_result.data:
@@ -535,6 +541,13 @@ class SupabaseManager:
                             if not full_node or full_node.get("status") != "active":
                                 continue
                             full_node["ctx_length"] = nm_node["ctx_length"]
+                            # Per-node-model metrics from junction table
+                            full_node["load"] = nm_node.get("load", 0)
+                            full_node["tps"] = nm_node.get("tps", 0)
+                            full_node["ttft"] = nm_node.get("ttft")
+                            full_node["latency"] = nm_node.get("latency")
+                            full_node["total_tokens"] = nm_node.get("total_tokens", 0)
+                            full_node["uptime"] = nm_node.get("uptime", 0)
                             enriched_nodes.append(full_node)
 
                         model["nodes"] = enriched_nodes
