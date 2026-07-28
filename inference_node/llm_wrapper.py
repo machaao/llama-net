@@ -825,7 +825,7 @@ class LlamaWrapper:
 
         finally:
             final_time = time.time() - start_time
-            self.metrics_manager.record_request_end(total_tokens, final_time, incoming_tokens=prompt_tokens)
+            self.metrics_manager.record_request_end(total_tokens, final_time, prompt_tokens=prompt_tokens)
             self.metrics_manager.record_latency(final_time)
         
     def generate(self, 
@@ -867,7 +867,7 @@ class LlamaWrapper:
             generation_time = time.time() - start_time
             tokens_generated = output['usage']['completion_tokens'] if 'output' in locals() and 'usage' in output else 0
             prompt_tokens_est = len(prompt.split()) if 'prompt' in locals() else 0
-            self.metrics_manager.record_request_end(tokens_generated, generation_time, incoming_tokens=prompt_tokens_est)
+            self.metrics_manager.record_request_end(tokens_generated, generation_time, prompt_tokens=prompt_tokens_est)
     
     def generate_stream(self, 
                        prompt: str, 

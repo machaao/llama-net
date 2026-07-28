@@ -221,7 +221,7 @@ class SupabaseManager:
             except Exception:
                 pass
 
-            incoming_tokens = metrics.get("total_tokens", 0)
+            incoming_total_tokens = metrics.get("total_tokens", 0)
 
             # Read existing prompt/completion tokens
             existing_prompt = 0
@@ -248,7 +248,7 @@ class SupabaseManager:
             effective_total = effective_prompt + effective_completion
 
             # Also handle legacy total_tokens field
-            if incoming_tokens < existing_tokens and existing_tokens > 0 and effective_completion == 0:
+            if incoming_total_tokens < existing_tokens and existing_tokens > 0 and effective_completion == 0:
                 self._add_cumulative_tokens(0, existing_tokens)
                 self._node_token_cache.pop(node_hash, None)
                 logger.info(
@@ -257,7 +257,7 @@ class SupabaseManager:
                 )
 
             # ── Merge: cumulative = max, instantaneous = incoming if non-zero ──
-            effective_tokens = max(incoming_tokens, effective_total)
+            effective_tokens = max(incoming_total_tokens, effective_total)
             effective_load = metrics.get("load", 0) or existing_load
             effective_tps = metrics.get("tps", 0) or existing_tps
             effective_ttft = metrics.get("ttft") if metrics.get("ttft") is not None else existing_ttft
@@ -477,9 +477,9 @@ class SupabaseManager:
                 # ── Preserve cumulative metrics from existing row ──
                 existing = existing_map.get(model_slug, {})
                 existing_tokens = existing.get("total_tokens", 0) or 0
-                incoming_tokens = model_metrics.get("total_tokens", 0)
+                incoming_total = model_metrics.get("total_tokens", 0)
 
-                effective_tokens = max(incoming_tokens, existing_tokens)
+                effective_tokens = max(incoming_total, existing_tokens)
                 effective_load = model_metrics.get("load", 0) or existing.get("load", 0) or 0
                 effective_tps = model_metrics.get("tps", 0) or existing.get("tps", 0) or 0
                 effective_ttft = (
@@ -493,14 +493,14 @@ class SupabaseManager:
                 effective_uptime = model_metrics.get("uptime", 0) or existing.get("uptime", 0) or 0
 
                 # ── Preserve incoming/generated tokens ──
-                existing_incoming = existing.get("incoming_tokens", 0) or 0
-                existing_generated = existing.get("generated_tokens", 0) or 0
+                existing_prompt = existing.get("prompt_tokens", 0) or 0
+                existing_completion = existing.get("completion_tokens", 0) or 0
                 incoming_inc = model_metrics.get("prompt_tokens", 0)
                 incoming_gen = model_metrics.get("completion_tokens", 0)
 
-                effective_incoming = max(incoming_inc, existing_incoming)
-                effective_generated = max(incoming_gen, existing_generated)
-                effective_total = effective_incoming + effective_generated
+                effective_prompt = max(incoming_inc, existing_prompt)
+                effective_completion = max(incoming_gen, existing_completion)
+                effective_total = effective_prompt + effective_completion
 
                 self.client.table("node_models").upsert({
                     "node_hash": node_hash,
@@ -803,7 +803,7 @@ class SupabaseManager:
     def get_network_stats(self) -> Dict[str, Any]:
         try:
             result = self.client.table("nodes").select(
-                "node_hash, load, tps, total_tokens, incoming_tokens, generated_tokens"
+                "node_hash, load, tps, total_tokens, prompt_tokens, completion_tokens"
             ).eq("status", "active").execute()
             nodes = result.data or []
             cum_in = self._get_cumulative_stat("cumulative_prompt_tokens")

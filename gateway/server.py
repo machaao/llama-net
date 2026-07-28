@@ -295,8 +295,8 @@ async def network_events(request: Request):
                                 "ttft": nm_row.get("ttft"),
                                 "latency": nm_row.get("latency"),
                                 "total_tokens": nm_row.get("total_tokens", 0),
-                                "incoming_tokens": nm_row.get("incoming_tokens", 0),
-                                "generated_tokens": nm_row.get("generated_tokens", 0),
+                                "prompt_tokens": nm_row.get("prompt_tokens", 0),
+                                "completion_tokens": nm_row.get("completion_tokens", 0),
                                 "uptime": nm_row.get("uptime", 0),
                             }
                     except Exception:
