@@ -354,8 +354,8 @@ class ModelPool:
                 "ttft": perf.get("ttft", 0),
                 "latency": perf.get("latency", 0),
                 "total_tokens": perf.get("total_tokens", 0),
-                "incoming_tokens": perf.get("incoming_tokens", 0),
-                "generated_tokens": perf.get("generated_tokens", 0),
+                "prompt_tokens": perf.get("prompt_tokens", 0),
+                "completion_tokens": perf.get("completion_tokens", 0),
                 "uptime": perf.get("uptime", 0),
             })
         return {

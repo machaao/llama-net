@@ -130,11 +130,11 @@ ALTER TABLE node_models ADD COLUMN IF NOT EXISTS uptime INTEGER DEFAULT 0;
 ALTER TABLE nodes DROP COLUMN IF EXISTS pool_models;
 ALTER TABLE nodes DROP COLUMN IF EXISTS metrics;
 
--- 13. Three-level token tracking: incoming + generated = total
+-- 13. Three-level token tracking: prompt + completion = total
 -- nodes table
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS incoming_tokens BIGINT DEFAULT 0;
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS generated_tokens BIGINT DEFAULT 0;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS prompt_tokens BIGINT DEFAULT 0;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS completion_tokens BIGINT DEFAULT 0;
 
 -- node_models table
-ALTER TABLE node_models ADD COLUMN IF NOT EXISTS incoming_tokens BIGINT DEFAULT 0;
-ALTER TABLE node_models ADD COLUMN IF NOT EXISTS generated_tokens BIGINT DEFAULT 0;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS prompt_tokens BIGINT DEFAULT 0;
+ALTER TABLE node_models ADD COLUMN IF NOT EXISTS completion_tokens BIGINT DEFAULT 0;

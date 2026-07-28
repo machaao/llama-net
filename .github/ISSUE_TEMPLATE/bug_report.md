@@ -36,7 +36,7 @@ Paste logs here
 
 - **OS:** [e.g., macOS 14.3, Ubuntu 22.04, Windows 11]
 - **Python Version:** [e.g., 3.11.5]
-- **LlamaNet Version:** [e.g., 0.1.7 or commit hash]
+- **LlamaNet Version:** [e.g., 0.1.8 or commit hash]
 - **GPU:** [e.g., Apple M2 Pro, NVIDIA RTX 4090, CPU only]
 - **RAM:** [e.g., 16 GB]
 - **Model:** [e.g., Ministral-3-8B-Instruct Q4_K_M]

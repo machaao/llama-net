@@ -1233,21 +1233,21 @@ class LlamaNetUI {
             parts.push(`<span class="node-metric-badge"><i class="fas fa-coins"></i> ${tokenDisplay} Tokens</span>`);
         }
 
-        // Incoming tokens (show if > 0)
-        const incomingTokens = this._safeMetric(node.incoming_tokens, 0);
-        if (incomingTokens > 0) {
-            const inDisplay = incomingTokens >= 1000000 ? `${(incomingTokens / 1000000).toFixed(1)}M` :
-                              incomingTokens >= 1000 ? `${(incomingTokens / 1000).toFixed(1)}K` :
-                              `${incomingTokens}`;
+        // Prompt tokens (show if > 0)
+        const promptTokens = this._safeMetric(node.prompt_tokens, 0);
+        if (promptTokens > 0) {
+            const inDisplay = promptTokens >= 1000000 ? `${(promptTokens / 1000000).toFixed(1)}M` :
+                              promptTokens >= 1000 ? `${(promptTokens / 1000).toFixed(1)}K` :
+                              `${promptTokens}`;
             parts.push(`<span class="node-metric-badge"><i class="fas fa-arrow-down"></i> ${inDisplay} In</span>`);
         }
 
-        // Generated tokens (show if > 0)
-        const generatedTokens = this._safeMetric(node.generated_tokens, 0);
-        if (generatedTokens > 0) {
-            const genDisplay = generatedTokens >= 1000000 ? `${(generatedTokens / 1000000).toFixed(1)}M` :
-                               generatedTokens >= 1000 ? `${(generatedTokens / 1000).toFixed(1)}K` :
-                               `${generatedTokens}`;
+        // Completion tokens (show if > 0)
+        const completionTokens = this._safeMetric(node.completion_tokens, 0);
+        if (completionTokens > 0) {
+            const genDisplay = completionTokens >= 1000000 ? `${(completionTokens / 1000000).toFixed(1)}M` :
+                               completionTokens >= 1000 ? `${(completionTokens / 1000).toFixed(1)}K` :
+                               `${completionTokens}`;
             parts.push(`<span class="node-metric-badge"><i class="fas fa-arrow-up"></i> ${genDisplay} Out</span>`);
         }
         

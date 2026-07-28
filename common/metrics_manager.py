@@ -11,8 +11,8 @@ class MetricsManager:
     def __init__(self):
         self.start_time = time.time()
         self.total_tokens_generated = 0
-        self.total_incoming_tokens = 0
-        self.total_generated_tokens = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
         self.total_generation_time = 0
         self.request_count = 0
         self.active_requests = 0
@@ -44,9 +44,9 @@ class MetricsManager:
             "uptime": uptime,
             "load": round(load, 2),
             "tps": round(tps, 2),
-            "total_tokens": self.total_incoming_tokens + self.total_generated_tokens,
-            "incoming_tokens": self.total_incoming_tokens,
-            "generated_tokens": self.total_generated_tokens,
+            "total_tokens": self.total_prompt_tokens + self.total_completion_tokens,
+            "prompt_tokens": self.total_prompt_tokens,
+            "completion_tokens": self.total_completion_tokens,
             "ttft": round(self.get_avg_ttft(), 3),
             "latency": round(self.get_avg_latency(), 3)
         }
@@ -102,11 +102,11 @@ class MetricsManager:
         self.active_requests += 1
         self.request_count += 1
     
-    def record_request_end(self, tokens_generated: int = 0, generation_time: float = 0, incoming_tokens: int = 0):
+    def record_request_end(self, tokens_generated: int = 0, generation_time: float = 0, prompt_tokens: int = 0):
         """Record request completion"""
         self.active_requests = max(0, self.active_requests - 1)
-        self.total_generated_tokens += tokens_generated
-        self.total_incoming_tokens += incoming_tokens
+        self.total_completion_tokens += tokens_generated
+        self.total_prompt_tokens += prompt_tokens
         self.total_generation_time += generation_time
         
         # Notify listeners that metrics have been updated
