@@ -315,8 +315,8 @@ class LandingApp {
                 <div class="node-row">
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
-                    <span class="node-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
-                    ${uptimeText ? `<span class="node-metric me-1"><i class="fas fa-clock"></i> ${uptimeText}</span>` : ''}
+                    <span class="node-model-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
+                    ${uptimeText ? `<span class="node-model-metric me-1"><i class="fas fa-clock"></i> ${uptimeText}</span>` : ''}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
                 </div>`;
             }).join('');
