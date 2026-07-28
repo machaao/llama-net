@@ -1382,7 +1382,6 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
                     # Use the thread-safe streaming method
                     async for chunk in active_llm.generate_chat_stream_safe(
                         messages=messages,
-                        max_tokens=request.max_tokens or 100,
                         temperature=request.temperature or 0.7,
                         top_p=request.top_p or 0.9,
                         stop=stop_tokens,
@@ -1530,7 +1529,6 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
                     def create_stream():
                         return llm.generate_chat_stream(
                             messages=messages,
-                            max_tokens=request.max_tokens or 100,
                             temperature=request.temperature or 0.7,
                             top_p=request.top_p or 0.9,
                             stop=stop_tokens,

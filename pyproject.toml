@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llamanet"
-version = "0.1.1"
+version = "0.1.2"
 description = "Decentralized Inference Swarm for llama.cpp"
 authors = [{name = "LlamaNet Team", email = "example@example.com"}]
 license = {text = "Apache-2.0"}

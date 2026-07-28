@@ -682,12 +682,12 @@ class LlamaWrapper:
         formatted_messages = self._format_messages(messages)
         prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
         prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
-        max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
+        # max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
         
         # Create streaming generator
         stream = self.llm.create_chat_completion(
             messages=formatted_messages,
-            max_tokens=max_tokens,
+            # max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
