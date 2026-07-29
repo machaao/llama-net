@@ -231,7 +231,13 @@ async def lifespan(app: FastAPI):
                 if gateway_client:
                     try:
                         await asyncio.wait_for(
-                            gateway_client.send_event("node_updated"),
+                            gateway_client.send_event(
+                                "node_updated",
+                                extra_data={
+                                    "pool_event": event_type,
+                                    "changed_model": changed_model,
+                                },
+                            ),
                             timeout=5.0
                         )
                     except Exception as e:
@@ -253,7 +259,7 @@ async def lifespan(app: FastAPI):
                                 node_info["tps"] = metrics.get("tps", 0)
                             except Exception:
                                 pass
-                        await sse_manager.broadcast_event("node_updated", {
+                        await sse_manager.broadcast_event(event_type, {
                             "node_info": node_info,
                             "event_type": event_type,
                             "model_name": changed_model,
@@ -281,7 +287,13 @@ async def lifespan(app: FastAPI):
                 if gateway_client:
                     try:
                         await asyncio.wait_for(
-                            gateway_client.send_event("node_updated"),
+                            gateway_client.send_event(
+                                "node_updated",
+                                extra_data={
+                                    "pool_event": event_type,
+                                    "changed_model": changed_model,
+                                },
+                            ),
                             timeout=5.0
                         )
                     except Exception as e:
@@ -305,7 +317,7 @@ async def lifespan(app: FastAPI):
                             except Exception:
                                 pass
 
-                        await sse_manager.broadcast_event("node_updated", {
+                        await sse_manager.broadcast_event(event_type, {
                             "node_info": node_info,
                             "event_type": event_type,
                             "model_name": changed_model,

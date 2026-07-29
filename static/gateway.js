@@ -130,6 +130,10 @@ class LandingApp {
                 if (this._lastKnownNodes) delete this._lastKnownNodes[data.node_hash];
                 if (this._nodePoolModels) delete this._nodePoolModels[data.node_hash];
                 break;
+            case 'model_evicted':
+                this.debouncedRefresh();
+                this.showToast('info', '🗑️ Model unloaded: ' + this.escapeHtml(data.model_name || data.model_slug || ''));
+                break;
             case 'heartbeat':
                 break;
             case 'stats_update':
