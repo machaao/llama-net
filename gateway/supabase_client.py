@@ -366,8 +366,12 @@ class SupabaseManager:
                 "last_heartbeat": "now()", "status": "active",
             }
 
+            # Track whether pool_models was provided so we can fall back for probe metrics
+            pool_models_present = False
+
             # Upsert per-node-model metrics via junction table
             if "pool_models" in metrics:
+                pool_models_present = True
                 pool_models = metrics["pool_models"]
                 # Extract active model slug from node_models junction table
                 active_slug = ""
@@ -389,6 +393,30 @@ class SupabaseManager:
                 update_data["ctx_length"] = metrics["ctx_length"]
 
             result = self.client.table("nodes").update(update_data).eq("node_hash", node_hash).execute()
+
+            # Also update node_models metrics even when pool_models is absent
+            # (e.g. probe metrics arriving before first heartbeat)
+            if not pool_models_present and any(k in update_data for k in ("ttft", "latency", "tps")):
+                try:
+                    nm_result = self.client.table("node_models").select("model_slug").eq(
+                        "node_hash", node_hash
+                    ).eq("is_active", True).eq("status", "active").limit(1).execute()
+                    if nm_result.data:
+                        active_slug = nm_result.data[0].get("model_slug", "")
+                        nm_update = {}
+                        if "ttft" in update_data:
+                            nm_update["ttft"] = update_data["ttft"]
+                        if "latency" in update_data:
+                            nm_update["latency"] = update_data["latency"]
+                        if "tps" in update_data:
+                            nm_update["tps"] = update_data["tps"]
+                        if nm_update:
+                            nm_update["updated_at"] = "now()"
+                            self.client.table("node_models").update(nm_update).eq(
+                                "node_hash", node_hash
+                            ).eq("model_slug", active_slug).eq("status", "active").execute()
+                except Exception as e:
+                    logger.debug(f"Probe metrics node_models update failed: {e}")
 
             # Persist token cache for gateway restart resilience
             self._persist_token_cache()

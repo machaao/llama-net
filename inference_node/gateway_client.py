@@ -460,15 +460,20 @@ class GatewayClient:
                 pass
         # Fallback: only return model_name if it's a real model
         if self.model_name and self.model_name != "No Model Loaded":
-            return [{"name": self.model_name, "ctx_length": 0}]
+            ctx = self._get_active_context_length_value()
+            return [{"name": self.model_name, "ctx_length": ctx}]
         return []
 
     def _get_active_context_length_value(self) -> int:
-        """Get ctx_length for the active model."""
+        """Get ctx_length for the active model, falling back to any loaded slot."""
         if self.model_pool:
             slot = self.model_pool.get_active()
             if slot:
                 return slot.n_ctx
+            # Fallback: use the first available slot's context length
+            if self.model_pool.slots:
+                first_slot = next(iter(self.model_pool.slots.values()))
+                return first_slot.n_ctx
         return 0
 
     @staticmethod

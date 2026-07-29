@@ -921,15 +921,8 @@ async def publish_node_event(request: Request):
                 pass
 
             model_slug = model_name_to_slug(model_name)
-            supabase_mgr.register_node(
-                user_id=system_user_id, node_hash=node_hash, model_name=model_name,
-                model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
-                port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
-                metrics=body.get("metrics", {}),
-                ctx_length=ctx_length,
-            )
 
-            # Upsert node_models for pool models
+            # Build models_list for register_node (single source of truth)
             event_pool_models_raw = body.get("models", [])
             event_pool_models = []
             for m in event_pool_models_raw:
@@ -937,6 +930,18 @@ async def publish_node_event(request: Request):
                     event_pool_models.append(m)
                 elif isinstance(m, str):
                     event_pool_models.append({"name": m, "ctx_length": 0})
+
+            if not event_pool_models:
+                event_pool_models = [{"name": model_name, "ctx_length": ctx_length}]
+
+            supabase_mgr.register_node(
+                user_id=system_user_id, node_hash=node_hash, model_name=model_name,
+                model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
+                port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
+                metrics=body.get("metrics", {}),
+                ctx_length=ctx_length,
+                models_list=event_pool_models,
+            )
 
             logger.info(
                 f"🟢 NODE JOINED: {node_hash} model={model_name} "
@@ -949,12 +954,6 @@ async def publish_node_event(request: Request):
                 f"latency={body.get('metrics', {}).get('latency', 'N/A')} "
                 f"gpu={body.get('gpu', '')[:40]}"
             )
-
-            if event_pool_models:
-                try:
-                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, model_name_to_slug(model_name))
-                except Exception as e:
-                    logger.debug(f"node_models upsert in event failed: {e}")
 
             # ── Quality Gate: Performance Check (self-reported native probe metrics) ──
             event_probe_metrics = body.get("probe_metrics", {})
