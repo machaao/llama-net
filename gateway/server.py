@@ -1099,17 +1099,8 @@ async def publish_node_event(request: Request):
                     if active_name:
                         model_name = active_name
 
-                # Upsert node_models junction table — preserve existing active slug
+                # Upsert node_models junction table — derive active slug from event payload
                 try:
-                    existing_slug = ""
-                    try:
-                        nm_check = supabase_mgr.client.table("node_models").select("model_slug").eq(
-                            "node_hash", node_hash
-                        ).eq("is_active", True).eq("status", "active").limit(1).execute()
-                        if nm_check.data:
-                            existing_slug = nm_check.data[0].get("model_slug", "")
-                    except Exception:
-                        pass
                     event_active_slug = model_name_to_slug(model_name)
                     supabase_mgr.upsert_node_models(node_hash, event_pool_models, event_active_slug)
                 except Exception as e:
