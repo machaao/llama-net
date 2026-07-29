@@ -72,6 +72,65 @@ class SupabaseManager:
         except Exception as e:
             logger.debug(f"Could not persist token cache: {e}")
 
+    @staticmethod
+    def _parse_timestamp(ts_str: str) -> Optional[float]:
+        """Parse ISO timestamp to Unix epoch. Returns None on failure."""
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+
+    def _detect_restart_and_accumulate(self, node_hash: str, new_prompt: int, new_completion: int) -> None:
+        """Detect node restart by checking if tokens decreased, then accumulate old values."""
+        cached = self._node_token_cache.get(node_hash, {})
+        old_prompt = cached.get("prompt", 0) if isinstance(cached, dict) else 0
+        old_completion = cached.get("completion", 0) if isinstance(cached, dict) else 0
+
+        if new_completion < old_completion and old_completion > 0:
+            self._add_cumulative_tokens(old_prompt, old_completion)
+            logger.info(f"Node {node_hash} restarted — accumulated {old_prompt} prompt + {old_completion} completion tokens")
+
+        self._node_token_cache[node_hash] = {"prompt": new_prompt, "completion": new_completion}
+
+    @staticmethod
+    def _merge_model_metrics(existing: dict, incoming: dict) -> dict:
+        """Merge incoming metrics with existing, preserving cumulative totals."""
+        return {
+            "load": incoming.get("load") if incoming.get("load") else (existing.get("load") or 0),
+            "tps": incoming.get("tps") if incoming.get("tps") else (existing.get("tps") or 0),
+            "ttft": incoming.get("ttft") if incoming.get("ttft") is not None else existing.get("ttft"),
+            "latency": incoming.get("latency") if incoming.get("latency") is not None else existing.get("latency"),
+            "uptime": incoming.get("uptime") or existing.get("uptime") or 0,
+            "total_tokens": max(incoming.get("total_tokens", 0), existing.get("total_tokens", 0)),
+            "prompt_tokens": max(incoming.get("prompt_tokens", 0), existing.get("prompt_tokens", 0)),
+            "completion_tokens": max(incoming.get("completion_tokens", 0), existing.get("completion_tokens", 0)),
+        }
+
+    @staticmethod
+    def _compute_model_aggregates(nodes: list) -> dict:
+        """Compute aggregate stats from a list of enriched node dicts."""
+        if not nodes:
+            return {
+                "total_tps": 0, "avg_load": 0, "avg_ttft": 0,
+                "total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0,
+            }
+        return {
+            "total_tps": round(sum(n.get("tps", 0) for n in nodes), 1),
+            "avg_load": round(sum(n.get("load", 0) for n in nodes) / len(nodes), 3),
+            "avg_ttft": round(sum(n.get("ttft", 0) or 0 for n in nodes) / len(nodes), 3),
+            "total_tokens": sum(n.get("total_tokens", 0) for n in nodes),
+            "prompt_tokens": sum(n.get("prompt_tokens", 0) for n in nodes),
+            "completion_tokens": sum(n.get("completion_tokens", 0) for n in nodes),
+        }
+
+    def _get_cumulative_token_breakdown(self) -> tuple:
+        """Get cumulative (prompt, completion) token totals from statistics table."""
+        return (
+            self._get_cumulative_stat("cumulative_prompt_tokens"),
+            self._get_cumulative_stat("cumulative_completion_tokens"),
+        )
+
     def get_or_create_user(
         self, user_id: str, email: str, full_name: str = "",
         avatar_url: str = "", google_id: str = ""
