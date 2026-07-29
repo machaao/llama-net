@@ -106,7 +106,7 @@ async def _periodic_stats_broadcast():
 
 async def _heartbeat_monitor_loop():
     """Monitor heartbeat timestamps and detect stale nodes — reads from Supabase"""
-    STALE_THRESHOLD = 90  # 30s heartbeat × 3 misses = 90s before marking stale
+    STALE_THRESHOLD = 120  # 30s heartbeat × 4 misses = 120s (extra margin for DB latency)
     while True:
         try:
             await asyncio.sleep(5)
@@ -793,9 +793,6 @@ async def publish_node(request: Request):
                 "tps": probe_metrics.get("tps", 0),
             })
 
-        # ── Issue per-node bearer token ──
-        node_token = node_token_manager.generate_token(node_hash)
-
         # Broadcast SSE event
         if sse_mgr:
             event_type = "node_joined" if is_new else "node_updated"
@@ -810,6 +807,9 @@ async def publish_node(request: Request):
                 "latency": reg_metrics.get("latency"),
                 "total_tokens": reg_metrics.get("total_tokens", 0),
             })
+
+        # ── Issue per-node bearer token (AFTER quality gate passes) ──
+        node_token = node_token_manager.generate_token(node_hash)
 
         logger.info(f"{'Published' if is_new else 'Updated'} node {node_hash} model={model_name}")
         return {"success": True, "node_hash": node_hash, "node_token": node_token}

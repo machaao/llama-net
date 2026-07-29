@@ -206,9 +206,12 @@ class SupabaseManager:
             existing_ttft = None
             existing_latency = None
             existing_uptime = 0
+            existing_prompt = 0
+            existing_completion = 0
+            row = {}
             try:
                 existing_result = self.client.table("nodes").select(
-                    "total_tokens, load, tps, ttft, latency, uptime"
+                    "total_tokens, load, tps, ttft, latency, uptime, prompt_tokens, completion_tokens"
                 ).eq("node_hash", node_hash).execute()
                 if existing_result.data:
                     row = existing_result.data[0]
@@ -218,19 +221,12 @@ class SupabaseManager:
                     existing_ttft = row.get("ttft")
                     existing_latency = row.get("latency")
                     existing_uptime = row.get("uptime", 0) or 0
+                    existing_prompt = row.get("prompt_tokens", 0) or 0
+                    existing_completion = row.get("completion_tokens", 0) or 0
             except Exception:
                 pass
 
             incoming_total_tokens = metrics.get("total_tokens", 0)
-
-            # Read existing prompt/completion tokens
-            existing_prompt = 0
-            existing_completion = 0
-            try:
-                existing_prompt = row.get("prompt_tokens", 0) or 0
-                existing_completion = row.get("completion_tokens", 0) or 0
-            except Exception:
-                pass
 
             incoming_prompt = metrics.get("prompt_tokens", 0)
             incoming_completion = metrics.get("completion_tokens", 0)
@@ -373,17 +369,29 @@ class SupabaseManager:
             if "pool_models" in metrics:
                 pool_models_present = True
                 pool_models = metrics["pool_models"]
-                # Extract active model slug from node_models junction table
-                active_slug = ""
-                try:
-                    nm_result = self.client.table("node_models").select("model_slug").eq(
-                        "node_hash", node_hash
-                    ).eq("is_active", True).eq("status", "active").execute()
-                    if nm_result.data:
-                        active_slug = nm_result.data[0].get("model_slug", "")
-                except Exception:
-                    pass
-                self.upsert_node_models(node_hash, pool_models, active_slug)
+                if pool_models:
+                    # Extract active model slug from node_models junction table
+                    active_slug = ""
+                    try:
+                        nm_result = self.client.table("node_models").select("model_slug").eq(
+                            "node_hash", node_hash
+                        ).eq("is_active", True).eq("status", "active").execute()
+                        if nm_result.data:
+                            active_slug = nm_result.data[0].get("model_slug", "")
+                    except Exception:
+                        pass
+                    self.upsert_node_models(node_hash, pool_models, active_slug)
+                else:
+                    # Pool drained — evict all active node_models
+                    try:
+                        self.client.table("node_models").update({
+                            "status": "evicted",
+                            "is_active": False,
+                            "updated_at": "now()",
+                        }).eq("node_hash", node_hash).eq("status", "active").execute()
+                        logger.info(f"Pool empty — evicted all node_models for {node_hash}")
+                    except Exception as e:
+                        logger.debug(f"Pool empty eviction failed: {e}")
                 # Use ctx_length from first pool model or direct metric
                 if pool_models and isinstance(pool_models[0], dict):
                     update_data["ctx_length"] = pool_models[0].get("ctx_length", 0)
