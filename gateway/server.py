@@ -1032,6 +1032,28 @@ async def publish_node_event(request: Request):
                 except Exception as e:
                     logger.error(f"Node update in node_updated failed: {e}")
 
+            # ── Explicit model eviction from pool ──
+            pool_event = body.get("pool_event", "")
+            changed_model = body.get("changed_model", "")
+            if pool_event == "model_evicted" and changed_model:
+                evicted_slug = model_name_to_slug(changed_model)
+                try:
+                    supabase_mgr.client.table("node_models").update({
+                        "status": "evicted",
+                        "is_active": False,
+                        "updated_at": "now()",
+                    }).eq("node_hash", node_hash).eq("model_slug", evicted_slug).eq("status", "active").execute()
+                    logger.info(f"🧹 Explicit eviction: {evicted_slug} from {node_hash}")
+                except Exception as e:
+                    logger.debug(f"Explicit eviction failed for {evicted_slug}: {e}")
+
+                if sse_mgr:
+                    await sse_mgr.broadcast("model_evicted", {
+                        "node_hash": node_hash,
+                        "model_name": changed_model,
+                        "model_slug": evicted_slug,
+                    })
+
             # Extract metrics early for logging
             event_metrics = body.get("metrics", {})
             event_ctx_length = body.get("ctx_length", 0)
