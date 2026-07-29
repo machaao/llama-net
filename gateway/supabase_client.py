@@ -239,9 +239,10 @@ class SupabaseManager:
                     f"{existing_completion} completion tokens to cumulative totals"
                 )
 
-            effective_prompt = max(incoming_prompt, existing_prompt)
-            effective_completion = max(incoming_completion, existing_completion)
-            effective_total = effective_prompt + effective_completion
+            # After accumulation, use incoming values — node is reporting fresh state
+            effective_prompt = incoming_prompt
+            effective_completion = incoming_completion
+            effective_total = incoming_prompt + incoming_completion
 
             # Also handle legacy total_tokens field
             if incoming_total_tokens < existing_tokens and existing_tokens > 0 and effective_completion == 0:
@@ -252,18 +253,15 @@ class SupabaseManager:
                     f"tokens to cumulative total"
                 )
 
-            # ── Merge: cumulative = max, instantaneous = incoming if non-zero ──
-            effective_tokens = max(incoming_total_tokens, effective_total)
+            # ── Always use incoming values — node reports its current state ──
+            effective_tokens = incoming_total_tokens or effective_total
             incoming_load = metrics.get("load", 0)
             incoming_tps = metrics.get("tps", 0)
-            effective_load = incoming_load if incoming_load > 0 else existing_load
-            effective_tps = incoming_tps if incoming_tps > 0 else existing_tps
-            effective_ttft = metrics.get("ttft") if metrics.get("ttft") is not None else existing_ttft
-            effective_latency = (
-                metrics.get("latency") if metrics.get("latency") is not None
-                else existing_latency
-            )
-            effective_uptime = metrics.get("uptime", 0) or existing_uptime
+            effective_load = incoming_load
+            effective_tps = incoming_tps
+            effective_ttft = metrics.get("ttft")
+            effective_latency = metrics.get("latency")
+            effective_uptime = metrics.get("uptime", 0)
 
             self._node_token_cache[node_hash] = {
                 "prompt": effective_prompt,
