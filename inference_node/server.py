@@ -501,9 +501,10 @@ async def _wait_for_tunnel_and_register():
     # Phase 3: Register with gateway
     registered = await gateway_client.register()
     if registered:
+        # publish_node already registers the node, broadcasts node_joined,
+        # and issues the per-node bearer token. No need for a second
+        # send_event("node_joined") which would re-register the node.
         logger.info(f"✅ Registered with gateway: {gateway_client.own_url}")
-        await gateway_client.send_event("node_joined")
-        logger.info("✅ Join event sent to gateway")
 
         # Immediately broadcast tunnel URL to local UI via SSE
         if sse_manager and gateway_client.own_url:
@@ -537,6 +538,8 @@ async def _wait_for_tunnel_and_register():
         # Start background tasks (only after successful registration)
         asyncio.create_task(gateway_client.heartbeat_loop())
         asyncio.create_task(gateway_client.peer_refresh_loop())
+
+        logger.info("✅ Background heartbeat and peer refresh loops started")
     elif gateway_client._quality_rejected:
         logger.warning(
             f"🚫 Gateway registration rejected by quality gate: "

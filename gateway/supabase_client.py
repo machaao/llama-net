@@ -95,13 +95,18 @@ class SupabaseManager:
 
     @staticmethod
     def _merge_model_metrics(existing: dict, incoming: dict) -> dict:
-        """Merge incoming metrics with existing, preserving cumulative totals."""
+        """Merge incoming metrics with existing, preserving cumulative totals.
+
+        Instantaneous metrics (load, tps, ttft, latency, uptime) use incoming
+        if explicitly provided (not None), otherwise keep existing.
+        Cumulative metrics (total_tokens, prompt, completion) take the max.
+        """
         return {
-            "load": incoming.get("load") if incoming.get("load") else (existing.get("load") or 0),
-            "tps": incoming.get("tps") if incoming.get("tps") else (existing.get("tps") or 0),
+            "load": incoming.get("load") if incoming.get("load") is not None else (existing.get("load") or 0),
+            "tps": incoming.get("tps") if incoming.get("tps") is not None else (existing.get("tps") or 0),
             "ttft": incoming.get("ttft") if incoming.get("ttft") is not None else existing.get("ttft"),
             "latency": incoming.get("latency") if incoming.get("latency") is not None else existing.get("latency"),
-            "uptime": incoming.get("uptime") or existing.get("uptime") or 0,
+            "uptime": incoming.get("uptime") if incoming.get("uptime") is not None else (existing.get("uptime") or 0),
             "total_tokens": max(incoming.get("total_tokens", 0), existing.get("total_tokens", 0)),
             "prompt_tokens": max(incoming.get("prompt_tokens", 0), existing.get("prompt_tokens", 0)),
             "completion_tokens": max(incoming.get("completion_tokens", 0), existing.get("completion_tokens", 0)),

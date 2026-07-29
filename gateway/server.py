@@ -767,41 +767,48 @@ async def publish_node(request: Request):
             ctx_length=ctx_length, models_list=models_list,
         )
 
-        # ── Quality Gate: Performance Check (self-reported native probe metrics) ──
+        # ── Persist native probe metrics (always, regardless of quality gate) ──
         probe_metrics = body.get("probe_metrics", {})
-        if quality_gate.enabled and probe_metrics:
-            metrics_passed, metrics_reason = quality_gate.evaluate_metrics(probe_metrics)
-
-            if not metrics_passed:
-                logger.info(
-                    f"❌ Node {node_hash} rejected by performance gate: {metrics_reason} "
-                    f"(ttft={probe_metrics.get('ttft', 0):.2f}, "
-                    f"latency={probe_metrics.get('latency', 0):.2f}, "
-                    f"tps={probe_metrics.get('tps', 0):.1f})"
-                )
-                supabase_mgr.deregister_node(node_hash)
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "success": False,
-                        "error": "Node does not meet performance requirements",
-                        "reason": metrics_reason,
-                        "failed_check": "probe",
-                        "probe": {
-                            "ttft": round(probe_metrics.get("ttft", 0), 2),
-                            "latency": round(probe_metrics.get("latency", 0), 2),
-                            "tps": round(probe_metrics.get("tps", 0), 2),
-                            "completion_tokens": probe_metrics.get("completion_tokens", 0),
+        if probe_metrics and probe_metrics.get("probe_success", False):
+            # Quality gate: performance check (when enabled)
+            if quality_gate.enabled:
+                metrics_passed, metrics_reason = quality_gate.evaluate_metrics(probe_metrics)
+                if not metrics_passed:
+                    logger.info(
+                        f"❌ Node {node_hash} rejected by performance gate: {metrics_reason} "
+                        f"(ttft={probe_metrics.get('ttft', 0):.2f}, "
+                        f"latency={probe_metrics.get('latency', 0):.2f}, "
+                        f"tps={probe_metrics.get('tps', 0):.1f})"
+                    )
+                    supabase_mgr.deregister_node(node_hash)
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "success": False,
+                            "error": "Node does not meet performance requirements",
+                            "reason": metrics_reason,
+                            "failed_check": "probe",
+                            "probe": {
+                                "ttft": round(probe_metrics.get("ttft", 0), 2),
+                                "latency": round(probe_metrics.get("latency", 0), 2),
+                                "tps": round(probe_metrics.get("tps", 0), 2),
+                                "completion_tokens": probe_metrics.get("completion_tokens", 0),
+                            },
                         },
-                    },
-                )
+                    )
 
-            # Persist native probe metrics so the node has real TTFT/latency from day 1
+            # Always persist probe metrics so the node has real TTFT/latency from day 1
             supabase_mgr.update_node_metrics(node_hash, {
                 "ttft": probe_metrics.get("ttft", 0),
                 "latency": probe_metrics.get("latency", 0),
                 "tps": probe_metrics.get("tps", 0),
             })
+            logger.info(
+                f"🔬 Probe metrics persisted for {node_hash}: "
+                f"ttft={probe_metrics.get('ttft', 0):.3f}s, "
+                f"latency={probe_metrics.get('latency', 0):.3f}s, "
+                f"tps={probe_metrics.get('tps', 0):.1f}"
+            )
 
         # Broadcast SSE event
         if sse_mgr:
@@ -958,37 +965,44 @@ async def publish_node_event(request: Request):
                 f"gpu={body.get('gpu', '')[:40]}"
             )
 
-            # ── Quality Gate: Performance Check (self-reported native probe metrics) ──
+            # ── Persist native probe metrics (always, regardless of quality gate) ──
             event_probe_metrics = body.get("probe_metrics", {})
-            if quality_gate.enabled and event_probe_metrics:
-                metrics_passed, metrics_reason = quality_gate.evaluate_metrics(event_probe_metrics)
-
-                if not metrics_passed:
-                    logger.info(
-                        f"❌ Node {node_hash} rejected by performance gate (event): {metrics_reason}"
-                    )
-                    supabase_mgr.deregister_node(node_hash)
-                    return JSONResponse(
-                        status_code=403,
-                        content={
-                            "success": False,
-                            "error": "Node does not meet performance requirements",
-                            "reason": metrics_reason,
-                            "failed_check": "probe",
-                            "probe": {
-                                "ttft": round(event_probe_metrics.get("ttft", 0), 2),
-                                "latency": round(event_probe_metrics.get("latency", 0), 2),
-                                "tps": round(event_probe_metrics.get("tps", 0), 2),
-                                "completion_tokens": event_probe_metrics.get("completion_tokens", 0),
+            if event_probe_metrics and event_probe_metrics.get("probe_success", False):
+                if quality_gate.enabled:
+                    metrics_passed, metrics_reason = quality_gate.evaluate_metrics(event_probe_metrics)
+                    if not metrics_passed:
+                        logger.info(
+                            f"❌ Node {node_hash} rejected by performance gate (event): {metrics_reason}"
+                        )
+                        supabase_mgr.deregister_node(node_hash)
+                        return JSONResponse(
+                            status_code=403,
+                            content={
+                                "success": False,
+                                "error": "Node does not meet performance requirements",
+                                "reason": metrics_reason,
+                                "failed_check": "probe",
+                                "probe": {
+                                    "ttft": round(event_probe_metrics.get("ttft", 0), 2),
+                                    "latency": round(event_probe_metrics.get("latency", 0), 2),
+                                    "tps": round(event_probe_metrics.get("tps", 0), 2),
+                                    "completion_tokens": event_probe_metrics.get("completion_tokens", 0),
+                                },
                             },
-                        },
-                    )
+                        )
 
+                # Always persist probe metrics
                 supabase_mgr.update_node_metrics(node_hash, {
                     "ttft": event_probe_metrics.get("ttft", 0),
                     "latency": event_probe_metrics.get("latency", 0),
                     "tps": event_probe_metrics.get("tps", 0),
                 })
+                logger.info(
+                    f"🔬 Probe metrics persisted (event) for {node_hash}: "
+                    f"ttft={event_probe_metrics.get('ttft', 0):.3f}s, "
+                    f"latency={event_probe_metrics.get('latency', 0):.3f}s, "
+                    f"tps={event_probe_metrics.get('tps', 0):.1f}"
+                )
 
             if sse_mgr:
                 await sse_mgr.broadcast("node_joined", {
