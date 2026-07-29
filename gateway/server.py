@@ -619,16 +619,15 @@ async def node_heartbeat(request: Request):
         except Exception as e:
             logger.debug(f"node_models upsert in heartbeat failed: {e}")
 
-            # Evict stale models not in current heartbeat pool
-            if pool_models:
-                pool_slugs = [
-                    model_name_to_slug(m.get("name", ""))
-                    for m in pool_models if isinstance(m, dict) and m.get("name")
-                ]
-                try:
-                    supabase_mgr.evict_stale_node_models(node_hash, pool_slugs)
-                except Exception as e:
-                    logger.debug(f"Stale node_models cleanup in heartbeat failed: {e}")
+        # Evict stale models not in current heartbeat pool (runs unconditionally)
+        pool_slugs = [
+            model_name_to_slug(m.get("name", ""))
+            for m in pool_models if isinstance(m, dict) and m.get("name")
+        ]
+        try:
+            supabase_mgr.evict_stale_node_models(node_hash, pool_slugs)
+        except Exception as e:
+            logger.debug(f"Stale node_models cleanup in heartbeat failed: {e}")
 
     if should_broadcast and sse_mgr:
         try:
