@@ -613,16 +613,9 @@ async def node_heartbeat(request: Request):
     # ── NOW upsert node_models with new per-model metrics ──
     if pool_models:
         try:
-            active_slug = ""
-            try:
-                nm_check = supabase_mgr.client.table("node_models").select("model_slug").eq(
-                    "node_hash", node_hash
-                ).eq("is_active", True).eq("status", "active").limit(1).execute()
-                if nm_check.data:
-                    active_slug = nm_check.data[0].get("model_slug", "")
-            except Exception:
-                pass
-            supabase_mgr.upsert_node_models(node_hash, pool_models, active_slug)
+            # Derive active slug from heartbeat payload (model_name synced before send)
+            heartbeat_active_slug = model_name_to_slug(body.get("model", ""))
+            supabase_mgr.upsert_node_models(node_hash, pool_models, heartbeat_active_slug)
         except Exception as e:
             logger.debug(f"node_models upsert in heartbeat failed: {e}")
 
@@ -1117,7 +1110,8 @@ async def publish_node_event(request: Request):
                             existing_slug = nm_check.data[0].get("model_slug", "")
                     except Exception:
                         pass
-                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, existing_slug)
+                    event_active_slug = model_name_to_slug(model_name)
+                    supabase_mgr.upsert_node_models(node_hash, event_pool_models, event_active_slug)
                 except Exception as e:
                     logger.debug(f"node_models upsert in node_updated failed: {e}")
 
