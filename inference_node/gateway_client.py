@@ -267,6 +267,7 @@ class GatewayClient:
                             f"{self.gateway_url}/api/nodes/heartbeat",
                             json={
                                 "node_hash": self.node_hash,
+                                "model": self.model_name,
                                 "url": self.own_url,
                                 "ip": self.public_ip,
                                 "metrics": metrics,

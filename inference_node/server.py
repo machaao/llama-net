@@ -229,7 +229,13 @@ async def lifespan(app: FastAPI):
                 logger.info(f"📢 Pool event: {event_type} → {changed_model}")
                 _sync_server_pool_state()
                 if gateway_client:
-                    asyncio.create_task(gateway_client.send_event("node_updated"))
+                    try:
+                        await asyncio.wait_for(
+                            gateway_client.send_event("node_updated"),
+                            timeout=5.0
+                        )
+                    except Exception as e:
+                        logger.warning(f"Pool change event failed ({event_type} → {changed_model}): {e}")
                 if sse_manager:
                     try:
                         pool_info = model_pool.get_network_info()
@@ -273,7 +279,13 @@ async def lifespan(app: FastAPI):
                 _sync_server_pool_state()
 
                 if gateway_client:
-                    asyncio.create_task(gateway_client.send_event("node_updated"))
+                    try:
+                        await asyncio.wait_for(
+                            gateway_client.send_event("node_updated"),
+                            timeout=5.0
+                        )
+                    except Exception as e:
+                        logger.warning(f"Pool change event failed ({event_type} → {changed_model}): {e}")
 
                 if sse_manager:
                     try:
