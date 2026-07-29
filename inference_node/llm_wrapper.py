@@ -199,9 +199,14 @@ class LlamaWrapper:
         # Detect and log the chat template being used
         self._detect_chat_template()
         logger.info(f"Model loaded successfully: {config.model_name}")
-        logger.info(f"  n_ubatch={getattr(config, 'n_ubatch', 512)}, n_slots={getattr(config, 'n_parallel', 1)}, "
-                     f"n_threads={getattr(config, 'n_threads', 'auto')}, "
-                     f"n_threads_batch={getattr(config, 'n_threads_batch', 'auto')}")
+        logger.info(
+            f"  n_ctx={config.n_ctx}, n_batch={config.n_batch}, "
+            f"n_ubatch={getattr(config, 'n_ubatch', 512)}, n_slots={getattr(config, 'n_parallel', 1)}, "
+            f"n_gpu_layers={config.n_gpu_layers}, flash_attn={getattr(config, 'flash_attn', False)}, "
+            f"cache_k={getattr(config, 'cache_type_k', 'f16')}, cache_v={getattr(config, 'cache_type_v', 'f16')}, "
+            f"n_threads={getattr(config, 'n_threads', 'auto')}, "
+            f"n_threads_batch={getattr(config, 'n_threads_batch', 'auto')}"
+        )
         
     def _detect_chat_template(self):
         """Detect and log the chat template being used"""
@@ -256,8 +261,16 @@ class LlamaWrapper:
         
         # Log actual context size allocated
         actual_ctx = self.llm.n_ctx() if hasattr(self.llm, 'n_ctx') else self.config.n_ctx
-        logger.info(f"Actual n_ctx allocated: {actual_ctx} (requested: {self.config.n_ctx})")
         logger.info(f"Model loaded successfully from {model_path}")
+        logger.info(
+            f"  n_ctx={actual_ctx} (requested: {self.config.n_ctx}), "
+            f"n_batch={self.config.n_batch}, "
+            f"n_ubatch={getattr(self.config, 'n_ubatch', 512)}, n_slots={getattr(self.config, 'n_parallel', 1)}, "
+            f"n_gpu_layers={self.config.n_gpu_layers}, flash_attn={getattr(self.config, 'flash_attn', False)}, "
+            f"cache_k={getattr(self.config, 'cache_type_k', 'f16')}, cache_v={getattr(self.config, 'cache_type_v', 'f16')}, "
+            f"n_threads={getattr(self.config, 'n_threads', 'auto')}, "
+            f"n_threads_batch={getattr(self.config, 'n_threads_batch', 'auto')}"
+        )
 
     def reload_model(self, new_model_path: str) -> None:
         """Hot-reload: unload current model and load a new one"""

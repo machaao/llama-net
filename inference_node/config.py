@@ -379,8 +379,12 @@ class InferenceConfig:
         
     def __str__(self) -> str:
         return (
-            f"InferenceConfig(model_path={self.model_path}, "
-            f"host={self.host}, port={self.port}, node_id={self.node_id}, "
+            f"InferenceConfig(model={self.model_name}, "
+            f"host={self.host}, port={self.port}, "
+            f"n_ctx={self.n_ctx}, n_batch={self.n_batch}, "
+            f"n_ubatch={getattr(self, 'n_ubatch', 512)}, n_parallel={getattr(self, 'n_parallel', 1)}, "
+            f"n_gpu_layers={self.n_gpu_layers}, flash_attn={getattr(self, 'flash_attn', False)}, "
+            f"cache_k={getattr(self, 'cache_type_k', 'f16')}, cache_v={getattr(self, 'cache_type_v', 'f16')}, "
             f"verbose={self.verbose}, no_model_mode={self.no_model_mode})"
         )
 

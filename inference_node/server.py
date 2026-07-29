@@ -200,7 +200,9 @@ async def lifespan(app: FastAPI):
         logger.info(
             f"Context size: {config.n_ctx} tokens "
             f"({'auto-detected' if getattr(config, 'n_ctx_auto_detected', False) else 'user-specified'}) "
-            f"[flash_attn={getattr(config, 'flash_attn', False)}, "
+            f"[n_batch={config.n_batch}, n_ubatch={getattr(config, 'n_ubatch', 512)}, "
+            f"n_parallel={getattr(config, 'n_parallel', 1)}, n_gpu_layers={config.n_gpu_layers}, "
+            f"flash_attn={getattr(config, 'flash_attn', False)}, "
             f"cache_k={getattr(config, 'cache_type_k', 'f16')}, "
             f"cache_v={getattr(config, 'cache_type_v', 'f16')}]"
         )
