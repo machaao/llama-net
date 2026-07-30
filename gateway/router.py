@@ -56,6 +56,29 @@ class ModelRouter:
         self._key_hourly_compute: Dict[str, Dict[str, float]] = {}
         self._lock = asyncio.Lock()
 
+    @staticmethod
+    def _estimate_input_tokens(body: dict) -> int:
+        """Estimate input token count from request body for context-aware routing.
+
+        Uses a simple heuristic: ~4 characters per token.
+        Only used for routing decisions — not precise enough for billing.
+        """
+        messages = body.get("messages", [])
+        if not messages:
+            prompt = body.get("prompt", "")
+            if isinstance(prompt, list):
+                prompt = " ".join(prompt)
+            return max(1, len(prompt) // 4)
+
+        total_chars = 0
+        for msg in messages:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    total_chars += len(content)
+
+        return max(1, total_chars // 4)
+
     # ── Budget & Fairness Checks ─────────────────────────────────
 
     async def check_token_budget(self, auth_key: str) -> Optional[JSONResponse]:
@@ -219,13 +242,17 @@ class ModelRouter:
             if conversation_id:
                 prefix_hash = self._compute_prefix_hash(body)
 
-            node = await self._select_node(model_name, strategy, prefix_hash=prefix_hash)
+            # ── Estimate required context length ──
+            input_tokens = self._estimate_input_tokens(body)
+            min_ctx = input_tokens + max_tokens + 256
+
+            node = await self._select_node(model_name, strategy, prefix_hash=prefix_hash, min_ctx_length=min_ctx)
             if not node:
                 return JSONResponse(status_code=503, content={
                     "error": {"message": f"No nodes available for model '{model_name}'", "type": "server_error", "code": "no_nodes_available"}
                 })
 
-            routing_log = f"Routing chat completion for '{model_name}' to {node['node_hash'][:8]}..."
+            routing_log = f"Routing chat completion for '{model_name}' to {node['node_hash'][:8]} (ctx={min_ctx})..."
             if prefix_hash:
                 routing_log += f" (prefix={prefix_hash[:8]}...)"
             logger.info(routing_log)
@@ -268,7 +295,11 @@ class ModelRouter:
             if conversation_id:
                 prefix_hash = self._compute_prefix_hash(body)
 
-            node = await self._select_node(model_name, strategy, prefix_hash=prefix_hash)
+            # ── Estimate required context length ──
+            input_tokens = self._estimate_input_tokens(body)
+            min_ctx = input_tokens + max_tokens + 256
+
+            node = await self._select_node(model_name, strategy, prefix_hash=prefix_hash, min_ctx_length=min_ctx)
             if not node:
                 return JSONResponse(status_code=503, content={
                     "error": {"message": f"No nodes available for model '{model_name}'"}
@@ -297,7 +328,7 @@ class ModelRouter:
             } for m in models],
         }
 
-    async def _select_node(self, model_name: str, strategy: str = "load_balanced", prefix_hash: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def _select_node(self, model_name: str, strategy: str = "load_balanced", prefix_hash: Optional[str] = None, min_ctx_length: int = 0) -> Optional[Dict[str, Any]]:
         from gateway.node_registry import model_name_to_slug
 
         # Periodic cleanup of stale affinity entries
@@ -311,15 +342,41 @@ class ModelRouter:
         if not nodes:
             return None
 
+        # ── Context-length filtering ──
+        if min_ctx_length > 0:
+            eligible = [
+                n for n in nodes
+                if (n.get("ctx_length") or 0) >= min_ctx_length
+            ]
+            if eligible:
+                nodes = eligible
+                logger.debug(
+                    f"Context filter: {len(nodes)} nodes with ctx_length >= {min_ctx_length}"
+                )
+            else:
+                logger.warning(
+                    f"No node with ctx_length >= {min_ctx_length} for '{model_name}' "
+                    f"(available: {[n.get('ctx_length', 0) for n in nodes]}) — "
+                    f"falling back to best available"
+                )
+
         # ── Prefix affinity: sticky routing for KV cache reuse ──
         if prefix_hash and prefix_hash in self._prefix_affinity:
             affinity_node_hash = self._prefix_affinity[prefix_hash]
             for node in nodes:
                 if node.get("node_hash") == affinity_node_hash:
+                    # Verify affinity node meets context requirement
+                    node_ctx = node.get("ctx_length") or 0
+                    if min_ctx_length > 0 and node_ctx > 0 and node_ctx < min_ctx_length:
+                        logger.debug(
+                            f"Affinity node {affinity_node_hash[:8]}... skipped: "
+                            f"ctx_length={node_ctx} < required={min_ctx_length}"
+                        )
+                        break
                     self._affinity_ttl[prefix_hash] = time.time()
                     logger.debug(f"Sticky routing: prefix={prefix_hash[:8]}... → node={affinity_node_hash[:8]}...")
                     return node
-            # Affinity node gone — clear stale entry
+            # Affinity node gone or insufficient context — clear stale entry
             logger.debug(f"Affinity node {affinity_node_hash[:8]}... unavailable, re-selecting")
             self._prefix_affinity.pop(prefix_hash, None)
             self._affinity_ttl.pop(prefix_hash, None)
