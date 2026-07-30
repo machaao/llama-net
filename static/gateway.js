@@ -183,6 +183,12 @@ class LandingApp {
         if (h > 0) return h + 'h ' + m + 'm';
         return m + 'm';
     }
+    formatContextLength(ctx) {
+        if (!ctx || ctx <= 0) return '';
+        if (ctx >= 131072) return (ctx / 1024) + 'K';
+        if (ctx >= 1024) return (ctx / 1024) + 'K';
+        return ctx.toString();
+    }
     _handleAuthCallback() {
         const hash = window.location.hash;
         if (hash) {
@@ -335,6 +341,7 @@ class LandingApp {
                     <span class="status-dot ${node.load < 0.8 ? 'online' : 'busy'}"></span>
                     <span class="node-hash me-2">${(node.node_hash || '').substring(0, 12)}</span>
                     <span class="node-model-metric tps me-1">${(node.tps || 0).toFixed(1)} TPS</span>
+                    ${(node.context_length || node.ctx_length) ? `<span class="node-model-metric me-1"><i class="fas fa-layer-group"></i> ${this.formatContextLength(node.context_length || node.ctx_length)} ctx</span>` : ''}
                     ${uptimeText ? `<span class="node-model-metric me-1"><i class="fas fa-clock"></i> ${uptimeText}</span>` : ''}
                     ${tokenBadges}
                     ${node.gpu_info ? `<span class="text-muted small">${this.escapeHtml(node.gpu_info)}</span>` : ''}
