@@ -73,7 +73,7 @@ class InferenceConfig:
             parser.add_argument('--cache-type-v', default='f16', choices=['f16', 'q8_0', 'q4_0'],
                                 help='KV cache value quantization type (default: f16)')
 
-            parser.add_argument('--batch-size', default=4096, type=int,
+            parser.add_argument('--batch-size', default=256, type=int,
                                 help='Llama Server Batch Size (in tokens)')
 
             parser.add_argument('--ubatch-size', default=512, type=int,
@@ -176,7 +176,7 @@ class InferenceConfig:
             self.cache_type_v = load_env_var("CACHE_TYPE_V", "f16")
             self.n_ctx = int(load_env_var("N_CTX", 0))
             
-            self.n_batch = int(load_env_var("N_BATCH", 4096))
+            self.n_batch = int(load_env_var("N_BATCH", 256))
             self.n_ubatch = int(load_env_var("N_UBATCH", 512))
             self.n_parallel = int(load_env_var("N_PARALLEL", 1))
             self.n_threads = int(load_env_var("N_THREADS", 0))

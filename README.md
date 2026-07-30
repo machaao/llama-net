@@ -328,28 +328,28 @@ The URL persists across restarts.
 
 ### Inference Node
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL_PATH` | — | Path to GGUF model file |
-| `PORT` | `8000` | HTTP API port |
-| `HOST` | `0.0.0.0` | Bind address |
-| `N_GPU_LAYERS` | `-1` | GPU layers (-1 = all, 0 = CPU only) |
-| `N_CTX` | `0` | Context window in tokens (0 = auto-detect from model) |
-| `N_BATCH` | `4096` | Batch size in tokens |
-| `N_UBATCH` | `512` | Physical micro-batch size in tokens |
-| `N_PARALLEL` | `1` | Number of parallel slots |
-| `N_THREADS` | `0` | CPU threads for generation (0 = auto) |
-| `N_THREADS_BATCH` | `0` | CPU threads for prefill (0 = auto) |
-| `FLASH_ATTN` | `false` | Enable FlashAttention |
-| `CACHE_TYPE_K` | `f16` | KV cache key type: f16, q8_0, q4_0 |
-| `CACHE_TYPE_V` | `f16` | KV cache value type: f16, q8_0, q4_0 |
-| `MAX_MODELS` | `0` | Max models in pool (0 = auto-detect from RAM) |
-| `MEMORY_BUDGET_GB` | `0` | Max RAM for models (0 = auto-detect) |
+| Variable | Default                | Description |
+|----------|------------------------|-------------|
+| `MODEL_PATH` | —                      | Path to GGUF model file |
+| `PORT` | `8000`                 | HTTP API port |
+| `HOST` | `0.0.0.0`              | Bind address |
+| `N_GPU_LAYERS` | `-1`                   | GPU layers (-1 = all, 0 = CPU only) |
+| `N_CTX` | `0`                    | Context window in tokens (0 = auto-detect from model) |
+| `N_BATCH` | `256`                  | Batch size in tokens |
+| `N_UBATCH` | `512`                  | Physical micro-batch size in tokens |
+| `N_PARALLEL` | `1`                    | Number of parallel slots |
+| `N_THREADS` | `0`                    | CPU threads for generation (0 = auto) |
+| `N_THREADS_BATCH` | `0`                    | CPU threads for prefill (0 = auto) |
+| `FLASH_ATTN` | `false`                | Enable FlashAttention |
+| `CACHE_TYPE_K` | `f16`                  | KV cache key type: f16, q8_0, q4_0 |
+| `CACHE_TYPE_V` | `f16`                  | KV cache value type: f16, q8_0, q4_0 |
+| `MAX_MODELS` | `0`                    | Max models in pool (0 = auto-detect from RAM) |
+| `MEMORY_BUDGET_GB` | `0`                    | Max RAM for models (0 = auto-detect) |
 | `BOOTSTRAP_PEERS` | `https://llamanet.app` | Gateway URL (auto-set by installer) |
-| `PUBLIC_IP` | — | Override public IP detection |
-| `LLAMANET_TUNNEL_URL` | — | Override tunnel URL |
-| `NODE_ID` | — | Override auto-generated node ID |
-| `VERBOSE` | `false` | Enable verbose llama-cpp-python logging |
+| `PUBLIC_IP` | —                      | Override public IP detection |
+| `LLAMANET_TUNNEL_URL` | —                      | Override tunnel URL |
+| `NODE_ID` | —                      | Override auto-generated node ID |
+| `VERBOSE` | `false`                | Enable verbose llama-cpp-python logging |
 
 ### Gateway
 
