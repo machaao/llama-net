@@ -325,6 +325,17 @@ class SupabaseManager:
 
             # Upsert node_models junction table
             all_models = models_list or [{"name": model_name, "ctx_length": ctx_length}]
+            # Inject node-level metrics into each model so node_models gets populated on join
+            for m in all_models:
+                if isinstance(m, dict):
+                    m.setdefault("load", effective_load)
+                    m.setdefault("tps", effective_tps)
+                    m.setdefault("ttft", effective_ttft)
+                    m.setdefault("latency", effective_latency)
+                    m.setdefault("total_tokens", effective_tokens)
+                    m.setdefault("prompt_tokens", effective_prompt)
+                    m.setdefault("completion_tokens", effective_completion)
+                    m.setdefault("uptime", effective_uptime)
             self.upsert_node_models(node_hash, all_models, model_slug)
 
             logger.info(f"Registered node {node_hash[:12]}... model={model_name} tokens={effective_tokens}")
