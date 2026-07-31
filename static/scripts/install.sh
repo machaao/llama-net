@@ -144,7 +144,23 @@ fi
 if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/activate" ]; then
     info "Creating virtual environment..."
     rm -rf "$VENV_DIR"
-    "$PYTHON_CMD" -m venv "$VENV_DIR"
+
+    if ! "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null; then
+        # ensurepip missing — common on Debian/Ubuntu/Google Colab
+        warn "venv creation failed (missing ensurepip)"
+        if [ "$OS" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then
+            PY_VER=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+            info "Installing python${PY_VER}-venv..."
+            sudo apt-get update -qq 2>/dev/null
+            sudo apt-get install -y -qq "python${PY_VER}-venv" 2>/dev/null || \
+            sudo apt-get install -y -qq python3-venv 2>/dev/null
+        fi
+        # Retry
+        rm -rf "$VENV_DIR"
+        "$PYTHON_CMD" -m venv "$VENV_DIR" || \
+            fail "Could not create virtual environment.\n   Install manually: sudo apt-get install python3-venv"
+    fi
+
     ok "Virtual environment created"
 fi
 
