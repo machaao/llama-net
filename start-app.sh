@@ -504,44 +504,65 @@ cleanup() {
     cleanup_sleep
 
     # Stop server FIRST — it sends departure event to gateway before shutting down
-    if [ ! -z "$SERVER_PID" ]; then
+    if [ -n "$SERVER_PID" ]; then
         echo "📤 Sending SIGTERM to server process $SERVER_PID..."
-        # Send SIGTERM and let the application handle graceful shutdown
         kill -TERM $SERVER_PID 2>/dev/null || true
 
-        # Wait for graceful shutdown with appropriate timeout
-        echo "⏳ Waiting for graceful shutdown (max 10 seconds)..."
+        echo "⏳ Waiting for server shutdown (max 10 seconds)..."
         for i in $(seq 1 10); do
             if ! kill -0 $SERVER_PID 2>/dev/null; then
                 echo "✅ Server shut down gracefully"
-                exit 0
+                break
             fi
             sleep 1
         done
-        
-        # Send SIGINT if still running
-        echo "⚠️ Sending SIGINT for faster shutdown..."
-        kill -INT $SERVER_PID 2>/dev/null || true
-        
-        # Wait a bit more
-        for i in $(seq 1 3); do
-            if ! kill -0 $SERVER_PID 2>/dev/null; then
-                echo "✅ Server shut down after SIGINT"
-                exit 0
-            fi
-            sleep 1
-        done
-        
-        # Force kill if still running
-        echo "⚠️ Forcing server shutdown..."
-        kill -KILL $SERVER_PID 2>/dev/null || true
+
+        # SIGINT if still alive
+        if kill -0 $SERVER_PID 2>/dev/null; then
+            echo "⚠️ Sending SIGINT for faster shutdown..."
+            kill -INT $SERVER_PID 2>/dev/null || true
+            for i in $(seq 1 3); do
+                if ! kill -0 $SERVER_PID 2>/dev/null; then
+                    echo "✅ Server shut down after SIGINT"
+                    break
+                fi
+                sleep 1
+            done
+        fi
+
+        # Force kill if still alive
+        if kill -0 $SERVER_PID 2>/dev/null; then
+            echo "⚠️ Forcing server shutdown..."
+            kill -KILL $SERVER_PID 2>/dev/null || true
+        fi
     fi
 
-    # Now stop tunnel AFTER server has finished
-    if [ ! -z "$TUNNEL_PID" ]; then
-        echo "🌐 Stopping Cloudflare Tunnel..."
-        kill $TUNNEL_PID 2>/dev/null || true
+    # Stop tunnel AFTER server has finished — kill entire process group
+    if [ -n "$TUNNEL_PID" ]; then
+        echo "🌐 Stopping Cloudflare Tunnel (PID: $TUNNEL_PID)..."
+
+        # Send SIGTERM to the entire process group (cloudflared + children)
+        # Negative PID = send signal to every process in that process group
+        kill -TERM -- -$TUNNEL_PID 2>/dev/null || \
+            kill -TERM $TUNNEL_PID 2>/dev/null || true
+
+        # Wait for cloudflared to exit
+        for i in $(seq 1 10); do
+            if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+                echo "✅ Cloudflare Tunnel stopped"
+                break
+            fi
+            sleep 1
+        done
+
+        # Force kill process group if still alive
+        if kill -0 $TUNNEL_PID 2>/dev/null; then
+            echo "⚠️ Forcing tunnel shutdown..."
+            kill -KILL -- -$TUNNEL_PID 2>/dev/null || \
+                kill -KILL $TUNNEL_PID 2>/dev/null || true
+        fi
     fi
+
     exit 0
 }
 
