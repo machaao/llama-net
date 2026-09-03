@@ -179,22 +179,7 @@ class LlamaWrapper:
         logger.info(f"Loading model from {config.model_path}")
         logger.info(f"Using detected chat format: {self.detected_chat_format}")
         
-        self.llm = Llama(
-            model_path=config.model_path,
-            n_ctx=config.n_ctx,
-            n_batch=config.n_batch,
-            n_ubatch=getattr(config, 'n_ubatch', 512),
-            n_gpu_layers=config.n_gpu_layers,
-            n_slots=getattr(config, 'n_parallel', 1),
-            n_threads=getattr(config, 'n_threads', None) or None,
-            n_threads_batch=getattr(config, 'n_threads_batch', None) or None,
-            verbose=config.verbose,
-            reasoning=True,
-            chat_format=self.detected_chat_format,
-            flash_attn=getattr(config, 'flash_attn', False),
-            type_k=_resolve_kv_cache_type(getattr(config, 'cache_type_k', 'f16')),
-            type_v=_resolve_kv_cache_type(getattr(config, 'cache_type_v', 'f16')),
-        )
+        self._init_llama(config.model_path, config)
         
         # Detect and log the chat template being used
         self._detect_chat_template()
