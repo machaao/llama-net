@@ -2317,9 +2317,6 @@ async def select_model(request: Request):
                 }
 
             # Normal mode — load into pool
-            if not llm:
-                raise HTTPException(status_code=503, detail="LLM wrapper not initialized")
-
             await request_queue_manager.set_reloading(True)
             try:
                 drained = await request_queue_manager.drain_active_requests(timeout=30.0)
@@ -2380,6 +2377,9 @@ async def select_model(request: Request):
 
         # Legacy replace mode removed — ModelPool.load_model() is the sole loader.
         # All loads go through the pool path above.
+        # Guard: llm must be initialized for non-pool paths only
+        if not llm:
+            raise HTTPException(status_code=503, detail="LLM wrapper not initialized")
         raise HTTPException(status_code=400, detail="Only load_mode='pool' is supported. Use ModelPool via load_mode='pool'.")
 
     except HTTPException:
