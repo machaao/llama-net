@@ -208,6 +208,25 @@ class LlamaWrapper:
             f"n_threads_batch={getattr(config, 'n_threads_batch', 'auto')}"
         )
         
+    def _init_llama(self, model_path: str, config) -> None:
+        """Private single-model initializer. Called only from __init__."""
+        self.llm = Llama(
+            model_path=model_path,
+            n_ctx=config.n_ctx,
+            n_batch=config.n_batch,
+            n_ubatch=getattr(config, 'n_ubatch', 512),
+            n_gpu_layers=config.n_gpu_layers,
+            n_slots=getattr(config, 'n_parallel', 1),
+            n_threads=getattr(config, 'n_threads', None) or None,
+            n_threads_batch=getattr(config, 'n_threads_batch', None) or None,
+            verbose=config.verbose,
+            reasoning=True,
+            chat_format=self.detected_chat_format,
+            flash_attn=getattr(config, 'flash_attn', False),
+            type_k=_resolve_kv_cache_type(getattr(config, 'cache_type_k', 'f16')),
+            type_v=_resolve_kv_cache_type(getattr(config, 'cache_type_v', 'f16')),
+        )
+
     def _detect_chat_template(self):
         """Detect and log the chat template being used"""
         try:
@@ -238,73 +257,6 @@ class LlamaWrapper:
             self.llm = None
             gc.collect()
             logger.info("Model unloaded and garbage collected")
-
-    def load_model(self, model_path: str) -> None:
-        """Load a new model from the given path"""
-        logger.info(f"Loading model from {model_path}")
-        self.llm = Llama(
-            model_path=model_path,
-            n_ctx=self.config.n_ctx,
-            n_batch=self.config.n_batch,
-            n_ubatch=getattr(self.config, 'n_ubatch', 512),
-            n_gpu_layers=self.config.n_gpu_layers,
-            n_slots=getattr(self.config, 'n_parallel', 1),
-            n_threads=getattr(self.config, 'n_threads', None) or None,
-            n_threads_batch=getattr(self.config, 'n_threads_batch', None) or None,
-            verbose=self.config.verbose,
-            reasoning=True,
-            chat_format=self.detected_chat_format,
-            flash_attn=getattr(self.config, 'flash_attn', False),
-            type_k=_resolve_kv_cache_type(getattr(self.config, 'cache_type_k', 'f16')),
-            type_v=_resolve_kv_cache_type(getattr(self.config, 'cache_type_v', 'f16')),
-        )
-        
-        # Log actual context size allocated
-        actual_ctx = self.llm.n_ctx() if hasattr(self.llm, 'n_ctx') else self.config.n_ctx
-        logger.info(f"Model loaded successfully from {model_path}")
-        logger.info(
-            f"  n_ctx={actual_ctx} (requested: {self.config.n_ctx}), "
-            f"n_batch={self.config.n_batch}, "
-            f"n_ubatch={getattr(self.config, 'n_ubatch', 512)}, n_slots={getattr(self.config, 'n_parallel', 1)}, "
-            f"n_gpu_layers={self.config.n_gpu_layers}, flash_attn={getattr(self.config, 'flash_attn', False)}, "
-            f"cache_k={getattr(self.config, 'cache_type_k', 'f16')}, cache_v={getattr(self.config, 'cache_type_v', 'f16')}, "
-            f"n_threads={getattr(self.config, 'n_threads', 'auto')}, "
-            f"n_threads_batch={getattr(self.config, 'n_threads_batch', 'auto')}"
-        )
-
-    def reload_model(self, new_model_path: str) -> None:
-        """Hot-reload: unload current model and load a new one"""
-        logger.info(f"Hot-reloading model: {self.config.model_path} -> {new_model_path}")
-        self.unload_model()
-        
-        # Update model config BEFORE loading new model
-        self.config.model_path = new_model_path
-        self.config.model_name = os.path.basename(new_model_path)
-        self._model_name = self.config.model_name  # Update snapshot
-        
-        # Recalculate optimal context for the new model
-        from common.context_optimizer import calculate_optimal_context
-        cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
-        self.config.n_ctx, auto_detected = calculate_optimal_context(
-            new_model_path, cache_type_k,
-            max_concurrent=max(getattr(self.config, 'max_models', 0), 2),
-        )
-        logger.info(
-            f"Context recalculated: {self.config.n_ctx} tokens "
-            f"(auto={auto_detected})"
-        )
-        
-        # Re-detect chat format and reasoning support for the new model
-        self.detected_chat_format = detect_chat_format_from_model_name(self.config.model_name)
-        self.supports_reasoning = detect_reasoning_model(self.config.model_name)
-        logger.info(f"New chat format: {self.detected_chat_format}, reasoning: {self.supports_reasoning}")
-        
-        # Reset metrics for the new model
-        self.metrics_manager = MetricsManager()
-        
-        self.load_model(new_model_path)
-        self._detect_chat_template()
-        logger.info(f"Hot-reload complete. New model: {self.config.model_name}")
 
     def _format_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Format messages for llama-cpp-python with chat-format-specific adaptations"""
