@@ -276,7 +276,6 @@ async def lifespan(app: FastAPI):
             model_pool = ModelPool(config, on_model_change=_on_pool_model_change)
             logger.info(f"Empty model pool created: max_models={model_pool.max_models}")
         else:
-            llm = LlamaWrapper(config)
             system_info = SystemInfo.get_all_info()
 
             # Model pool change callback → gateway + SSE
@@ -330,10 +329,12 @@ async def lifespan(app: FastAPI):
                     except Exception as e:
                         logger.debug(f"SSE broadcast failed: {e}")
 
-            # Initialize model pool
+            # Initialize model pool — sole loader is ModelPool.load_model()
             from inference_node.model_pool import ModelPool
             model_pool = ModelPool(config, on_model_change=_on_pool_model_change)
-            model_pool.register(config.model_path, llm, config.model_name)
+            new_slot = model_pool.load_model(config.model_path, config.model_name)
+            llm = new_slot.llm
+            _sync_server_pool_state()
             logger.info(f"Model pool initialized: {model_pool}")
 
             # Load pool history
@@ -2371,102 +2372,9 @@ async def select_model(request: Request):
             finally:
                 await request_queue_manager.set_reloading(False)
 
-        # ── Legacy replace mode (fallback) ──
-        if config.no_model_mode:
-            config.model_path = model_path
-            config.model_name = model_name
-            config.no_model_mode = False
-            config.save_active_model(model_path, config.model_name)
-            if gateway_client:
-                gateway_client.model_name = config.model_name
-
-            llm = LlamaWrapper(config)
-            try:
-                heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
-                await heartbeat_manager.start()
-            except Exception as e:
-                logger.warning(f"Failed to start heartbeat manager: {e}")
-
-            if config.bootstrap_peers:
-                try:
-                    peer_url = config.bootstrap_peers.split(",")[0].strip()
-                    gateway_client_local = GatewayClient(
-                        gateway_url=peer_url,
-                        node_id=config.node_id,
-                        model_name=config.model_name,
-                        port=config.port,
-                        metrics_callback=llm.get_metrics,
-                        public_ip=config.public_ip,
-                        model_pool=model_pool,
-                    )
-                    await gateway_client_local.register()
-                    asyncio.create_task(gateway_client_local.heartbeat_loop())
-                    asyncio.create_task(gateway_client_local.peer_refresh_loop())
-                    gateway_client = gateway_client_local
-                except Exception as e:
-                    logger.warning(f"Failed to register with gateway: {e}")
-
-            return {
-                "success": True,
-                "data": {"model_path": model_path, "model_name": config.model_name, "mode": "initial_load", "reloaded": True},
-                "message": f"Model loaded: {config.model_name}",
-                "timestamp": time.time(),
-            }
-
-        if not llm:
-            raise HTTPException(status_code=503, detail="LLM wrapper not initialized")
-
-        if model_path == config.model_path:
-            return {
-                "success": True,
-                "data": {"model_path": model_path, "model_name": config.model_name, "mode": "already_loaded", "reloaded": False},
-                "message": f"Model already loaded: {config.model_name}",
-                "timestamp": time.time(),
-            }
-
-        await request_queue_manager.set_reloading(True)
-        try:
-            drained = await request_queue_manager.drain_active_requests(timeout=30.0)
-            if not drained:
-                logger.warning("Not all requests drained - proceeding anyway")
-
-            llm.reload_model(model_path)
-
-            # Run native probe after model loads
-            probe_metrics = await _run_native_probe(llm)
-
-            if gateway_client:
-                gateway_client.model_name = config.model_name
-                gateway_client.own_url = gateway_client.tunnel_url
-                gateway_client.probe_metrics = probe_metrics
-                asyncio.create_task(gateway_client.send_event("node_updated"))
-
-            config.save_active_model(model_path, config.model_name)
-
-            if sse_manager:
-                try:
-                    await sse_manager.broadcast_event("node_updated", {
-                        "node_info": {
-                            "node_id": config.node_id,
-                            "url": _get_own_url(),
-                            "model": config.model_name,
-                            "load": 0.0, "tps": 0.0, "uptime": 0,
-                            "last_seen": int(time.time()),
-                        },
-                        "timestamp": time.time(),
-                        "source": "model_reload",
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to broadcast model change: {e}")
-
-            return {
-                "success": True,
-                "data": {"model_path": model_path, "model_name": config.model_name, "mode": "hot_reload", "reloaded": True, "drained": drained},
-                "message": f"Model hot-reloaded: {config.model_name}",
-                "timestamp": time.time(),
-            }
-        finally:
-            await request_queue_manager.set_reloading(False)
+        # Legacy replace mode removed — ModelPool.load_model() is the sole loader.
+        # All loads go through the pool path above.
+        raise HTTPException(status_code=400, detail="Only load_mode='pool' is supported. Use ModelPool via load_mode='pool'.")
 
     except HTTPException:
         raise

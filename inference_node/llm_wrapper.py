@@ -115,7 +115,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
     
     # Model name to chat format mapping (ordered by specificity)
     format_patterns = {
-        'llama-3': ['llama-3', 'llama3', 'meta-llama-3'],
+        'llama-3': ['llama-3', 'llama3', 'meta-llama-3', 'muse'],
         'llama-2': ['llama-2', 'llama2', 'meta-llama-2'],
         'mistral-instruct': ['mistral-instruct', 'mistral-7b-instruct', 'mixtral-instruct', 'ministral'],
         'gemma': ['gemma', 'google/gemma'],
