@@ -1,22 +1,17 @@
-> Your Mac is idle 18 hours a day. Let it do something useful.
-
-![GitHub Stars](https://img.shields.io/github/stars/machaao/llama-net?style=social)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa)](https://github.com/sponsors/machaao)
-
 # LlamaNet - Free OpenAI-Compatible API from Your Mac/GPU | Local LLM GGUF Server
 
-**Turn your idle Mac or GPU into a free public AI API.**
-**Local GGUF inference with public URL in 60s. Ollama alternative with sharing built-in.**
-
+![GitHub Stars](https://img.shields.io/github/stars/machaao/llama-net?style=social)
 [![PyPI version](https://badge.fury.io/py/llamanet.svg)](https://pypi.org/project/llamanet/)
 [![Live Demo](https://img.shields.io/badge/demo-llamanet.app-green)](https://llamanet.app)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+[![Mac Apple Silicon](https://img.shields.io/badge/Mac-Apple_Silicon-black.svg)](#setup)
 
-Your Mac is asleep 18 hours a day.
+**Turn your idle Mac or GPU into a free public AI API. Local GGUF LLM server with OpenAI-compatible `/v1/chat/completions`, public HTTPS URL in 60s. Ollama alternative with sharing built-in.**
 
-Why not let it serve AI while you're away?
+> Your Mac is idle 18 hours a day. Let it do something useful.
 
-LlamaNet turns any idle Mac or GPU into a public OpenAI-compatible API.
+LlamaNet is a free, open-source local LLM inference server powered by llama.cpp. Run Mistral, Llama 3, Qwen, Phi, Gemma, DeepSeek-R1 GGUF models on Mac Apple Silicon, NVIDIA GPU, or CPU — then share via Cloudflare tunnel with zero config.
 
 One command.
 60 seconds.
@@ -33,7 +28,21 @@ llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
 
 That's it. Your Mac is now an AI server.
 
-![LlamaNet](./static/images/screenshot-v2.png)
+## Contents
+
+- [Why?](#why)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Features](#features)
+- [Ollama vs LM Studio vs LlamaNet](#ollama-vs-lm-studio-vs-llamanet)
+- [Multi-Model Pool](#multi-model-pool)
+- [Recommended Models by Tier](#recommended-models-by-tier)
+- [Architecture](#architecture)
+- [Web UI](#web-ui)
+- [Run on a GPU Cloud Provider](#run-on-a-gpu-cloud-provider-no-hardware-needed)
+- [FAQ](#faq)
+
+![LlamaNet Web UI - local LLM GGUF server with model manager, chat interface and network dashboard](./static/images/screenshot-v2.png)
 
 ## Why?
 
@@ -157,17 +166,17 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 - **Real-time Network** — SSE-powered live updates for node status, model availability, and metrics
 - **GPU Auto-detect** — NVIDIA, Apple Silicon, CPU fallback
 
-## Ollama vs LM Studio vs LlamaNet
+## Ollama vs LM Studio vs LlamaNet - Best Local LLM Server & Ollama Alternative
 
-| | Ollama | LM Studio | LlamaNet |
-|---|---|---|---|
-| Local GGUF inference | yes | yes | yes |
-| OpenAI-compatible API | yes | yes | yes |
-| Public URL in 60s | no | no | yes - Cloudflare tunnel |
-| Model manager in browser | no | yes | yes - search Hugging Face, download, hot-reload |
-| Multi-model pool | no | no | yes - LRU, instant switch |
-| Reasoning models | partial | partial | yes - DeepSeek-R1, Qwen, GPT-OSS streaming |
-| Run on Mac Apple Silicon | yes | yes | yes - Metal auto-detect |
+| | Ollama | LM Studio | Jan / LocalAI / llama.cpp server | LlamaNet |
+|---|---|---|---|---|
+| Local GGUF inference | yes | yes | yes | yes |
+| OpenAI-compatible API (`/v1/chat/completions`) | yes | yes | partial | yes |
+| Public URL in 60s | no | no | no | yes - Cloudflare tunnel |
+| Model manager in browser | no | yes | no | yes - search Hugging Face, download, hot-reload |
+| Multi-model pool | no | no | no | yes - LRU, instant switch |
+| Reasoning models (DeepSeek-R1, Qwen, GPT-OSS streaming) | partial | partial | partial | yes |
+| Run on Mac Apple Silicon (Metal) | yes | yes | varies | yes - Metal auto-detect |
 
 ## Multi-Model Pool
 
@@ -191,6 +200,10 @@ LlamaNet supports loading multiple models simultaneously in a pool with automati
 3. **When pool is full**, the least recently used model is evicted
 4. **Switching between pool models** is instant — no reload overlay
 5. **Pool state persists** across restarts via `~/.llamanet/pool_history.json`
+
+## Supported Models - Llama 3, Mistral, Qwen, Phi, Gemma, DeepSeek-R1
+
+Works with any GGUF file from Hugging Face: Llama 3.2, Mistral 7B, Ministral 3 8B, Qwen 2.5 4B / 14B / 32B, Phi-4 Mini, Gemma 3 12B, DeepSeek-R1 Distill 32B, GPT-OSS 20B. Search by name in the Web UI Model Manager.
 
 ## Recommended Models by Tier
 
@@ -678,6 +691,12 @@ Start with `--tunnel`. Node gets HTTPS URL, joins `llamanet.app` gateway. No por
 
 **Is it an Ollama alternative?**
 Yes for local GGUF + OpenAI API, plus built-in sharing, browser model manager, and multi-model pool.
+
+**Can I run Llama 3 / Mistral / Qwen locally on Apple Silicon?**
+Yes. LlamaNet uses llama.cpp with Metal acceleration. Download any GGUF quantization (Q4_K_M recommended) via the Model Manager and chat at `http://localhost:8000`.
+
+**Do I need a GPU or Docker or port forwarding?**
+No. Runs on Mac CPU, Apple Silicon GPU, NVIDIA CUDA, or plain CPU. No Docker, no Kubernetes, no port forwarding — tunnel provides public HTTPS URL.
 
 ## Built On
 
