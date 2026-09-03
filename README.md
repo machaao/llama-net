@@ -4,9 +4,13 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa)](https://github.com/sponsors/machaao)
 
-# LlamaNet - Powered by Llama.cpp
+# LlamaNet - Free OpenAI-Compatible API from Your Mac/GPU | Local LLM GGUF Server
 
 **Turn your idle Mac or GPU into a free public AI API.**
+**Local GGUF inference with public URL in 60s. Ollama alternative with sharing built-in.**
+
+[![PyPI version](https://badge.fury.io/py/llamanet.svg)](https://pypi.org/project/llamanet/)
+[![Live Demo](https://img.shields.io/badge/demo-llamanet.app-green)](https://llamanet.app)
 
 Your Mac is asleep 18 hours a day.
 
@@ -152,6 +156,18 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 - **Gateway Routing** — Central gateway with automatic node discovery and load balancing
 - **Real-time Network** — SSE-powered live updates for node status, model availability, and metrics
 - **GPU Auto-detect** — NVIDIA, Apple Silicon, CPU fallback
+
+## Ollama vs LM Studio vs LlamaNet
+
+| | Ollama | LM Studio | LlamaNet |
+|---|---|---|---|
+| Local GGUF inference | yes | yes | yes |
+| OpenAI-compatible API | yes | yes | yes |
+| Public URL in 60s | no | no | yes - Cloudflare tunnel |
+| Model manager in browser | no | yes | yes - search Hugging Face, download, hot-reload |
+| Multi-model pool | no | no | yes - LRU, instant switch |
+| Reasoning models | partial | partial | yes - DeepSeek-R1, Qwen, GPT-OSS streaming |
+| Run on Mac Apple Silicon | yes | yes | yes - Metal auto-detect |
 
 ## Multi-Model Pool
 
@@ -648,6 +664,20 @@ For dedicated GPU machines (desktop, workstation, or server):
 - Use `--gpu-layers N` to split between GPU and CPU for large models
 - The node auto-generates a persistent ID stored in `~/.llamanet_node_id`
 - The node auto-joins the public network at `llamanet.app` (override with `--bootstrap-peers`)
+
+## FAQ
+
+**How to run LLM on Mac for free?**
+`curl -sSL https://llamanet.app/install.sh | sh` then `llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M`. Open `http://localhost:8000`.
+
+**How to get a free OpenAI API?**
+Run LlamaNet, get public URL via tunnel, call `/v1/chat/completions` with any OpenAI client. Or use `https://llamanet.app/v1` with free API key.
+
+**How to share local LLM publicly?**
+Start with `--tunnel`. Node gets HTTPS URL, joins `llamanet.app` gateway. No port forwarding.
+
+**Is it an Ollama alternative?**
+Yes for local GGUF + OpenAI API, plus built-in sharing, browser model manager, and multi-model pool.
 
 ## Built On
 
