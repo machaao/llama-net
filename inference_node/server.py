@@ -2202,6 +2202,12 @@ async def select_model(request: Request):
 
         model_name = os.path.basename(model_path)
 
+        # ── Initialize pool on-demand if missing ──
+        if not model_pool:
+            from inference_node.model_pool import ModelPool
+            model_pool = ModelPool(config)
+            logger.info("Model pool initialized on-demand via /models/select")
+
         # ── Pool mode: instant switch or load with LRU eviction ──
         if model_pool and load_mode == "pool":
             existing = model_pool.get(model_name)
