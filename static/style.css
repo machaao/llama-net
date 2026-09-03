@@ -1779,3 +1779,9 @@ pre {
 .reasoning-complete .reasoning-stats {
     color: rgba(25, 135, 84, 0.8);
 }
+.markdown-content pre { position: relative; padding-top: 2rem; max-height: 480px; }
+.markdown-content pre::before { content: attr(data-language); position: absolute; top: .5rem; right: 2.8rem; }
+.markdown-content .table-responsive { overflow-x: auto; margin: 1rem 0; }
+.markdown-content .table-responsive table { margin: 0; }
+.code-block-wrapper pre { padding-top: 2rem; }
+.streaming-markdown { min-height: 1.5em; }

@@ -5,24 +5,24 @@ class MarkdownRenderer {
     }
     
     initializeMarked() {
-        // Configure marked with safe defaults
-        marked.setOptions({
-            highlight: (code, lang) => {
-                if (lang && hljs.getLanguage(lang)) {
-                    try {
-                        return hljs.highlight(code, { language: lang }).value;
-                    } catch (err) {
-                        console.warn('Highlight.js error:', err);
-                    }
-                }
-                return hljs.highlightAuto(code).value;
-            },
-            langPrefix: 'hljs language-',
-            breaks: true,
+        const self = this;
+        marked.use({
             gfm: true,
-            sanitize: false, // We'll handle sanitization separately
-            smartLists: true,
-            smartypants: true
+            breaks: true,
+            renderer: {
+                code(code, infostring) {
+                    const l = (infostring || '').split(/\s/)[0] || 'plaintext';
+                    const esc = self.escapeHtml(code);
+                    return `<pre data-language="${l}"><code class="language-${l}">${esc}</code></pre>`;
+                },
+                table(header, body) {
+                    return `<div class="table-responsive"><table class="table table-sm table-bordered">${header}${body}</table></div>`;
+                },
+                link(href, title, text) {
+                    const t = title ? ` title="${title}"` : '';
+                    return `<a href="${href}"${t} target="_blank" rel="noopener noreferrer">${text}</a>`;
+                }
+            }
         });
     }
     
@@ -35,32 +35,20 @@ class MarkdownRenderer {
         }
     }
     
-    render(text) {
-        if (!text || typeof text !== 'string') {
-            return '';
-        }
-        
-        try {
-            // Basic sanitization - remove script tags and dangerous attributes
-            const sanitized = this.sanitizeHtml(text);
-            
-            // Render markdown
-            const rendered = marked.parse(sanitized);
-            
-            return rendered;
-        } catch (error) {
-            console.error('Markdown rendering error:', error);
-            return this.escapeHtml(text);
-        }
+    sanitizeHtml(dirty) {
+        if (window.DOMPurify) return DOMPurify.sanitize(dirty, {ADD_ATTR: ['target', 'rel']});
+        return dirty.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
     }
-    
-    sanitizeHtml(html) {
-        // Basic HTML sanitization - remove dangerous elements and attributes
-        return html
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-            .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-            .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
-            .replace(/javascript:/gi, '');
+    preprocessForStream(text) {
+        const fences = (text.match(/```/g) || []).length;
+        return (fences % 2 === 1) ? text + '\n```' : text;
+    }
+    render(text) {
+        if (!text) return '';
+        try {
+            const html = marked.parse(this.preprocessForStream(text));
+            return this.sanitizeHtml(html);
+        } catch (e) { return this.escapeHtml(text); }
     }
     
     escapeHtml(text) {
@@ -2550,8 +2538,10 @@ class LlamaNetUI {
                 streamState.contentBlockEl = contentDiv;
             }
 
-            streamState.contentBlockEl.innerHTML = this.markdownRenderer.render(streamState.accumulatedText);
-            this.highlightCodeBlocks(streamState.contentBlockEl);
+            streamState._pendingRenders = (streamState._pendingRenders || 0) + 1;
+            if (streamState._pendingRenders % 3 === 0 || data.finished) {
+                streamState.contentBlockEl.innerHTML = this.markdownRenderer.render(streamState.accumulatedText);
+            }
 
             document.getElementById('chat-messages').scrollTop =
                 document.getElementById('chat-messages').scrollHeight;
@@ -2708,6 +2698,12 @@ class LlamaNetUI {
         const cursor = streamState.bubbleDiv.querySelector('.streaming-cursor');
         if (cursor) {
             cursor.remove();
+        }
+
+        if (streamState.contentBlockEl) {
+            streamState.contentBlockEl.innerHTML = this.markdownRenderer.render(streamState.accumulatedText);
+            this.highlightCodeBlocks(streamState.contentBlockEl);
+            this.addCopyButtons(streamState.messageDiv);
         }
 
         // Show [stopped] indicator if request was cancelled
@@ -3090,15 +3086,6 @@ class LlamaNetUI {
             .trim();
     }
     
-    cleanResponse(text) {
-        // Remove any leaked conversation format
-        return text
-            .replace(/^(Human:|User:|Assistant:)\s*/i, '')
-            .replace(/\n\n(Human:|User:).*$/s, '')
-            .replace(/\n(Human:|User:).*$/s, '')
-            .trim();
-    }
-    
     highlightCodeBlocks(element) {
         if (typeof hljs !== 'undefined') {
             const codeBlocks = element.querySelectorAll('pre code');
@@ -3109,8 +3096,9 @@ class LlamaNetUI {
     }
 
     addCopyButtons(element) {
-        const codeBlocks = element.querySelectorAll('pre');
+        const codeBlocks = element.querySelectorAll('pre:not([data-copy-btn])');
         codeBlocks.forEach(pre => {
+            pre.setAttribute('data-copy-btn', '1');
             // Wrap in container for positioning
             const wrapper = document.createElement('div');
             wrapper.className = 'code-block-wrapper';
