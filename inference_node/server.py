@@ -2184,7 +2184,7 @@ async def get_model_system_info():
 @app.post("/models/select")
 async def select_model(request: Request):
     """Select a model — instant switch if in pool, otherwise load (may evict LRU)."""
-    global llm, gateway_client, model_pool
+    global llm, gateway_client, model_pool, heartbeat_manager
 
     if not config:
         raise HTTPException(status_code=503, detail="Node not initialized")
@@ -2257,66 +2257,7 @@ async def select_model(request: Request):
             if len(model_pool.slots) >= model_pool.max_models and evicted_name:
                 eviction_warning = evicted_name
 
-            # In no-model mode, do full initialization
-            if config.no_model_mode:
-                config.model_path = model_path
-                config.model_name = model_name
-                config.no_model_mode = False
-                config.save_active_model(model_path, model_name)
-
-                new_slot = model_pool.load_model(model_path, model_name)
-                llm = new_slot.llm
-
-                # Run native probe after model loads
-                probe_metrics = await _run_native_probe(llm)
-
-                if gateway_client:
-                    gateway_client.model_name = model_name
-                    gateway_client.probe_metrics = probe_metrics
-
-                try:
-                    heartbeat_manager = HeartbeatManager(config.node_id, llm.get_metrics)
-                    await heartbeat_manager.start()
-                except Exception as e:
-                    logger.warning(f"Failed to start heartbeat manager: {e}")
-
-                if config.bootstrap_peers:
-                    try:
-                        peer_url = config.bootstrap_peers.split(",")[0].strip()
-                        gateway_client_local = GatewayClient(
-                            gateway_url=peer_url,
-                            node_id=config.node_id,
-                            model_name=config.model_name,
-                            port=config.port,
-                            metrics_callback=llm.get_metrics,
-                            public_ip=config.public_ip,
-                            model_pool=model_pool,
-                        )
-                        gateway_client_local.probe_metrics = probe_metrics
-                        await gateway_client_local.register()
-                        asyncio.create_task(gateway_client_local.heartbeat_loop())
-                        asyncio.create_task(gateway_client_local.peer_refresh_loop())
-                        gateway_client = gateway_client_local
-                    except Exception as e:
-                        logger.warning(f"Failed to register with gateway: {e}")
-
-                config.save_pool_history(model_pool.get_history())
-
-                return {
-                    "success": True,
-                    "data": {
-                        "model_path": model_path,
-                        "model_name": model_name,
-                        "mode": "initial_load",
-                        "reloaded": True,
-                        "evicted": eviction_warning,
-                        "pool": model_pool.status(),
-                    },
-                    "message": f"Model loaded: {model_name}",
-                    "timestamp": time.time(),
-                }
-
-            # Normal mode — load into pool
+            # Not in pool — load it (works when pool empty or populated)
             await request_queue_manager.set_reloading(True)
             try:
                 drained = await request_queue_manager.drain_active_requests(timeout=30.0)
@@ -2324,24 +2265,48 @@ async def select_model(request: Request):
                     logger.warning("Not all requests drained - proceeding anyway")
 
                 new_slot = model_pool.load_model(model_path, model_name)
-                llm = new_slot.llm
-                config.model_name = model_name
-                config.model_path = model_path
+                _sync_server_pool_state()
 
                 # Run native probe after model loads
-                probe_metrics = await _run_native_probe(llm)
+                probe_metrics = await _run_native_probe(new_slot.llm)
 
                 if gateway_client:
-                    gateway_client.model_name = model_name
+                    gateway_client.model_name = config.model_name
                     gateway_client.probe_metrics = probe_metrics
+                    gateway_client.metrics_callback = new_slot.llm.get_metrics
                     asyncio.create_task(gateway_client.send_event("node_updated"))
+                elif config.bootstrap_peers:
+                    try:
+                        peer_url = config.bootstrap_peers.split(",")[0].strip()
+                        gateway_client = GatewayClient(
+                            gateway_url=peer_url,
+                            node_id=config.node_id,
+                            model_name=config.model_name,
+                            port=config.port,
+                            metrics_callback=new_slot.llm.get_metrics,
+                            public_ip=config.public_ip,
+                            model_pool=model_pool,
+                        )
+                        gateway_client.probe_metrics = probe_metrics
+                        await gateway_client.register()
+                        asyncio.create_task(gateway_client.heartbeat_loop())
+                        asyncio.create_task(gateway_client.peer_refresh_loop())
+                    except Exception as e:
+                        logger.warning(f"Failed to register with gateway: {e}")
+
+                if heartbeat_manager is None and new_slot.llm:
+                    try:
+                        heartbeat_manager = HeartbeatManager(config.node_id, new_slot.llm.get_metrics)
+                        await heartbeat_manager.start()
+                    except Exception as e:
+                        logger.warning(f"Failed to start heartbeat manager: {e}")
 
                 config.save_active_model(model_path, model_name)
                 config.save_pool_history(model_pool.get_history())
 
                 if sse_manager:
                     try:
-                        metrics = llm.get_metrics()
+                        metrics = new_slot.llm.get_metrics()
                         await sse_manager.broadcast_event("node_updated", {
                             "node_info": {
                                 "node_id": config.node_id,
