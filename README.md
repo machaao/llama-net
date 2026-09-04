@@ -223,7 +223,7 @@ Works with any GGUF file from Hugging Face: Llama 3.2, Mistral 7B, Ministral 3 8
 | Your Hardware | Recommended Tiers | Notes |
 |---------------|-------------------|-------|
 | Mac M1/M2 8GB | Tiny, Fast | Use Q4_K_M quantization |
-| Mac M1/M2 Pro 16GB | Tiny → Standard | Standard tier runs great on Pro chips |
+| Mac M1/M2 Pro 16GB | Tiny → Fast | Fast tier runs great on Pro chips |
 | Mac M3/M4 Pro 18GB+ | Tiny → Versatile | Gemma 3 12B runs well on Pro chips |
 | Mac M2/M3 Max 32GB+ | All tiers | Max chips handle even the largest models |
 | Mac M2 Ultra 64GB+ | All tiers | No compromises — run anything |
@@ -590,7 +590,7 @@ Don't have a GPU? Rent one by the hour and run LlamaNet in 2 minutes.
 2. Click **Deploy** → **Custom** → paste Docker image: `machaao/llamanet:latest`
 3. Select a GPU (see sizing table below)
 4. Set **Environment Variables**:
-   - `MODEL_URL` = `hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M`
+   - `MODEL_URL` = `hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M`
 5. Expose **Port 8000** (TCP)
 6. Click **Deploy**
 7. Open the proxy URL — Web UI loads automatically
@@ -599,7 +599,7 @@ Don't have a GPU? Rent one by the hour and run LlamaNet in 2 minutes.
 | GPU | VRAM | Recommended Models | ~Cost/hr |
 |-----|------|--------------------|----------|
 | RTX 4060 | 8 GB | Phi-4 Mini, Qwen 4B | ~$0.20 |
-| RTX 4090 | 24 GB | Ministral 8B, Gemma 12B, Qwen 14B | ~$0.44 |
+| RTX 4090 | 24 GB | Llama 3.1 8B, Gemma 12B, Qwen 14B | ~$0.44 |
 | A100 80GB | 80 GB | Qwen 35B, DeepSeek-R1 32B | ~$1.64 |
 
 **Environment Variables:**
@@ -660,7 +660,7 @@ For dedicated GPU machines (desktop, workstation, or server):
 
 2. **Start with a model:**
    ```bash
-   llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
+   llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
    ```
 
 3. **Or start empty and download via Web UI:**
