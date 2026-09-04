@@ -23,7 +23,7 @@ Let friends, apps, or AI agents use your machine.
 
 ```
 curl -sSL https://llamanet.app/install.sh | sh
-llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 That's it. Your Mac is now an AI server.
@@ -84,14 +84,14 @@ llamanet
 You can also pre-load a model at startup:
 
 ```bash
-llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 Or install via PyPI:
 
 ```bash
 pip install llamanet
-llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 Models can be switched at any time via the Web UI without restarting the node.
@@ -211,7 +211,7 @@ Works with any GGUF file from Hugging Face: Llama 3.2, Mistral 7B, Ministral 3 8
 |------|-------|---------------|---------|----------|
 | **Tiny** | Phi-4 Mini | ~1.5 GB | 8 GB | Quick tasks, edge devices, fast iteration |
 | **Fast** | Qwen 4B | ~2.5 GB | 8 GB | Daily driver — fast responses, solid quality |
-| **Standard** | Ministral 3 8B | ~4.5 GB | 16 GB | Best all-round balance of speed and quality |
+| **Fast** | Llama 3.1 8B Instruct (abliterated) | ~4.7 GB | 16 GB | Daily driver — fast, uncensored, strong quality |
 | **Versatile** | Gemma 3 12B | ~7 GB | 24 GB | General-purpose, multilingual, strong reasoning |
 | **Coding** | Qwen 14B | ~8 GB | 32 GB | Code generation, technical tasks |
 | **Premium** | GPT-OSS 20B | ~12 GB | 32 GB | High-quality general-purpose inference |
@@ -337,7 +337,7 @@ A tunnel URL is **required** to join the LlamaNet network. The `--tunnel` flag h
 ### Quick Tunnel (No Account Needed)
 
 ```bash
-sh start-app.sh run hf.co/user/Model:Q4_K_M --tunnel
+sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel
 ```
 
 Generates a temporary URL that changes on restart. No Cloudflare account needed.
@@ -348,7 +348,7 @@ Generates a temporary URL that changes on restart. No Cloudflare account needed.
 cloudflared tunnel login
 cloudflared tunnel create bootstrap
 cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
-sh start-app.sh run hf.co/user/Model:Q4_K_M --tunnel
+sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel
 ```
 
 The URL persists across restarts.
@@ -474,7 +474,7 @@ Check your usage at **/auth/token-usage** (requires authentication).
 ```bash
 # One-liner install (recommended)
 curl -sSL https://llamanet.app/install.sh | sh
-llamanet
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 Or install from source:
@@ -483,7 +483,7 @@ Or install from source:
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
-sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
 ```
 
 **Intel Macs** — Metal shaders in `llama-cpp-python` 0.3.x are incompatible with Intel GPUs.
@@ -509,7 +509,7 @@ Works on any Linux distro with Python 3.9+. For NVIDIA GPUs, ensure drivers and 
 ```bash
 # One-liner install (recommended)
 curl -sSL https://llamanet.app/install.sh | sh
-llamanet
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 Or install from source:
@@ -518,7 +518,7 @@ Or install from source:
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
-sh start-app.sh --tunnel --bootstrap-peers https://llamanet.app
+sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
 ```
 
 For CPU-only or non-NVIDIA setups:
@@ -534,7 +534,7 @@ Works on Windows 10/11 with Python 3.9+. For NVIDIA GPUs, ensure drivers and CUD
 ```powershell
 # One-liner install (recommended)
 irm https://llamanet.app/install.ps1 | iex
-llamanet
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 Or install from source:
@@ -543,7 +543,7 @@ Or install from source:
 git clone https://github.com/machaao/llama-net.git
 cd llama-net
 pip install -r requirements-inference.txt
-start-app.bat --tunnel --bootstrap-peers https://llamanet.app
+start-app.bat run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
 ```
 
 For CPU-only mode:
@@ -564,7 +564,7 @@ Run a node on any VPS or cloud instance (AWS, GCP, Azure, Hetzner, etc.):
 
 ```bash
 curl -sSL https://llamanet.app/install.sh | sh
-llamanet run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
 **GPU instances:** Install NVIDIA drivers + CUDA toolkit before running. The node auto-detects GPU availability.
@@ -577,7 +577,7 @@ llamanet run hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M
 cloudflared tunnel login
 cloudflared tunnel create my-node
 cloudflared tunnel route dns my-node node.mydomain.com
-llamanet run hf.co/user/Model:Q4_K_M --tunnel
+llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel
 ```
 
 ## Run on a GPU Cloud Provider (No Hardware Needed)
@@ -628,12 +628,12 @@ The image is published at `machaao/llamanet:latest`:
 ```bash
 # Run locally with GPU
 docker run --gpus all -p 8000:8000 \
-  -e MODEL_URL="hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M" \
+  -e MODEL_URL="hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M" \
   machaao/llamanet:latest
 
 # Run without GPU (CPU only)
 docker run -p 8000:8000 \
-  -e MODEL_URL="hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M" \
+  -e MODEL_URL="hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M" \
   -e N_GPU_LAYERS=0 \
   machaao/llamanet:latest
 ```
@@ -681,7 +681,7 @@ For dedicated GPU machines (desktop, workstation, or server):
 ## FAQ
 
 **How to run LLM on Mac for free?**
-`curl -sSL https://llamanet.app/install.sh | sh` then `llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M`. Open `http://localhost:8000`.
+`curl -sSL https://llamanet.app/install.sh | sh` then `llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M`. Open `http://localhost:8000`.
 
 **How to get a free OpenAI API?**
 Run LlamaNet, get public URL via tunnel, call `/v1/chat/completions` with any OpenAI client. Or use `https://llamanet.app/v1` with free API key.
