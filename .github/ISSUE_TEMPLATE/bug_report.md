@@ -39,7 +39,7 @@ Paste logs here
 - **LlamaNet Version:** [e.g., 0.1.11 or commit hash]
 - **GPU:** [e.g., Apple M2 Pro, NVIDIA RTX 4090, CPU only]
 - **RAM:** [e.g., 16 GB]
-- **Model:** [e.g., Ministral-3-8B-Instruct Q4_K_M]
+- **Model:** [e.g., Meta-Llama-3.1-8B-Instruct Q4_K_M]
 - **Install Method:** [e.g., install.sh, pip, source]
 
 ## Additional Context
