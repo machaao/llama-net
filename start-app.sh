@@ -63,7 +63,7 @@ case "${1:-}" in
         echo ""
         echo "  Examples:"
         echo "    llamanet"
-        echo "    llamanet run hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M"
+        echo "    llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M"
         echo "    llamanet run hf.co/user/Model:Q4_K_M --no-tunnel"
         echo "    llamanet run hf.co/user/Model:Q4_K_M --ctx-size 16384 --flash-attn"
         echo "    llamanet run hf.co/user/Model:Q4_K_M --no-gpu --cache-type-k q8_0"

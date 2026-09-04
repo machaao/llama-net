@@ -2385,7 +2385,7 @@ Usage:
 
 Commands:
   run <hf-url>    Download and run a model from Hugging Face
-                  Example: llamanet run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+                  Example: llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 
 Options:
   --model-path PATH     Path to the GGUF model file (required if not using run command)
@@ -2404,10 +2404,10 @@ Hugging Face URL Formats:
 
 Examples:
   # Download and run a model from Hugging Face
-  llamanet run hf.co/meta-llama/Llama-2-7b-chat-hf:Q4_K_M
+  llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 
   # Download and run with custom options
-  llamanet run hf.co/TheBloke/Llama-2-7B-Chat-GGUF:Q4_K_M --port 8080
+  llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --port 8080
 
   # Run bootstrap node with local model
   python -m inference_node.server --model-path ./models/model.gguf

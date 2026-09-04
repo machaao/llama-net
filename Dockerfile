@@ -7,7 +7,7 @@
 #
 # Run:
 #   docker run --gpus all -p 8000:8000 \
-#     -e MODEL_URL="hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M" \
+#     -e MODEL_URL="hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M" \
 #     machaao/llamanet:latest
 # ═══════════════════════════════════════════════════════════════
 

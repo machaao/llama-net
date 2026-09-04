@@ -117,7 +117,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="Ministral-3-8B-Instruct",
+    model="Meta-Llama-3.1-8B-Instruct",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 
@@ -203,7 +203,7 @@ LlamaNet supports loading multiple models simultaneously in a pool with automati
 
 ## Supported Models - Llama 3, Mistral, Qwen, Phi, Gemma, DeepSeek-R1
 
-Works with any GGUF file from Hugging Face: Llama 3.2, Mistral 7B, Ministral 3 8B, Qwen 2.5 4B / 14B / 32B, Phi-4 Mini, Gemma 3 12B, DeepSeek-R1 Distill 32B, GPT-OSS 20B. Search by name in the Web UI Model Manager.
+Works with any GGUF file from Hugging Face: Llama 3.2, Llama 3.1 8B, Mistral 7B, Qwen 2.5 4B / 14B / 32B, Phi-4 Mini, Gemma 3 12B, DeepSeek-R1 Distill 32B, GPT-OSS 20B. Search by name in the Web UI Model Manager.
 
 ## Recommended Models by Tier
 

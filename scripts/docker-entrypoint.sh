@@ -111,7 +111,7 @@ else
     echo "   Download a model via Web UI at http://localhost:${PORT}"
     echo ""
     echo "💡 To pre-load a model, set:"
-    echo "   MODEL_URL=hf.co/mistralai/Ministral-3-8B-Instruct-GGUF:Q4_K_M"
+    echo "   MODEL_URL=hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M"
     echo ""
 
     # No-model mode: start without a model
