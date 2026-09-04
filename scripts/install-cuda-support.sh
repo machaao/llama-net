@@ -21,7 +21,7 @@ if command -v nvcc &> /dev/null; then
     echo "CUDA version detected: $CUDA_VERSION"
 else
     echo "Warning: CUDA not detected. Installing CPU-only version."
-    pip install llama-cpp-python>=0.2.11
+    pip install llama-cpp-python>=0.3.35
     exit 0
 fi
 

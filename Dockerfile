@@ -50,7 +50,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Using pre-built CUDA 12.1 wheel from abetlen's index
 RUN pip install --no-cache-dir \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 \
-    llama-cpp-python==0.3.34
+    llama-cpp-python==0.3.35
 
 # ── Install remaining inference dependencies ──
 RUN pip install --no-cache-dir -r requirements-inference.txt

@@ -629,7 +629,7 @@ class LlamaWrapper:
         # Prepare stop tokens
         stop_tokens = normalize_stop_tokens(stop)
         
-        # Count prompt tokens before streaming (stream_options not supported in 0.3.34)
+        # Count prompt tokens before streaming (stream_options not supported in 0.3.35)
         formatted_messages = self._format_messages(messages)
         prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
         prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
