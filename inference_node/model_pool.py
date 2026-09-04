@@ -422,6 +422,12 @@ class ModelPool:
         mb = size_bytes / (1024 ** 2)
         return f"{mb:.0f} MB"
 
+    def __bool__(self) -> bool:
+        # A ModelPool instance is always truthy once initialized — its truthiness
+        # tracks existence, not occupancy. Prevents an empty pool (0 slots) from
+        # being treated as "not initialized" in `if model_pool` checks.
+        return True
+
     def __len__(self) -> int:
         return len(self.slots)
 
