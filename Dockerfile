@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.4
+
 # ═══════════════════════════════════════════════════════════════
 # LlamaNet — Docker Image for GPU Cloud Providers
 # Supports: Docker Hub, RunPod, vast.ai, any Docker host
@@ -44,22 +46,22 @@ WORKDIR /app
 COPY requirements.txt requirements-inference.txt setup.py pyproject.toml ./
 
 # ── Install gateway dependencies ──
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 # ── Install llama-cpp-python with CUDA support ──
 # Using pre-built CUDA 12.1 wheel from abetlen's index
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip pip install \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 \
     llama-cpp-python==0.3.35
 
 # ── Install remaining inference dependencies ──
-RUN pip install --no-cache-dir -r requirements-inference.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-inference.txt
 
 # ── Copy source code ──
 COPY . .
 
 # ── Install LlamaNet package ──
-RUN pip install --no-cache-dir -e .
+RUN --mount=type=cache,target=/root/.cache/pip pip install -e .
 
 # ── Make scripts executable ──
 RUN chmod +x start-app.sh scripts/*.sh 2>/dev/null || true
