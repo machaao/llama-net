@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from common.utils import get_logger, resolve_static_dir
+from common.utils import get_logger, resolve_static_dir, setup_logging
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
 from gateway.supabase_client import SupabaseManager
@@ -157,6 +157,7 @@ async def _heartbeat_monitor_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global sse_mgr, supabase_mgr, auth_mgr, router, registry, rate_limiter, quality_gate, node_token_manager
+    setup_logging()
     logger.info("Starting llamanet.app gateway...")
     try:
         supabase_mgr = SupabaseManager()
@@ -1451,6 +1452,7 @@ async def get_token_usage(request: Request):
 
 
 def start_server():
+    setup_logging()
     port = int(os.environ.get("PORT", "8000"))
     host = os.environ.get("HOST", "0.0.0.0")
     log_level = os.environ.get("LOG_LEVEL", "info")

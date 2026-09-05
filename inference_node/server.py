@@ -31,7 +31,7 @@ from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
 from inference_node.event_publisher import GatewayEventPublisher
 from inference_node.model_pool import ModelPool
-from common.utils import get_logger, get_host_ip, get_tunnel_url_file, resolve_static_dir
+from common.utils import get_logger, get_host_ip, get_tunnel_url_file, resolve_static_dir, setup_logging
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
 
@@ -195,6 +195,7 @@ async def lifespan(app: FastAPI):
     global config, llm, system_info, heartbeat_manager, sse_manager, request_queue_manager, download_manager, gateway_client, rate_limiter, model_pool
 
     try:
+        setup_logging()
         config = InferenceConfig()
         logger.info(f"Starting inference node: {config}")
         logger.info(
@@ -2356,6 +2357,7 @@ async def select_model(request: Request):
 
 def start_server():
     global config
+    setup_logging()
     if config is None:
         config = InferenceConfig()
     log_level = os.environ.get("LOG_LEVEL", "info")

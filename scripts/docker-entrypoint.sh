@@ -24,6 +24,11 @@
 
 set -e
 
+# Ensure Python streams logs to stdout unbuffered (cloud GPU log viewers)
+export PYTHONUNBUFFERED=1
+export PYTHONIOENCODING=utf-8
+export LOG_LEVEL="${LOG_LEVEL:-info}"
+
 echo ""
 echo "  ╔══════════════════════════════════════════════════════╗"
 echo "  ║  🦙 LlamaNet — GPU Cloud Node                       ║"

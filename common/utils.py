@@ -3,6 +3,7 @@ import json
 import logging
 import socket
 import ipaddress
+import sys
 from typing import Any, Dict, Optional
 
 # Configure logging
@@ -14,6 +15,37 @@ logging.basicConfig(
 def get_logger(name: str) -> logging.Logger:
     """Get a logger with the given name"""
     return logging.getLogger(name)
+
+def setup_logging(level: Optional[str] = None) -> logging.Logger:
+    """Idempotent, explicit logging configuration.
+
+    Import-time logging.basicConfig() is a no-op once uvicorn or any
+    third-party library has touched the root logger. This replaces it
+    reliably at startup and streams to stdout, which cloud GPU Docker
+    runners (vast.ai, RunPod) surface more consistently than stderr.
+    """
+    if level is None:
+        level = os.environ.get("LOG_LEVEL", "INFO")
+    numeric = getattr(logging, str(level).upper(), logging.INFO)
+
+    root = logging.getLogger()
+    # Drop any pre-existing handlers to avoid duplicates and format drift
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    root.setLevel(numeric)
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    ))
+    root.addHandler(handler)
+
+    # Keep noisy third-party loggers quiet while allowing app INFO logs
+    for noisy in ("uvicorn.access", "httpx", "httpcore", "urllib3", "asyncio"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("uvicorn").setLevel(numeric)
+
+    return root
 
 def load_env_var(key: str, default: Any = None) -> Any:
     """Load an environment variable with a default value"""
