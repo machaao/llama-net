@@ -389,7 +389,20 @@ async def lifespan(app: FastAPI):
 
     logger.info("🛑 Shutting down...")
 
-    # Signal SSE generators to exit cleanly (prevents CancelledError traceback in Starlette)
+    # ── Departure FIRST: beat vast.ai/Docker SIGKILL grace period ──
+    if gateway_client:
+        try:
+            await asyncio.wait_for(gateway_client.send_event("node_left"), timeout=5.0)
+            logger.info("✅ Departure event sent to gateway")
+        except Exception as e:
+            logger.warning(f"Departure event failed: {e}")
+
+        try:
+            await asyncio.wait_for(gateway_client.unregister(), timeout=8.0)
+        except Exception:
+            logger.warning("⚠️ Unregister timed out — node may appear stale on gateway")
+
+    # ── THEN signal SSE generators and drain/close them ──
     _shutdown_event.set()
     if _active_sse_tasks:
         logger.info(f"Closing {len(_active_sse_tasks)} SSE connections...")
@@ -405,22 +418,6 @@ async def lifespan(app: FastAPI):
             pass
         _active_sse_tasks.clear()
 
-    if gateway_client:
-        # 1. Send departure event via event-driven path (logged, SSE-broadcast)
-        try:
-            await asyncio.wait_for(
-                gateway_client.send_event("node_left"),
-                timeout=5.0
-            )
-            logger.info("✅ Departure event sent to gateway")
-        except Exception as e:
-            logger.warning(f"Departure event failed: {e}")
-
-        # 2. Unregister via unpublish path (redundant safety net)
-        try:
-            await asyncio.wait_for(gateway_client.unregister(), timeout=8.0)
-        except Exception:
-            logger.warning("⚠️ Unregister timed out — node may appear stale on gateway")
     if model_pool:
         try:
             config.save_pool_history(model_pool.get_history())
