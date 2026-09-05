@@ -528,8 +528,8 @@ class SupabaseManager:
             existing_map: Dict[str, Dict] = {}
             try:
                 existing_result = self.client.table("node_models").select(
-                    "model_slug, total_tokens, load, tps, ttft, latency, uptime"
-                ).eq("node_hash", node_hash).eq("status", "active").execute()
+                    "model_slug, total_tokens, prompt_tokens, completion_tokens, load, tps, ttft, latency, uptime"
+                ).eq("node_hash", node_hash).execute()
                 for row in (existing_result.data or []):
                     existing_map[row["model_slug"]] = row
             except Exception:
