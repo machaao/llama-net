@@ -2214,17 +2214,15 @@ async def select_model(request: Request):
             if existing:
                 # INSTANT SWITCH
                 model_pool.activate(model_name)
-                llm = existing.llm
-                config.model_name = model_name
-                config.model_path = model_path
+                _sync_server_pool_state()
                 config.save_active_model(model_path, model_name)
 
+                metrics = llm.get_metrics()
+
                 if gateway_client:
-                    gateway_client.model_name = model_name
                     asyncio.create_task(gateway_client.send_event("node_updated"))
 
                 if sse_manager:
-                    metrics = llm.get_metrics()
                     await sse_manager.broadcast_event("node_updated", {
                         "node_info": {
                             "node_id": config.node_id,
