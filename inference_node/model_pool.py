@@ -225,13 +225,23 @@ class ModelPool:
         # Load the new model
         logger.info(f"Loading model into pool: {model_path}")
 
-        # Respect user's explicit context size if not auto-detected
+        # Resolve context size:
+        #   1. User-specified → honor it.
+        #   2. Already auto-detected for THIS exact model in config → reuse it
+        #      (avoids re-running the optimizer with a different max_concurrent,
+        #       which yields a different, lower result).
+        #   3. Different model loaded into the pool → compute fresh.
         cache_type_k = getattr(self.config, 'cache_type_k', 'f16')
         config_n_ctx = getattr(self.config, 'n_ctx', 0)
         was_auto_detected = getattr(self.config, 'n_ctx_auto_detected', False)
+        same_model = model_path == getattr(self.config, 'model_path', '')
+
         if config_n_ctx > 0 and not was_auto_detected:
             n_ctx = config_n_ctx
             logger.info(f"Using user-configured context size: {n_ctx}")
+        elif config_n_ctx > 0 and was_auto_detected and same_model:
+            n_ctx = config_n_ctx
+            logger.info(f"Reusing auto-detected context size: {n_ctx}")
         else:
             n_ctx, _ = calculate_optimal_context(
                 model_path, cache_type_k,
