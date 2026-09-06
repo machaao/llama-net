@@ -336,15 +336,30 @@ class LlamaWrapper:
     def _separate_reasoning_and_content(self, text: str) -> tuple[str, str]:
         """Separate reasoning content from final response.
 
-        Handles two marker patterns:
-          1. gpt-oss style: reasoning ... <|channel|>final<|message|> content
-          2. generic style: reasoning ... <|message|> content
+        Handles three marker patterns:
+          1. Qwen3 style:   reasoningcontent
+          2. gpt-oss style: reasoning ... <|channel|>final<|message|> content
+          3. generic style: reasoning ... <|message|> content
         """
         if not self.supports_reasoning:
             return "", text
 
-        # Try gpt-oss pattern first: <|channel|>final<|message|>
-        # Also handles cases where markers may have been partially stripped
+        # Qwen3 style: reasoning wrapped in ...# (also handles the less common <thinking>...</thinking> spelling)
+        for open_tag, close_tag in (
+            ("", ""),
+            ("<thinking>", "</thinking>"),
+        ):
+            if open_tag in text and close_tag in text:
+                try:
+                    after_open = text.split(open_tag, 1)[1]
+                    parts = after_open.split(close_tag, 1)
+                    reasoning_part = parts[0].strip()
+                    content_part = parts[1].strip() if len(parts) > 1 else ""
+                    return reasoning_part, content_part
+                except (ValueError, IndexError):
+                    continue
+
+        # gpt-oss pattern: <|channel|>final<|message|>
         for boundary in ("<|channel|>final<|message|>", "<|channel|>final",
                          "<|message|>"):
             if boundary in text:
@@ -654,13 +669,16 @@ class LlamaWrapper:
         in_reasoning_phase = True
 
         def _strip_markers(text: str) -> str:
-            """Strip channel markers and special tokens from text using regex."""
+            """Strip channel markers, reasoning tags and special tokens from text."""
             if not text:
                 return text
             cleaned = re.sub(r'<\|?channel\|?[>a-zA-Z]*', '', text)
             cleaned = re.sub(r'</?\|?channel\|?>', '', cleaned)
             cleaned = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', cleaned)
             cleaned = re.sub(r'<[a-zA-Z_]+\|>', '', cleaned)
+            # Qwen3 reasoning tags
+            cleaned = cleaned.replace("", "").replace("", "")
+            cleaned = cleaned.replace("<thinking>", "").replace("</thinking>", "")
             for token in ["<|start|>", "<|end|>", "<|message|>",
                           "<|channel|>final", "<|channel|>analysis"]:
                 cleaned = cleaned.replace(token, "")
@@ -685,7 +703,7 @@ class LlamaWrapper:
 
                         # Detect reasoning→content transition via <|message|> boundary
                         if in_reasoning_phase and self.supports_reasoning and reasoning:
-                            # Detect gpt-oss (<|channel|>final<|message|>) or generic (<|message|>) boundary
+                            # Detect Qwen3 () or gpt-oss boundaries
                             boundary = None
                             if "<|channel|>final<|message|>" in accumulated_text:
                                 boundary = "<|channel|>final<|message|>"
@@ -693,6 +711,10 @@ class LlamaWrapper:
                                 boundary = "<|channel|>final"
                             elif "<|message|>" in accumulated_text:
                                 boundary = "<|message|>"
+                            elif "" in accumulated_text:
+                                boundary = ""
+                            elif "</thinking>" in accumulated_text:
+                                boundary = "</thinking>"
 
                             if boundary:
                                 # Split at the marker boundary
