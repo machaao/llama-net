@@ -1854,7 +1854,7 @@ class LlamaNetUI {
         if (!modelName) return false;
         const name = modelName.toLowerCase();
         const patterns = [
-            'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning',
+            'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning', 'qwen3',
             'reasoning', 'r1-', '-r1', 'think', 'cot', 'gpt-oss'
         ];
         return patterns.some(p => name.includes(p));

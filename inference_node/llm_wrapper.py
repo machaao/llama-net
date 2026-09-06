@@ -95,7 +95,7 @@ def detect_reasoning_model(model_name: str) -> bool:
     model_name_lower = model_name.lower()
     
     reasoning_patterns = [
-        'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning', 
+        'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning', 'qwen3',
         'reasoning', 'r1-', '-r1', 'think', 'cot', 'gpt-oss'  # Add gpt-oss pattern
     ]
     
