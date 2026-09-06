@@ -88,6 +88,14 @@ def _detect_and_fix_metal_compatibility():
 # Auto-detect at module import time
 _detect_and_fix_metal_compatibility()
 
+# Qwen3 reasoning tag delimiters (string concatenation avoids any
+# HTML-escaping ambiguity with raw angle-bracket literals).
+_THINK_OPEN = "<" + "think" + ">"
+_THINK_CLOSE = "<" + "/think" + ">"
+_THINKING_OPEN = "<" + "thinking" + ">"
+_THINKING_CLOSE = "<" + "/thinking" + ">"
+
+
 def detect_reasoning_model(model_name: str) -> bool:
     """
     Detect if the model supports reasoning based on model name patterns.
@@ -346,8 +354,8 @@ class LlamaWrapper:
 
         # Qwen3 style: reasoning wrapped in ...# (also handles the less common <thinking>...</thinking> spelling)
         for open_tag, close_tag in (
-            ("", ""),
-            ("<thinking>", "</thinking>"),
+            (_THINK_OPEN, _THINK_CLOSE),
+            (_THINKING_OPEN, _THINKING_CLOSE),
         ):
             if open_tag in text and close_tag in text:
                 try:
@@ -677,8 +685,8 @@ class LlamaWrapper:
             cleaned = re.sub(r'<\|[a-zA-Z_]+\|[a-zA-Z_]*>', '', cleaned)
             cleaned = re.sub(r'<[a-zA-Z_]+\|>', '', cleaned)
             # Qwen3 reasoning tags
-            cleaned = cleaned.replace("", "").replace("", "")
-            cleaned = cleaned.replace("<thinking>", "").replace("</thinking>", "")
+            for _tag in (_THINK_OPEN, _THINK_CLOSE, _THINKING_OPEN, _THINKING_CLOSE):
+                cleaned = cleaned.replace(_tag, "")
             for token in ["<|start|>", "<|end|>", "<|message|>",
                           "<|channel|>final", "<|channel|>analysis"]:
                 cleaned = cleaned.replace(token, "")
@@ -711,10 +719,10 @@ class LlamaWrapper:
                                 boundary = "<|channel|>final"
                             elif "<|message|>" in accumulated_text:
                                 boundary = "<|message|>"
-                            elif "" in accumulated_text:
-                                boundary = ""
-                            elif "</thinking>" in accumulated_text:
-                                boundary = "</thinking>"
+                            elif _THINK_CLOSE in accumulated_text:
+                                boundary = _THINK_CLOSE
+                            elif _THINKING_CLOSE in accumulated_text:
+                                boundary = _THINKING_CLOSE
 
                             if boundary:
                                 # Split at the marker boundary
