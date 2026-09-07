@@ -319,6 +319,19 @@ class LlamaWrapper:
                                 logger.warning(f"Failed to decode base64 image: {e}")
         return images
 
+    def _extract_text_from_messages(self, messages: List[Dict[str, Any]]) -> str:
+        """Extract plain text from messages, handling multimodal content arrays."""
+        parts = []
+        for m in messages:
+            content = m.get("content", "")
+            if isinstance(content, list):
+                for part in content:
+                    if part.get("type") == "text":
+                        parts.append(part.get("text", ""))
+            elif isinstance(content, str):
+                parts.append(content)
+        return " ".join(parts)
+
     def _cap_max_tokens(self, max_tokens: int, formatted_messages: list) -> int:
         """Cap max_tokens based only on available context window.
 
@@ -328,7 +341,7 @@ class LlamaWrapper:
         """
         try:
             n_ctx = self.llm.n_ctx() if self.llm else 4096
-            prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
+            prompt_text = self._extract_text_from_messages(formatted_messages)
             prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
             # 64-token safety margin for internal processing
             available = n_ctx - prompt_tokens - 64
@@ -635,6 +648,22 @@ class LlamaWrapper:
             formatted_messages = self._format_messages(messages)
             max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
 
+            # Check if prompt fits within the context window
+            prompt_text = self._extract_text_from_messages(formatted_messages)
+            prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
+            n_ctx = self.llm.n_ctx() if self.llm else 4096
+            if prompt_tokens >= n_ctx - 128:
+                logger.error(
+                    f"Prompt too large: {prompt_tokens} tokens > context window {n_ctx - 128}. "
+                    "Please start a new conversation or shorten the prompt."
+                )
+                return {
+                    "text": "The conversation is too long to fit in the context window. Please start a new conversation.",
+                    "content": "The conversation is too long to fit in the context window. Please start a new conversation.",
+                    "tokens_generated": 0,
+                    "generation_time": 0,
+                }
+
             output = self.llm.create_chat_completion(
                 messages=formatted_messages,
                 max_tokens=max_tokens,
@@ -715,14 +744,32 @@ class LlamaWrapper:
         
         # Count prompt tokens before streaming (stream_options not supported in 0.3.35)
         formatted_messages = self._format_messages(messages)
-        prompt_text = " ".join(m.get("content", "") for m in formatted_messages)
+        prompt_text = self._extract_text_from_messages(formatted_messages)
         prompt_tokens = len(self.llm.tokenize(prompt_text.encode("utf-8")))
-        # max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
-        
+        max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
+
+        # Check if prompt fits within the context window
+        n_ctx = self.llm.n_ctx() if self.llm else 4096
+        if prompt_tokens >= n_ctx - 128:
+            logger.error(
+                f"Prompt too large: {prompt_tokens} tokens > context window {n_ctx - 128}. "
+                "Please start a new conversation or shorten the prompt."
+            )
+            yield {
+                "text": "The conversation is too long to fit in the context window. Please start a new conversation.",
+                "content": "The conversation is too long to fit in the context window. Please start a new conversation.",
+                "tokens_generated": 0,
+                "prompt_tokens": prompt_tokens,
+                "generation_time": 0,
+                "finished": True,
+                "reasoning_phase": False,
+            }
+            return
+
         # Create streaming generator
         stream = self.llm.create_chat_completion(
             messages=formatted_messages,
-            # max_tokens=max_tokens,
+            max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
