@@ -123,6 +123,7 @@ class LlamaNetUI {
         // Restore selected model from localStorage
         this.selectedModel = localStorage.getItem('llamanet_selected_model') || null;
         this.reasoningEnabled = localStorage.getItem('llamanet_reasoning') !== 'false';
+        this._supportsVision = false; // Whether the selected model supports image input
 
         // Request cancellation state
         this._currentAbortController = null;
@@ -169,6 +170,7 @@ class LlamaNetUI {
             setTimeout(() => {
                 this.updateChatInterface(this.selectedModel);
                 this.updateReasoningForModel(this.detectReasoningModel(this.selectedModel));
+                this.updateVisionForModel(this.detectVisionModel(this.selectedModel));
                 const selectedGroup = document.querySelector(`[data-model="${this.selectedModel}"]`);
                 if (selectedGroup) {
                     selectedGroup.classList.add('selected-model');
@@ -315,6 +317,12 @@ class LlamaNetUI {
     handleImageSelect(event) {
         const files = event.target.files;
         if (!files || files.length === 0) return;
+        // Only allow images if the selected model supports vision
+        if (!this._supportsVision) {
+            this.showToast('error', 'This model does not support image input');
+            event.target.value = '';
+            return;
+        }
         for (const file of files) {
             if (!file.type.startsWith('image/')) continue;
             this.addImageFromFile(file);
@@ -325,6 +333,9 @@ class LlamaNetUI {
     handlePaste(event) {
         const items = event.clipboardData?.items;
         if (!items) return;
+
+        // Only capture images if the selected model supports vision
+        if (!this._supportsVision) return; // Let default paste behavior proceed
 
         // Collect image items from the clipboard
         const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
@@ -382,6 +393,11 @@ class LlamaNetUI {
     }
 
     async addImageFromFile(file) {
+        // Reject if model does not support vision
+        if (!this._supportsVision) {
+            this.showToast('error', 'This model does not support image input');
+            return;
+        }
         // Enforce max images
         if (this.attachedImages.length >= 4) {
             this.showToast('error', 'Maximum 4 images per message');
@@ -651,6 +667,9 @@ class LlamaNetUI {
         if (selectedOpt) {
             const supportsReasoning = selectedOpt.dataset.reasoning === 'true';
             this.updateReasoningForModel(supportsReasoning);
+            this.updateVisionForModel(this.detectVisionModel(select.value));
+        } else {
+            this.updateVisionForModel(false);
         }
     }
 
@@ -665,6 +684,7 @@ class LlamaNetUI {
         localStorage.setItem('llamanet_selected_model', modelName);
         this.updateChatInterface(modelName);
         this.updateReasoningForModel(supportsReasoning);
+        this.updateVisionForModel(this.detectVisionModel(modelName));
 
         if (source === 'pool' && modelPath) {
             this.switchPoolModel(modelName, modelPath);
@@ -2000,6 +2020,16 @@ class LlamaNetUI {
         return patterns.some(p => name.includes(p));
     }
 
+    detectVisionModel(modelName) {
+        if (!modelName) return false;
+        const name = modelName.toLowerCase();
+        const patterns = [
+            'llava', 'qwen2-vl', 'qwen-vl', 'minicpm-v',
+            'phi-3-vision', 'idefics', 'llama-3.2-vision'
+        ];
+        return patterns.some(p => name.includes(p));
+    }
+
     /**
      * Update the reasoning toggle based on model capability.
      */
@@ -2022,6 +2052,24 @@ class LlamaNetUI {
         }
     }
 
+    updateVisionForModel(supportsVision) {
+        this._supportsVision = supportsVision;
+        const imageUploadBtn = document.getElementById('image-upload-btn');
+        if (imageUploadBtn) {
+            if (supportsVision) {
+                imageUploadBtn.classList.remove('d-none');
+                imageUploadBtn.title = 'Attach images (model supports vision)';
+            } else {
+                imageUploadBtn.classList.add('d-none');
+                imageUploadBtn.title = 'This model does not support image input';
+            }
+        }
+        // If the model doesn't support vision, clear any attached images
+        if (!supportsVision && this.attachedImages.length > 0) {
+            this.clearAttachedImages();
+        }
+    }
+
     async selectModel(modelId) {
         try {
             // Update the current model selection
@@ -2029,6 +2077,7 @@ class LlamaNetUI {
 
             // Update reasoning toggle for the selected model
             this.updateReasoningForModel(this.detectReasoningModel(modelId));
+            this.updateVisionForModel(this.detectVisionModel(modelId));
 
             // Sync the chat model selector dropdown
             const chatSelect = document.getElementById('chat-model-select');
