@@ -79,6 +79,7 @@ class LlamaNetUI {
         this.selectedNode = null;
         this.chatHistory = [];
         this.markdownRenderer = new MarkdownRenderer();
+        this.attachedImages = [];  // Multimodal attachments (base64 data URLs)
         
         // System prompt properties
         this.systemPrompt = '';
@@ -296,7 +297,56 @@ class LlamaNetUI {
     
     
     setupEventListeners() {
-        // No API mode selector needed - OpenAI only
+        // Image attachment handlers
+        const imageUploadBtn = document.getElementById('image-upload-btn');
+        const imageInput = document.getElementById('image-input');
+        if (imageUploadBtn && imageInput) {
+            imageUploadBtn.addEventListener('click', () => imageInput.click());
+            imageInput.addEventListener('change', (e) => this.handleImageSelect(e));
+        }
+    }
+
+    handleImageSelect(event) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+        for (const file of files) {
+            if (!file.type.startsWith('image/')) continue;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.attachedImages.push({
+                    name: file.name,
+                    dataUrl: e.target.result
+                });
+                this.renderImagePreview();
+            };
+            reader.readAsDataURL(file);
+        }
+        event.target.value = '';
+    }
+
+    renderImagePreview() {
+        const preview = document.getElementById('image-preview');
+        if (!preview) return;
+        if (this.attachedImages.length === 0) {
+            preview.innerHTML = '';
+            return;
+        }
+        preview.innerHTML = this.attachedImages.map((img, idx) => `
+            <div class="position-relative">
+                <img src="${img.dataUrl}" alt="${this.escapeHtml(img.name)}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid #dee2e6; padding: 2px;">
+                <button class="btn btn-sm btn-danger position-absolute top-0 end-0" style="font-size: 0.6rem; border-radius: 50%;" onclick="llamaNetUI.removeImage(${idx})">&times;</button>
+            </div>
+        `).join('');
+    }
+
+    removeImage(index) {
+        this.attachedImages.splice(index, 1);
+        this.renderImagePreview();
+    }
+
+    clearAttachedImages() {
+        this.attachedImages = [];
+        this.renderImagePreview();
     }
 
     async startWakeDetection() {
@@ -2348,6 +2398,7 @@ class LlamaNetUI {
             this.showError(`Failed to send message: ${error.message}`);
         } finally {
             this.toggleSendButton(true);
+            this.clearAttachedImages();
         }
     }
     
@@ -2374,7 +2425,16 @@ class LlamaNetUI {
             .forEach(msg => messages.push({ role: msg.role, content: msg.content }));
         
         // Add current message
-        messages.push({ role: 'user', content: message });
+        const userContent = this.attachedImages.length > 0
+            ? [
+                { type: "text", text: message },
+                ...this.attachedImages.map(img => ({
+                    type: "image_url",
+                    image_url: { url: img.dataUrl }
+                }))
+            ]
+            : message;
+        messages.push({ role: 'user', content: userContent });
         
         // Read model from the visible selector dropdown
         const chatSelect = document.getElementById('chat-model-select');
