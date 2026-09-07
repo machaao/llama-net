@@ -185,6 +185,8 @@ def get_model_context_length(
         # ── 8. Clamp to native or memory limit ──
         effective_ctx = min(native_ctx, max_ctx_from_memory)
 
+        logger.info(f"Model context length: {effective_ctx}")
+
         # ── 9. Snap down to nearest standard power-of-two ──
         standard_sizes = [262144, 131072, 65536, 32768, 16384, 8192, 4096, 2048]
         for size in standard_sizes:

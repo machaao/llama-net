@@ -63,16 +63,37 @@ class RequestValidator:
                 raise ValidationError(
                     f"Message {i} has invalid role '{role}'. Must be one of: system, user, assistant, function, tool.", 400
                 )
-            if not isinstance(content, str):
+
+            # Validate multimodal content (string or list of parts)
+            total_message_chars = 0
+            if isinstance(content, str):
+                total_message_chars = len(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        raise ValidationError(f"Message {i} content part must be an object.", 400)
+                    ptype = part.get("type")
+                    if ptype == "text":
+                        text = part.get("text", "")
+                        if not isinstance(text, str):
+                            raise ValidationError(f"Message {i} text content must be a string.", 400)
+                        total_message_chars += len(text)
+                    elif ptype == "image_url":
+                        if "url" not in part.get("image_url", {}):
+                            raise ValidationError(f"Message {i} image_url part requires 'url'.", 400)
+                    else:
+                        raise ValidationError(f"Message {i} unsupported content part type: {ptype}", 400)
+            else:
                 if role == "assistant" and content is None:
-                    content = ""
+                    total_message_chars = 0
                 else:
-                    raise ValidationError(f"Message {i} content must be a string.", 400)
-            if len(content) > MAX_MESSAGE_CHARS:
+                    raise ValidationError(f"Message {i} content must be a string or list.", 400)
+
+            if total_message_chars > MAX_MESSAGE_CHARS:
                 raise ValidationError(
-                    f"Message {i} exceeds maximum length of {MAX_MESSAGE_CHARS:,} characters (got {len(content):,}).", 400
+                    f"Message {i} exceeds maximum length of {MAX_MESSAGE_CHARS:,} characters (got {total_message_chars:,}).", 400
                 )
-            total_chars += len(content)
+            total_chars += total_message_chars
 
         if total_chars > MAX_TOTAL_CONTEXT_CHARS:
             raise ValidationError(

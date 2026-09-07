@@ -152,6 +152,10 @@
                         <div class="row">
                             <div class="col-md-8">
                                 <div class="input-group">
+                                    <input type="file" id="image-input" accept="image/*" multiple class="d-none">
+                                    <button class="btn btn-outline-secondary" type="button" id="image-upload-btn" title="Attach images">
+                                        <i class="fas fa-image"></i>
+                                    </button>
                                     <textarea id="message-input" class="form-control" rows="2" placeholder="Type your message here..." onkeypress="handleKeyPress(event)"></textarea>
                                     <button class="btn btn-primary" onclick="sendMessage()" id="send-btn">
                                         <i class="fas fa-paper-plane"></i> Send
@@ -160,6 +164,7 @@
                                         <i class="fas fa-stop"></i> Stop
                                     </button>
                                 </div>
+                                <div id="image-preview" class="d-flex flex-wrap gap-2 mt-2"></div>
                             </div>
                             <div class="col-md-4">
                                 <div class="row g-2">

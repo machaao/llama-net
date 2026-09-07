@@ -76,6 +76,12 @@ class ModelRouter:
                 content = msg.get("content", "")
                 if isinstance(content, str):
                     total_chars += len(content)
+                elif isinstance(content, list):
+                    for part in content:
+                        if part.get("type") == "text":
+                            total_chars += len(part.get("text", ""))
+                        elif part.get("type") == "image_url":
+                            total_chars += 256  # Flat per-image estimate for routing
 
         return max(1, total_chars // 4)
 
