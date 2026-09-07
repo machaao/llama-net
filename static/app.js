@@ -317,15 +317,7 @@ class LlamaNetUI {
         if (!files || files.length === 0) return;
         for (const file of files) {
             if (!file.type.startsWith('image/')) continue;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.attachedImages.push({
-                    name: file.name,
-                    dataUrl: e.target.result
-                });
-                this.renderImagePreview();
-            };
-            reader.readAsDataURL(file);
+            this.addImageFromFile(file);
         }
         event.target.value = '';
     }
@@ -360,15 +352,7 @@ class LlamaNetUI {
         for (const item of imageItems) {
             const file = item.getAsFile();
             if (!file) continue;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.attachedImages.push({
-                    name: file.name || `pasted-image-${Date.now()}.png`,
-                    dataUrl: e.target.result
-                });
-                this.renderImagePreview();
-            };
-            reader.readAsDataURL(file);
+            this.addImageFromFile(file);
         }
     }
 
@@ -395,6 +379,64 @@ class LlamaNetUI {
     clearAttachedImages() {
         this.attachedImages = [];
         this.renderImagePreview();
+    }
+
+    async addImageFromFile(file) {
+        // Enforce max images
+        if (this.attachedImages.length >= 4) {
+            this.showToast('error', 'Maximum 4 images per message');
+            return;
+        }
+        // Reject non-image files
+        if (!file.type.startsWith('image/')) return;
+
+        try {
+            const compressedDataUrl = await this.compressImage(file);
+            // Enforce max byte size
+            const base64Length = compressedDataUrl.length;
+            const estimatedBytes = base64Length * 0.75; // base64 overhead
+            if (estimatedBytes > 1.5 * 1024 * 1024) {
+                this.showToast('error', 'Image too large (max 1.5MB after compression)');
+                return;
+            }
+            this.attachedImages.push({
+                name: file.name || `pasted-image-${Date.now()}.jpg`,
+                dataUrl: compressedDataUrl
+            });
+            this.renderImagePreview();
+        } catch (e) {
+            this.showToast('error', 'Failed to process image: ' + e.message);
+        }
+    }
+
+    async compressImage(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const MAX_DIM = 1024;
+                    let { width, height } = img;
+                    if (width > height && width > MAX_DIM) {
+                        height = Math.round(height * MAX_DIM / width);
+                        width = MAX_DIM;
+                    } else if (height > MAX_DIM) {
+                        width = Math.round(width * MAX_DIM / height);
+                        height = MAX_DIM;
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.8));
+                };
+                img.onerror = () => reject(new Error('Invalid image'));
+                img.src = e.target.result;
+            };
+            reader.onerror = () => reject(new Error('File read error'));
+            reader.readAsDataURL(file);
+        });
     }
 
     async startWakeDetection() {
