@@ -33,7 +33,7 @@ class NodeInfo(BaseModel):
 class OpenAIMessage(BaseModel):
     """OpenAI chat message format with reasoning support"""
     role: str
-    content: str
+    content: Union[str, List[Dict[str, Any]]]  # Allow multimodal content array
     reasoning_content: Optional[str] = None
 
     @validator('role')
@@ -45,9 +45,27 @@ class OpenAIMessage(BaseModel):
 
     @validator('content')
     def validate_content_length(cls, v):
-        if v is not None and len(v) > _MAX_MESSAGE_CHARS:
-            raise ValueError(f"Message content exceeds {_MAX_MESSAGE_CHARS:,} character limit.")
-        return v
+        if v is None:
+            return v
+        if isinstance(v, str):
+            if len(v) > _MAX_MESSAGE_CHARS:
+                raise ValueError(f"Message content exceeds {_MAX_MESSAGE_CHARS:,} character limit.")
+            return v
+        if isinstance(v, list):
+            for part in v:
+                if not isinstance(part, dict):
+                    raise ValueError("Content part must be an object")
+                ptype = part.get("type")
+                if ptype == "text":
+                    if len(part.get("text", "")) > _MAX_MESSAGE_CHARS:
+                        raise ValueError("Text content exceeds character limit.")
+                elif ptype == "image_url":
+                    if "url" not in part.get("image_url", {}):
+                        raise ValueError("image_url part requires 'url'")
+                else:
+                    raise ValueError(f"Unsupported content type: {ptype}")
+            return v
+        raise ValueError("content must be a string or list of content parts")
 
 class OpenAICompletionRequest(BaseModel):
     """OpenAI-compatible completion request"""
