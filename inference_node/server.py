@@ -233,15 +233,12 @@ async def lifespan(app: FastAPI):
                 _sync_server_pool_state()
                 if gateway_client:
                     try:
-                        await asyncio.wait_for(
-                            gateway_client.send_event(
-                                "node_updated",
-                                extra_data={
-                                    "pool_event": event_type,
-                                    "changed_model": changed_model,
-                                },
-                            ),
-                            timeout=5.0
+                        await gateway_client.send_event(
+                            "node_updated",
+                            extra_data={
+                                "pool_event": event_type,
+                                "changed_model": changed_model,
+                            },
                         )
                     except Exception as e:
                         logger.warning(f"Pool change event failed ({event_type} → {changed_model}): {e}")
@@ -288,15 +285,12 @@ async def lifespan(app: FastAPI):
 
                 if gateway_client:
                     try:
-                        await asyncio.wait_for(
-                            gateway_client.send_event(
-                                "node_updated",
-                                extra_data={
-                                    "pool_event": event_type,
-                                    "changed_model": changed_model,
-                                },
-                            ),
-                            timeout=5.0
+                        await gateway_client.send_event(
+                            "node_updated",
+                            extra_data={
+                                "pool_event": event_type,
+                                "changed_model": changed_model,
+                            },
                         )
                     except Exception as e:
                         logger.warning(f"Pool change event failed ({event_type} → {changed_model}): {e}")
@@ -392,7 +386,7 @@ async def lifespan(app: FastAPI):
     # ── Departure FIRST: beat vast.ai/Docker SIGKILL grace period ──
     if gateway_client:
         try:
-            await asyncio.wait_for(gateway_client.send_event("node_left"), timeout=5.0)
+            await gateway_client.send_event("node_left")
             logger.info("✅ Departure event sent to gateway")
         except Exception as e:
             logger.warning(f"Departure event failed: {e}")
