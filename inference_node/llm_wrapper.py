@@ -103,7 +103,7 @@ def detect_reasoning_model(model_name: str) -> bool:
     model_name_lower = model_name.lower()
     
     reasoning_patterns = [
-        'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning', 'qwen3',
+        'deepseek-r1', 'deepseek-reasoning', 'qwen-reasoning', 'qwen3', 'ornith',
         'reasoning', 'r1-', '-r1', 'think', 'cot', 'gpt-oss'  # Add gpt-oss pattern
     ]
     
@@ -123,7 +123,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
     
     # Model name to chat format mapping (ordered by specificity)
     format_patterns = {
-        'llama-3': ['llama-3', 'llama3', 'meta-llama-3', 'muse'],
+        'llama-3': ['llama-3', 'llama3', 'meta-llama-3', 'muse', 'muse-glimmer'],
         'llama-2': ['llama-2', 'llama2', 'meta-llama-2'],
         'mistral-instruct': ['mistral-instruct', 'mistral-7b-instruct', 'mixtral-instruct', 'ministral'],
         'gemma': ['gemma', 'google/gemma'],
@@ -133,7 +133,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
         'functionary-v1': ['functionary-v1'],
         'functionary': ['functionary', 'meetkai/functionary'],
         'chatglm3': ['chatglm3', 'chatglm-3'],
-        'qwen': ['qwen-', 'qwen1.5', 'alibaba/qwen', 'qwen3.5'],
+        'qwen': ['qwen-', 'qwen1.5', 'alibaba/qwen', 'qwen3.5', 'qwen35' , 'ornith'],
         'baichuan-2': ['baichuan-2', 'baichuan2'],
         'baichuan': ['baichuan'],
         'phind': ['phind', 'phind-codellama'],
