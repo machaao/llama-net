@@ -1,4 +1,5 @@
 import os
+import base64
 import time
 import asyncio
 import gc
@@ -180,6 +181,10 @@ class LlamaWrapper:
         # Detect if this is a reasoning model
         self.supports_reasoning = detect_reasoning_model(config.model_name)
         logger.info(f"Reasoning support: {'enabled' if self.supports_reasoning else 'disabled'}")
+
+        # Detect if this is a vision model (for multimodal input)
+        self.supports_vision = self._detect_vision()
+        logger.info(f"Vision support: {'enabled' if self.supports_vision else 'disabled'}")
         
         # Chat formats that do not support system role messages
         self._formats_without_system_role = {'gemma', 'mistral-instruct'}
@@ -255,16 +260,56 @@ class LlamaWrapper:
         """Format messages for llama-cpp-python with chat-format-specific adaptations"""
         formatted = []
         for msg in messages:
-            formatted.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Multimodal content — extract text parts only
+                text_parts = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                joined_text = "\n".join(text_parts)
+                formatted.append({
+                    "role": role,
+                    "content": joined_text
+                })
+            else:
+                formatted.append({
+                    "role": role,
+                    "content": str(content) if content is not None else ""
+                })
 
         # For formats that don't support system role, merge system content into first user message
         if self.detected_chat_format in self._formats_without_system_role:
             formatted = self._adapt_messages_for_format(formatted)
 
         return formatted
+
+    def _detect_vision(self) -> bool:
+        """Detect if this model supports vision/multimodal input."""
+        name = self.config.model_name.lower()
+        vision_patterns = [
+            "llava", "qwen2-vl", "qwen-vl", "minicpm-v",
+            "phi-3-vision", "idefics", "llama-3.2-vision",
+        ]
+        return any(p in name for p in vision_patterns)
+
+    def _extract_images(self, messages: List[Dict[str, Any]]) -> list:
+        """Extract base64 images from multimodal messages and decode to bytes."""
+        images = []
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for part in content:
+                    if part.get("type") == "image_url":
+                        url = part.get("image_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            try:
+                                b64 = url.split(",", 1)[1]
+                                images.append(base64.b64decode(b64))
+                            except Exception as e:
+                                logger.warning(f"Failed to decode base64 image: {e}")
+        return images
 
     def _cap_max_tokens(self, max_tokens: int, formatted_messages: list) -> int:
         """Cap max_tokens based only on available context window.
@@ -574,6 +619,7 @@ class LlamaWrapper:
             formatted_messages = self._format_messages(messages)
             max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
 
+            images = self._extract_images(messages)
             output = self.llm.create_chat_completion(
                 messages=formatted_messages,
                 max_tokens=max_tokens,
@@ -581,7 +627,8 @@ class LlamaWrapper:
                 top_p=top_p,
                 top_k=top_k,
                 stop=normalize_stop_tokens(stop),
-                repeat_penalty=repeat_penalty
+                repeat_penalty=repeat_penalty,
+                images=images if (images and self.supports_vision) else None
             )
             
             generation_time = time.time() - start_time
@@ -659,6 +706,7 @@ class LlamaWrapper:
         # max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
         
         # Create streaming generator
+        images = self._extract_images(messages)
         stream = self.llm.create_chat_completion(
             messages=formatted_messages,
             # max_tokens=max_tokens,
@@ -668,6 +716,7 @@ class LlamaWrapper:
             stop=stop_tokens,
             repeat_penalty=repeat_penalty,
             stream=True,
+            images=images if (images and self.supports_vision) else None
         )
         
         total_tokens = 0
