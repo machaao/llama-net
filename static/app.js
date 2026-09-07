@@ -341,6 +341,22 @@ class LlamaNetUI {
         // Prevent default only when we have images to attach
         event.preventDefault();
 
+        // Extract any text that was also in the clipboard and prepend it to the message input
+        const textItems = Array.from(items).filter(item => item.type === 'text/plain');
+        if (textItems.length > 0) {
+            const textPromise = textItems[0].getAsString(text => {
+                const messageInput = document.getElementById('message-input');
+                if (messageInput) {
+                    // Insert pasted text at cursor position
+                    const start = messageInput.selectionStart;
+                    const end = messageInput.selectionEnd;
+                    messageInput.value = messageInput.value.substring(0, start) + text + messageInput.value.substring(end);
+                    messageInput.selectionStart = messageInput.selectionEnd = start + text.length;
+                    messageInput.focus();
+                }
+            });
+        }
+
         for (const item of imageItems) {
             const file = item.getAsFile();
             if (!file) continue;
@@ -364,9 +380,9 @@ class LlamaNetUI {
             return;
         }
         preview.innerHTML = this.attachedImages.map((img, idx) => `
-            <div class="position-relative">
-                <img src="${img.dataUrl}" alt="${this.escapeHtml(img.name)}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid #dee2e6; padding: 2px;">
-                <button class="btn btn-sm btn-danger position-absolute top-0 end-0" style="font-size: 0.6rem; border-radius: 50%;" onclick="llamaNetUI.removeImage(${idx})">&times;</button>
+            <div class="image-attachment-preview">
+                <img src="${img.dataUrl}" alt="${this.escapeHtml(img.name)}" class="image-attachment-thumb">
+                <button class="image-attachment-remove" onclick="llamaNetUI.removeImage(${idx})" title="Remove image">&times;</button>
             </div>
         `).join('');
     }
@@ -2410,8 +2426,19 @@ class LlamaNetUI {
         input.value = '';
         this.toggleSendButton(false);
         
-        // Add user message to chat
-        this.addMessageToChat('user', message);
+        // Build user content (text + images)
+        const userContent = this.attachedImages.length > 0
+            ? [
+                { type: "text", text: message },
+                ...this.attachedImages.map(img => ({
+                    type: "image_url",
+                    image_url: { url: img.dataUrl }
+                }))
+            ]
+            : message;
+        
+        // Add user message to chat (preserves multimodal content in history)
+        this.addMessageToChat('user', userContent);
         
         try {
             const response = await this.sendOpenAIMessage(message);
@@ -2988,8 +3015,17 @@ class LlamaNetUI {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${role}`;
         
-        // Store in chat history
+        // Store in chat history — preserve the original content (may be multimodal)
         this.chatHistory.push({ role, content, timestamp: Date.now() });
+        
+        // Extract text and image count for display
+        let displayContent = content;
+        let imageCount = 0;
+        if (Array.isArray(content)) {
+            const textParts = content.filter(part => part.type === 'text').map(part => part.text);
+            imageCount = content.filter(part => part.type === 'image_url').length;
+            displayContent = textParts.join(' ');
+        }
         
         let metadataHtml = '';
         if (metadata) {
@@ -3035,10 +3071,11 @@ class LlamaNetUI {
             `;
         } else {
             // Keep user messages as plain text
-            renderedContent = this.escapeHtml(content);
+            renderedContent = this.escapeHtml(displayContent);
             messageDiv.innerHTML = `
                 <div class="message-bubble">
                     <i class="${roleIcon} me-2"></i>${renderedContent}
+                    ${imageCount > 0 ? `<span class="message-image-indicator"><i class="fas fa-image"></i> ${imageCount} image${imageCount > 1 ? 's' : ''}</span>` : ''}
                 </div>
                 ${metadataHtml}
             `;

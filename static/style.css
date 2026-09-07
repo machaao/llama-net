@@ -1785,3 +1785,58 @@ pre {
 .markdown-content .table-responsive table { margin: 0; }
 .code-block-wrapper pre { padding-top: 2rem; }
 .streaming-markdown { min-height: 1.5em; }
+
+/* Image attachments */
+.image-attachment-preview {
+    position: relative;
+    display: inline-block;
+}
+
+.image-attachment-thumb {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    padding: 2px;
+}
+
+.image-attachment-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    border-radius: 50%;
+    font-size: 0.6rem;
+    padding: 2px 5px;
+    line-height: 1;
+    background-color: var(--danger-color);
+    border: none;
+    color: white;
+    cursor: pointer;
+    opacity: 0.9;
+}
+
+.image-attachment-remove:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.image-preview-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+/* Chat message image indicator */
+.message-image-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.7rem;
+    color: var(--secondary-color);
+    border: 1px solid var(--secondary-color);
+    border-radius: 0.75rem;
+    padding: 0.1rem 0.4rem;
+    margin-left: 0.25rem;
+}
