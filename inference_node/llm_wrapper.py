@@ -263,16 +263,24 @@ class LlamaWrapper:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if isinstance(content, list):
-                # Multimodal content — extract text parts only
-                text_parts = []
-                for part in content:
-                    if part.get("type") == "text":
-                        text_parts.append(part.get("text", ""))
-                joined_text = "\n".join(text_parts)
-                formatted.append({
-                    "role": role,
-                    "content": joined_text
-                })
+                if self.supports_vision:
+                    # Preserve multimodal content for vision-capable models.
+                    # llama-cpp-python expects the OpenAI-style content array.
+                    formatted.append({
+                        "role": role,
+                        "content": content
+                    })
+                else:
+                    # Not a vision model — extract text parts only, ignore images.
+                    text_parts = []
+                    for part in content:
+                        if part.get("type") == "text":
+                            text_parts.append(part.get("text", ""))
+                    joined_text = "\n".join(text_parts)
+                    formatted.append({
+                        "role": role,
+                        "content": joined_text
+                    })
             else:
                 formatted.append({
                     "role": role,
@@ -364,10 +372,18 @@ class LlamaWrapper:
         system_prepended = False
         for msg in non_system_messages:
             if msg.get("role") == "user" and not system_prepended:
-                adapted.append({
-                    "role": "user",
-                    "content": f"{combined_system}\n\n{msg.get('content', '')}"
-                })
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    # Multimodal content — prepend system text as a text part
+                    adapted.append({
+                        "role": "user",
+                        "content": [{"type": "text", "text": combined_system}] + content
+                    })
+                else:
+                    adapted.append({
+                        "role": "user",
+                        "content": f"{combined_system}\n\n{content}"
+                    })
                 system_prepended = True
             else:
                 adapted.append(msg)
@@ -619,7 +635,6 @@ class LlamaWrapper:
             formatted_messages = self._format_messages(messages)
             max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
 
-            images = self._extract_images(messages)
             output = self.llm.create_chat_completion(
                 messages=formatted_messages,
                 max_tokens=max_tokens,
@@ -627,8 +642,7 @@ class LlamaWrapper:
                 top_p=top_p,
                 top_k=top_k,
                 stop=normalize_stop_tokens(stop),
-                repeat_penalty=repeat_penalty,
-                images=images if (images and self.supports_vision) else None
+                repeat_penalty=repeat_penalty
             )
             
             generation_time = time.time() - start_time
@@ -706,7 +720,6 @@ class LlamaWrapper:
         # max_tokens = self._cap_max_tokens(max_tokens, formatted_messages)
         
         # Create streaming generator
-        images = self._extract_images(messages)
         stream = self.llm.create_chat_completion(
             messages=formatted_messages,
             # max_tokens=max_tokens,
@@ -715,8 +728,7 @@ class LlamaWrapper:
             top_k=top_k,
             stop=stop_tokens,
             repeat_penalty=repeat_penalty,
-            stream=True,
-            images=images if (images and self.supports_vision) else None
+            stream=True
         )
         
         total_tokens = 0
