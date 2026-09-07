@@ -304,6 +304,12 @@ class LlamaNetUI {
             imageUploadBtn.addEventListener('click', () => imageInput.click());
             imageInput.addEventListener('change', (e) => this.handleImageSelect(e));
         }
+
+        // Paste-to-attach image handler on the message input
+        const messageInput = document.getElementById('message-input');
+        if (messageInput) {
+            messageInput.addEventListener('paste', (e) => this.handlePaste(e));
+        }
     }
 
     handleImageSelect(event) {
@@ -322,6 +328,32 @@ class LlamaNetUI {
             reader.readAsDataURL(file);
         }
         event.target.value = '';
+    }
+
+    handlePaste(event) {
+        const items = event.clipboardData?.items;
+        if (!items) return;
+
+        // Collect image items from the clipboard
+        const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+        if (imageItems.length === 0) return; // No images — let default text paste proceed
+
+        // Prevent default only when we have images to attach
+        event.preventDefault();
+
+        for (const item of imageItems) {
+            const file = item.getAsFile();
+            if (!file) continue;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.attachedImages.push({
+                    name: file.name || `pasted-image-${Date.now()}.png`,
+                    dataUrl: e.target.result
+                });
+                this.renderImagePreview();
+            };
+            reader.readAsDataURL(file);
+        }
     }
 
     renderImagePreview() {
