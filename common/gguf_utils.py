@@ -184,6 +184,7 @@ def get_model_context_length(
 
         # ── 8. Clamp to native or memory limit ──
         effective_ctx = min(native_ctx, max_ctx_from_memory)
+        # effective_ctx = native_ctx
 
         logger.info(f"Model context length: {effective_ctx}")
 
