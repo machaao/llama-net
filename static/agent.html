@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LlamaNet Computer-Use Agent</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦙</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/gateway.css">
+    <link rel="stylesheet" href="/static/agent.css">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand mb-0 h1" href="/">
+                <i class="fas fa-network-wired"></i> LlamaNet
+            </a>
+            <span class="navbar-text text-white">
+                <i class="fas fa-robot"></i> Computer-Use Agent Console
+            </span>
+            <div class="d-flex">
+                <a class="btn btn-outline-light btn-sm" href="/"><i class="fas fa-comments"></i> Chat</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Safety Warning -->
+    <div class="alert alert-warning text-center mb-0 rounded-0">
+        <i class="fas fa-shield-alt me-2"></i>
+        <strong>Safety notice:</strong> this drives a real web browser. The agent pauses at critical points
+        (personal info, payments, submissions, sign-ins, sending messages). Run in a VM/container or on a
+        machine without sensitive data.
+    </div>
+
+    <div class="container-fluid mt-3">
+        <div class="row g-3">
+            <!-- Left: Controls -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-sliders-h"></i> Session</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="agent-status" class="mb-3 text-center">
+                            <span class="badge bg-secondary">Idle</span>
+                        </div>
+
+                        <label class="form-label small">Goal</label>
+                        <textarea id="agent-goal" class="form-control" rows="4"
+                            placeholder="e.g. Find the cheapest flight from SF to NYC next Friday and list the top 3 options"></textarea>
+
+                        <label class="form-label small mt-2">Start URL <span class="text-muted">(optional)</span></label>
+                        <input id="agent-start-url" class="form-control" placeholder="https://example.com">
+
+                        <label class="form-label small mt-2">Allowed domains <span class="text-muted">(optional, comma-separated)</span></label>
+                        <input id="agent-allowlist" class="form-control" placeholder="example.com, flights.google.com">
+
+                        <label class="form-label small mt-2">Blocked domains <span class="text-muted">(optional)</span></label>
+                        <input id="agent-blocklist" class="form-control" placeholder="facebook.com">
+
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" id="agent-headless" checked>
+                            <label class="form-check-label small" for="agent-headless">Headless (no visible window)</label>
+                        </div>
+
+                        <div class="d-grid gap-2 mt-3">
+                            <button class="btn btn-primary" id="agent-start-btn" onclick="agentConsole.createSession()">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                            <button class="btn btn-outline-secondary" id="agent-run-btn" onclick="agentConsole.runSession()" disabled>
+                                <i class="fas fa-forward"></i> Run
+                            </button>
+                            <button class="btn btn-warning" id="agent-pause-btn" onclick="agentConsole.pauseSession()" disabled>
+                                <i class="fas fa-pause"></i> Pause
+                            </button>
+                            <button class="btn btn-success" id="agent-resume-btn" onclick="agentConsole.resumeSession()" disabled>
+                                <i class="fas fa-play"></i> Resume
+                            </button>
+                            <button class="btn btn-danger" id="agent-stop-btn" onclick="agentConsole.stopSession()" disabled>
+                                <i class="fas fa-stop"></i> Stop
+                            </button>
+                        </div>
+
+                        <!-- Critical-point answer box -->
+                        <div id="agent-answer-box" class="mt-3 d-none">
+                            <label class="form-label small text-warning">
+                                <i class="fas fa-question-circle"></i> Agent is asking for input
+                            </label>
+                            <textarea id="agent-answer" class="form-control" rows="2" placeholder="Your answer / confirmation"></textarea>
+                            <button class="btn btn-sm btn-success mt-2 w-100" onclick="agentConsole.sendAnswer()">
+                                <i class="fas fa-reply"></i> Send answer &amp; resume
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle: Screenshot -->
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0"><i class="fas fa-image"></i> Browser</h6>
+                        <span class="small text-muted" id="agent-url"></span>
+                    </div>
+                    <div class="card-body d-flex align-items-center justify-content-center bg-dark">
+                        <img id="agent-screenshot" class="img-fluid agent-screenshot" alt="Browser view"
+                             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500'%3E%3Crect width='100%25' height='100%25' fill='%23f8f9fa'/%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-size='20' fill='%23999' text-anchor='middle'%3ENo screenshot yet%3C/text%3E%3C/svg%3E">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Step log -->
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-list"></i> Step Log</h6>
+                    </div>
+                    <div class="card-body overflow-auto" id="agent-log" style="max-height: 70vh;">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-robot fa-2x mb-2"></i>
+                            <p>Define a goal and press Start.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/agent.js"></script>
+</body>
+</html>

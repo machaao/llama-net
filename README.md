@@ -166,6 +166,50 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 - **Real-time Network** — SSE-powered live updates for node status, model availability, and metrics
 - **GPU Auto-detect** — NVIDIA, Apple Silicon, CPU fallback
 
+## Computer-Use Agent (Fara1.5-9B)
+
+LlamaNet bundles a native harness for **computer-use agent** models like
+[Microsoft Research's Fara1.5-9B](https://huggingface.co/microsoft/Fara1.5-9B)
+(and its [GGUF conversions](https://huggingface.co/bartowski/Fara1.5-9B-GGUF)).
+
+Fara is a multimodal agent that observes a live browser through **screenshots
+(no DOM access)** and emits structured tool calls — `left_click`, `type`,
+`scroll`, `visit_url`, `web_search`, and more — to complete tasks end-to-end.
+
+### Requirements
+
+- A Fara-class vision model loaded (the Web UI auto-detects `fara`/`cua`
+  models and enables image input).
+- The model's vision projector (`mmproj-*.gguf`) downloaded alongside the
+  weights — the Model Manager flags and auto-downloads it.
+- **Playwright** — installed automatically via `requirements-inference.txt`
+  (or `pip install playwright && playwright install chromium`).
+
+### Usage
+
+1. Download and load `bartowski/Fara1.5-9B-GGUF` (any quantization; `Q4_K_M`
+   ≈ 5.91 GB) via the Model Manager.
+2. Open the **Agent** console (`/agent` in the Web UI, or click **Agent** in
+   the navbar).
+3. Enter a goal (optionally a start URL and domain allow-list), then **Run**.
+
+### Safety (read this)
+
+The agent drives a **real web browser**. It ships with the controls the model
+card requires:
+
+- **Domain allow-list / block-list** — navigation outside approved domains is
+  blocked before the browser moves.
+- **Critical-point pause** — the agent stops and asks before entering personal
+  info, making payments, submitting forms, signing in, or sending messages
+  (Fara's built-in Cases 1/2/3).
+- **Watch-mode trace log** — every screenshot, action, and reasoning step is
+  recorded and visible in the step log.
+- **Immediate halt** — the Stop button tears down the browser session.
+
+> ⚠ Do **not** run the agent on a machine with anything sensitive on it — run
+> it in a VM/container or a disposable environment.
+
 ## Ollama vs LM Studio vs LlamaNet - Best Local LLM Server & Ollama Alternative
 
 | | Ollama | LM Studio | Jan / LocalAI / llama.cpp server | LlamaNet |
@@ -441,6 +485,14 @@ Check your usage at **/auth/token-usage** (requires authentication).
 | `/models/statistics` | GET | Local model statistics |
 | `/models/system-info` | GET | Hardware specs for client-side filtering |
 | `/events/network` | GET | SSE stream for real-time network events |
+| `/agent/sessions` | POST | Create a computer-use agent session (goal + allow-list) |
+| `/agent/sessions/{id}/run` | POST | Start the agent loop |
+| `/agent/sessions/{id}/pause` | POST | Pause the agent |
+| `/agent/sessions/{id}/resume` | POST | Resume the agent |
+| `/agent/sessions/{id}/answer` | POST | Answer a critical-point question and resume |
+| `/agent/sessions/{id}/stop` | POST | Abort the agent session |
+| `/agent/sessions/{id}` | GET | Session state + trace log |
+| `/agent/sessions/{id}/events` | GET | SSE stream (screenshots, steps, reasoning) |
 | `/health` | GET | Health check |
 | `/status` | GET | Node status and metrics |
 | `/info` | GET | Node configuration info |

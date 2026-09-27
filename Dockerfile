@@ -57,6 +57,10 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install \
 # ── Install remaining inference dependencies ──
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-inference.txt
 
+# ── Install Playwright Chromium (computer-use agent support) ──
+RUN python -m playwright install --with-deps chromium 2>/dev/null || \
+    python -m playwright install chromium
+
 # ── Copy source code ──
 COPY . .
 

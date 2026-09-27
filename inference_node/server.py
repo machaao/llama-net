@@ -31,6 +31,7 @@ from inference_node.download_manager import DownloadManager
 from inference_node.gateway_client import GatewayClient
 from inference_node.event_publisher import GatewayEventPublisher
 from inference_node.model_pool import ModelPool
+from agent.server import create_agent_router
 from common.utils import get_logger, get_host_ip, get_tunnel_url_file, resolve_static_dir, setup_logging
 from common.rate_limiter import RateLimiter
 from common.request_validator import RequestValidator, ValidationError
@@ -171,7 +172,7 @@ def _sync_server_pool_state():
         config.model_name = "No Model Loaded"
         config.model_path = ""
         config.no_model_mode = True
-        logger.warning("⚠️ Pool empty — server in no-model mode")
+        logger.warning("⚠ Pool empty — server in no-model mode")
 
     if gateway_client:
         if llm:
@@ -219,7 +220,7 @@ async def lifespan(app: FastAPI):
         )
 
         if config.no_model_mode:
-            logger.warning("⚠️  Starting in NO-MODEL MODE")
+            logger.warning("⚠  Starting in NO-MODEL MODE")
             system_info = SystemInfo.get_all_info()
             sse_manager = UnifiedSSEManager(f"http://{config.host}:{config.port}")
             await sse_manager.start()
@@ -392,7 +393,7 @@ async def lifespan(app: FastAPI):
         try:
             await asyncio.wait_for(gateway_client.unregister(), timeout=8.0)
         except Exception:
-            logger.warning("⚠️ Unregister timed out — node may appear stale on gateway")
+            logger.warning("⚠ Unregister timed out — node may appear stale on gateway")
 
     # ── THEN signal SSE generators and drain/close them ──
     _shutdown_event.set()
@@ -470,7 +471,7 @@ async def _wait_for_tunnel_and_register():
             break
 
     if not url:
-        logger.warning("⚠️ No tunnel URL found after 90s — node not registered with gateway")
+        logger.warning("⚠ No tunnel URL found after 90s — node not registered with gateway")
         return
 
     # Phase 2: Wait for Uvicorn to be serving /health (up to 30s)
@@ -489,7 +490,7 @@ async def _wait_for_tunnel_and_register():
         except Exception:
             pass
     else:
-        logger.warning("⚠️ Uvicorn /health not ready after 30s — registering anyway")
+        logger.warning("⚠ Uvicorn /health not ready after 30s — registering anyway")
 
     # Phase 3: Register with gateway
     registered = await gateway_client.register()
@@ -539,7 +540,7 @@ async def _wait_for_tunnel_and_register():
             f"{gateway_client._rejection_reason}"
         )
     else:
-        logger.warning("⚠️ Gateway registration failed — will retry via heartbeat")
+        logger.warning("⚠ Gateway registration failed — will retry via heartbeat")
         # Start heartbeat loop anyway so it retries on next cycle
         asyncio.create_task(gateway_client.heartbeat_loop())
         asyncio.create_task(gateway_client.peer_refresh_loop())
@@ -595,6 +596,22 @@ if static_dir:
     logger.info(f"Static files: {static_dir}")
 else:
     logger.warning("Static files directory not found — Web UI will not be available")
+
+
+def _get_active_llm():
+    """Resolve the currently active LlamaWrapper (pool-aware) for the agent router.
+
+    Returns None when no model is loaded. The agent router uses this to avoid
+    holding a stale reference across hot-swaps.
+    """
+    if model_pool:
+        slot = model_pool.get_active()
+        if slot and slot.llm:
+            return slot.llm
+    return llm
+
+
+app.include_router(create_agent_router(_get_active_llm))
 
 async def _broadcast_current_node_metrics():
     """Broadcast metrics via SSE after each generation."""
@@ -691,7 +708,7 @@ async def _check_node_overload() -> Optional[JSONResponse]:
         )
         if overload_info.get("is_overloaded"):
             reasons = overload_info.get("overload_reasons", [])
-            logger.warning(f"⚠️ 503: Node overloaded ({', '.join(reasons)})")
+            logger.warning(f"⚠ 503: Node overloaded ({', '.join(reasons)})")
             return JSONResponse(
                 status_code=503,
                 content={
@@ -722,6 +739,18 @@ async def web_ui():
             "web_ui": "Not available", 
             "endpoints": ["/v1/models", "/v1/completions", "/v1/chat/completions"]
         }
+
+
+@app.get("/agent")
+async def agent_console():
+    """Serve the Fara computer-use agent console."""
+    agent_path = os.path.join(static_dir, "agent.html") if static_dir else ""
+    if agent_path and os.path.exists(agent_path):
+        return FileResponse(agent_path)
+    return {
+        "message": "Computer-use agent console not available",
+        "install_note": "The agent requires a vision model (Fara) and Playwright.",
+    }
 
 # OpenAI-compatible endpoints only
 @app.get("/v1/models")
@@ -953,19 +982,19 @@ async def create_completion(request: Request, body: OpenAICompletionRequest):
     request = body
     if config and config.no_model_mode and not llm:
         if not gateway_client:
-            logger.warning("⚠️ 503: No model loaded AND no gateway_client (no_model_mode)")
+            logger.warning("⚠ 503: No model loaded AND no gateway_client (no_model_mode)")
             raise HTTPException(status_code=503, detail="No model loaded, no peers available")
         peer = await gateway_client.select_node(
             model=getattr(request, 'model', None),
             strategy=getattr(request, 'strategy', 'load_balanced'),
         )
         if not peer:
-            logger.warning(f"⚠️ 503: No peers available for model '{getattr(request, 'model', None)}'")
+            logger.warning(f"⚠ 503: No peers available for model '{getattr(request, 'model', None)}'")
             raise HTTPException(status_code=503, detail="No peers available for this model")
         return await _forward_request(request.dict(), "completions", peer, stream=request.stream)
 
     if not llm or not request_queue_manager:
-        logger.warning(f"⚠️ 503: Services not initialized — llm={llm is not None}, queue={request_queue_manager is not None}")
+        logger.warning(f"⚠ 503: Services not initialized — llm={llm is not None}, queue={request_queue_manager is not None}")
         raise HTTPException(status_code=503, detail="Services not initialized")
 
     async def process(request_data):
@@ -1310,19 +1339,19 @@ async def create_chat_completion(request: Request, body: OpenAIChatCompletionReq
     request = body
     if config and config.no_model_mode and not llm:
         if not gateway_client:
-            logger.warning("⚠️ 503: No model loaded AND no gateway_client (no_model_mode)")
+            logger.warning("⚠ 503: No model loaded AND no gateway_client (no_model_mode)")
             raise HTTPException(status_code=503, detail="No model loaded, no peers available")
         peer = await gateway_client.select_node(
             model=getattr(request, 'model', None),
             strategy=getattr(request, 'strategy', 'load_balanced'),
         )
         if not peer:
-            logger.warning(f"⚠️ 503: No peers available for model '{getattr(request, 'model', None)}'")
+            logger.warning(f"⚠ 503: No peers available for model '{getattr(request, 'model', None)}'")
             raise HTTPException(status_code=503, detail="No peers available for this model")
         return await _forward_request(request.dict(), "chat/completions", peer, stream=request.stream)
 
     if not llm or not request_queue_manager:
-        logger.warning(f"⚠️ 503: Services not initialized — llm={llm is not None}, queue={request_queue_manager is not None}")
+        logger.warning(f"⚠ 503: Services not initialized — llm={llm is not None}, queue={request_queue_manager is not None}")
         raise HTTPException(status_code=503, detail="Services not initialized")
 
     async def process(request_data):

@@ -40,7 +40,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     echo "✅ NVIDIA GPU detected:"
     nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "   (details unavailable)"
 else
-    echo "⚠️  No nvidia-smi found — GPU may not be available"
+    echo "⚠  No nvidia-smi found — GPU may not be available"
     if [ -z "$N_GPU_LAYERS" ] || [ "$N_GPU_LAYERS" = "-1" ]; then
         echo "   Setting N_GPU_LAYERS=0 (CPU-only mode)"
         export N_GPU_LAYERS=0
@@ -62,6 +62,13 @@ export CACHE_TYPE_K="${CACHE_TYPE_K:-f16}"
 export CACHE_TYPE_V="${CACHE_TYPE_V:-f16}"
 export MAX_MODELS="${MAX_MODELS:-0}"
 export MEMORY_BUDGET_GB="${MEMORY_BUDGET_GB:-0}"
+
+# ── Ensure Playwright browser is installed (computer-use agent) ──
+if python -c "import playwright" 2>/dev/null; then
+    if ! python -m playwright install chromium 2>/dev/null; then
+        echo "⚠  Could not install Playwright Chromium — computer-use agent unavailable"
+    fi
+fi
 
 # ── Build start-app.sh arguments ──
 ARGS=""
