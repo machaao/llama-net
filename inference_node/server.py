@@ -174,7 +174,6 @@ def _sync_server_pool_state():
         logger.warning("⚠️ Pool empty — server in no-model mode")
 
     if gateway_client:
-        gateway_client.model_name = config.model_name
         if llm:
             gateway_client.metrics_callback = llm.get_metrics
         else:
@@ -359,7 +358,6 @@ async def lifespan(app: FastAPI):
                 gateway_client = GatewayClient(
                     gateway_url=peer_url,
                     node_id=config.node_id,
-                    model_name=config.model_name,
                     port=config.port,
                     metrics_callback=llm.get_metrics,
                     public_ip=config.public_ip,
@@ -2261,7 +2259,6 @@ async def select_model(request: Request):
                 probe_metrics = await _run_native_probe(new_slot.llm)
 
                 if gateway_client:
-                    gateway_client.model_name = config.model_name
                     gateway_client.probe_metrics = probe_metrics
                     gateway_client.metrics_callback = new_slot.llm.get_metrics
                     asyncio.create_task(gateway_client.send_event("node_updated"))
@@ -2271,7 +2268,6 @@ async def select_model(request: Request):
                         gateway_client = GatewayClient(
                             gateway_url=peer_url,
                             node_id=config.node_id,
-                            model_name=config.model_name,
                             port=config.port,
                             metrics_callback=new_slot.llm.get_metrics,
                             public_ip=config.public_ip,

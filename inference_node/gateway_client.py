@@ -28,7 +28,6 @@ class GatewayClient:
         self,
         gateway_url: str,
         node_id: str,
-        model_name: str,
         port: int,
         metrics_callback=None,
         tunnel_url: str = "",
@@ -38,7 +37,6 @@ class GatewayClient:
         self.gateway_url = gateway_url.rstrip("/")
         self.node_id = node_id
         self.node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
-        self.model_name = model_name
         self.port = port
         self.metrics_callback = metrics_callback
         self.tunnel_url = tunnel_url or self._detect_tunnel_url()
@@ -267,7 +265,6 @@ class GatewayClient:
                             f"{self.gateway_url}/api/nodes/heartbeat",
                             json={
                                 "node_hash": self.node_hash,
-                                "model": self.model_name,
                                 "url": self.own_url,
                                 "ip": self.public_ip,
                                 "metrics": metrics,
@@ -351,7 +348,6 @@ class GatewayClient:
             payload = {
                 "event_type": event_type,
                 "node_id": self.node_id,
-                "model": self.model_name,
                 "url": self.own_url,
                 "ip": self.public_ip,
                 "port": self.port,
@@ -459,10 +455,7 @@ class GatewayClient:
             except Exception:
                 pass
 
-        # Fallback: only return model_name if it's a real model
-        if self.model_name and self.model_name != "No Model Loaded":
-            ctx = self._get_active_context_length_value()
-            return [{"name": self.model_name, "ctx_length": ctx, "is_active": True}]
+        # Empty pool — return empty list (no stale model fallback)
         return []
 
     def _get_active_context_length_value(self) -> int:

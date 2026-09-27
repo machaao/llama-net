@@ -64,6 +64,28 @@ quality_gate = None
 node_token_manager = None
 
 
+def _derive_active_model(body: dict):
+    """Derive (model_name, model_slug) from models list is_active flag.
+
+    Single source of truth: the models list in the request body.
+    Falls back to body.get("model") for legacy payloads without a models list.
+    """
+    models = body.get("models", [])
+    for m in models:
+        if isinstance(m, dict) and m.get("is_active"):
+            name = m.get("name", "")
+            if name:
+                return name, model_name_to_slug(name)
+    # Fallback: first model in list
+    if models:
+        first = models[0]
+        name = first.get("name", "unknown") if isinstance(first, dict) else str(first)
+        return name, model_name_to_slug(name)
+    # Legacy fallback: body.get("model") string
+    name = body.get("model", "unknown")
+    return name, model_name_to_slug(name)
+
+
 def _sanitize_node(node: dict) -> dict:
     """Remove sensitive and redundant fields from a node dict for public API responses."""
     sanitized = {k: v for k, v in node.items() if k not in (
@@ -578,6 +600,9 @@ async def node_heartbeat(request: Request):
         except Exception as e:
             logger.error(f"Node update failed for {node_hash}: {e}")
 
+    # ── Derive active model from models list (single source of truth) ──
+    heartbeat_model_name, heartbeat_model_slug = _derive_active_model(body)
+
     # ── Change detection: read PREVIOUS metrics BEFORE upserting new ones ──
     should_broadcast = False
     try:
@@ -603,11 +628,15 @@ async def node_heartbeat(request: Request):
                 should_broadcast = True
                 break
 
-        # Also broadcast if pool size changed
+        # Also broadcast if pool size changed or active model changed
         if not should_broadcast and pool_models:
             prev_nm = supabase_mgr.get_node_models(node_hash, status="active")
             if len(prev_nm) != len(pool_models):
                 should_broadcast = True
+            else:
+                prev_active = {r.get("model_slug", "") for r in prev_nm if r.get("is_active")}
+                if prev_active != {heartbeat_model_slug}:
+                    should_broadcast = True
     except Exception as e:
         logger.debug(f"Could not read previous metrics for {node_hash}: {e}")
 
@@ -721,7 +750,8 @@ async def publish_node(request: Request):
                     "failed_check": "hardware",
                 },
             )
-        model_name = body.get("model", "unknown")
+        # Derive active model from models list (single source of truth)
+        model_name, model_slug_from_list = _derive_active_model(body)
         # Accept pool models list (objects with ctx_length or legacy strings)
         models_list = body.get("models", [{"name": model_name, "ctx_length": ctx_length}])
         # Normalize models_list to object format
@@ -759,10 +789,9 @@ async def publish_node(request: Request):
         ).execute()
         is_new = len(existing.data) == 0 or existing.data[0].get("status") != "active"
 
-        model_slug = model_name_to_slug(model_name)
         result = supabase_mgr.register_node(
             user_id=system_user_id, node_hash=node_hash, model_name=model_name,
-            model_slug=model_slug, url=tunnel_url or body.get("url", ""),
+            model_slug=model_slug_from_list, url=tunnel_url or body.get("url", ""),
             ip=body.get("ip", ""), port=body.get("port", 8000),
             gpu_info=body.get("gpu", ""), metrics=reg_metrics,
             ctx_length=ctx_length, models_list=models_list,
@@ -805,7 +834,7 @@ async def publish_node(request: Request):
                 "tps": probe_metrics.get("tps", 0),
             })
             logger.info(
-                f"🔬 Probe metrics persisted for {node_hash}: "
+                f"🔬 Probe metrics persisted for {node_hash} model={model_name}: "
                 f"ttft={probe_metrics.get('ttft', 0):.3f}s, "
                 f"latency={probe_metrics.get('latency', 0):.3f}s, "
                 f"tps={probe_metrics.get('tps', 0):.1f}"
@@ -898,10 +927,12 @@ async def publish_node_event(request: Request):
                 return JSONResponse(status_code=400, content={"error": f"Invalid URL: {reason}"})
 
         node_hash = hashlib.sha256(node_id.encode()).hexdigest()[:12]
-        model_name = body.get("model", "unknown")
 
         if event_type == "node_joined":
             ctx_length = body.get("ctx_length", 0)
+            # ── Derive active model from models list ──
+            event_model_name, event_model_slug = _derive_active_model(body)
+
             # ── Quality Gate: Hardware Check ──
             hw_passed, hw_reason = quality_gate.evaluate_hardware(
                 platform=body.get("platform", ""),
@@ -931,8 +962,6 @@ async def publish_node_event(request: Request):
             except Exception:
                 pass
 
-            model_slug = model_name_to_slug(model_name)
-
             # Build models_list for register_node (single source of truth)
             event_pool_models_raw = body.get("models", [])
             event_pool_models = []
@@ -943,11 +972,11 @@ async def publish_node_event(request: Request):
                     event_pool_models.append({"name": m, "ctx_length": 0})
 
             if not event_pool_models:
-                event_pool_models = [{"name": model_name, "ctx_length": ctx_length}]
+                event_pool_models = [{"name": event_model_name, "ctx_length": ctx_length}]
 
             supabase_mgr.register_node(
-                user_id=system_user_id, node_hash=node_hash, model_name=model_name,
-                model_slug=model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
+                user_id=system_user_id, node_hash=node_hash, model_name=event_model_name,
+                model_slug=event_model_slug, url=body.get("url", ""), ip=body.get("ip", ""),
                 port=body.get("port", 8000), gpu_info=body.get("gpu", ""),
                 metrics=body.get("metrics", {}),
                 ctx_length=ctx_length,
@@ -955,7 +984,7 @@ async def publish_node_event(request: Request):
             )
 
             logger.info(
-                f"🟢 NODE JOINED: {node_hash} model={model_name} "
+                f"🟢 NODE JOINED: {node_hash} model={event_model_name} "
                 f"url={body.get('url', '')[:60]} "
                 f"ctx={ctx_length} "
                 f"pool={[m.get('name', m) if isinstance(m, dict) else m for m in event_pool_models]} "
@@ -1021,21 +1050,25 @@ async def publish_node_event(request: Request):
             logger.info(f"📡 Node joined via event: {node_hash} model={model_name}")
 
         elif event_type == "node_left":
+            event_model_name, _ = _derive_active_model(body)
             supabase_mgr.deregister_node(node_hash)
 
             logger.info(
-                f"🔴 NODE LEFT: {node_hash} model={model_name} "
+                f"🔴 NODE LEFT: {node_hash} model={event_model_name} "
                 f"reason={body.get('reason', 'node_event')}"
             )
 
             if sse_mgr:
                 await sse_mgr.broadcast("node_left", {
-                    "node_hash": node_hash, "model_name": model_name,
+                    "node_hash": node_hash, "model_name": event_model_name,
                     "reason": body.get("reason", "node_event")
                 })
-            logger.info(f"📡 Node left via event: {node_hash} model={model_name}")
+            logger.info(f"📡 Node left via event: {node_hash} model={event_model_name}")
 
         elif event_type == "node_updated":
+            # ── Derive active model from models list ──
+            event_model_name, event_model_slug = _derive_active_model(body)
+
             # Update URL and IP unconditionally (tunnel rotation)
             event_url = body.get("url", "")
             event_ip = body.get("ip", "")
@@ -1084,7 +1117,7 @@ async def publish_node_event(request: Request):
             event_ctx_length = body.get("ctx_length", 0)
 
             logger.info(
-                f"🔄 NODE UPDATED: {node_hash} model={model_name} "
+                f"🔄 NODE UPDATED: {node_hash} model={event_model_name} "
                 f"pool={[m.get('name', '?') for m in (event_metrics.get('pool_models', []) or body.get('models', []))]} "
                 f"load={event_metrics.get('load', 0):.2f} "
                 f"tps={event_metrics.get('tps', 0):.1f} "
@@ -1144,7 +1177,7 @@ async def publish_node_event(request: Request):
                 if active_model and isinstance(active_model, dict):
                     active_name = active_model.get("name", "")
                     if active_name:
-                        model_name = active_name
+                        event_model_name = active_name
 
                 # Upsert node_models junction table — derive active slug from event payload
                 try:
@@ -1173,7 +1206,7 @@ async def publish_node_event(request: Request):
                 )
 
                 await sse_mgr.broadcast("node_updated", {
-                    "node_hash": node_hash, "model_name": model_name,
+                    "node_hash": node_hash, "model_name": event_model_name,
                     "metrics": event_metrics,
                     "pool_models": event_pool_models,
                     "pool_empty": is_pool_empty,
@@ -1202,7 +1235,7 @@ async def publish_node_event(request: Request):
             )
 
         logger.info(
-            f"✅ Event processed: type={event_type} node={node_hash} model={model_name}"
+            f"✅ Event processed: type={event_type} node={node_hash}"
         )
 
         return {"success": True, "event_type": event_type, "node_hash": node_hash}
@@ -1233,7 +1266,7 @@ async def handle_peer_notification(request: Request):
                     logger.warning(f"Rejected peer notification URL: {reason}")
                     continue
             peer_node_id = peer.get("node_id", "")
-            peer_model = peer.get("model", "unknown")
+            peer_model, peer_model_slug = _derive_active_model(peer)
 
             if not peer_url or not peer_node_id:
                 continue
@@ -1246,11 +1279,10 @@ async def handle_peer_notification(request: Request):
 
             if not existing.data:
                 system_user_id = "00000000-0000-0000-0000-000000000000"
-                model_slug = model_name_to_slug(peer_model)
 
                 supabase_mgr.register_node(
                     user_id=system_user_id, node_hash=peer_hash,
-                    model_name=peer_model, model_slug=model_slug,
+                    model_name=peer_model, model_slug=peer_model_slug,
                     url=peer_url, ip=peer.get("ip", ""),
                     port=peer.get("port", 8000),
                     metrics=peer.get("metrics", {})

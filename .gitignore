@@ -38,9 +38,6 @@ models/
 # Logs
 *.log
 
-# MACH-AI specific
-plans
-
 # Deployment
 start-app.sh.local
 

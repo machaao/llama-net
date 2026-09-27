@@ -411,16 +411,18 @@ class SupabaseManager:
                 pool_models_present = True
                 pool_models = metrics["pool_models"]
                 if pool_models:
-                    # Extract active model slug from node_models junction table
+                    # Derive active slug from pool_models is_active flag (single source of truth)
+                    from gateway.node_registry import model_name_to_slug
                     active_slug = ""
-                    try:
-                        nm_result = self.client.table("node_models").select("model_slug").eq(
-                            "node_hash", node_hash
-                        ).eq("is_active", True).eq("status", "active").execute()
-                        if nm_result.data:
-                            active_slug = nm_result.data[0].get("model_slug", "")
-                    except Exception:
-                        pass
+                    for m in pool_models:
+                        if isinstance(m, dict) and m.get("is_active"):
+                            active_slug = model_name_to_slug(m.get("name", ""))
+                            break
+                    if not active_slug and pool_models:
+                        first = pool_models[0]
+                        active_slug = model_name_to_slug(
+                            first.get("name", "") if isinstance(first, dict) else str(first)
+                        )
                     self.upsert_node_models(node_hash, pool_models, active_slug)
                 else:
                     # Pool drained — evict all active node_models
