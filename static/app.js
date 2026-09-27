@@ -1660,7 +1660,7 @@ class LlamaNetUI {
                 
             } else {
                 // API failed, but we can still refresh the SSE-based display
-                console.warn('⚠️ API refresh failed, updating SSE-based display');
+                console.warn('⚠ API refresh failed, updating SSE-based display');
                 this.updateNetworkDisplayRealTime();
                 this.showToast('warning', 'Partial refresh - API unavailable, SSE data maintained');
             }
@@ -2025,7 +2025,9 @@ class LlamaNetUI {
         const name = modelName.toLowerCase();
         const patterns = [
             'llava', 'qwen2-vl', 'qwen-vl', 'minicpm-v',
-            'phi-3-vision', 'idefics', 'llama-3.2-vision'
+            'phi-3-vision', 'idefics', 'llama-3.2-vision',
+            // Computer-use agents (screenshot → structured tool calls)
+            'fara', 'cua', 'computer-use'
         ];
         return patterns.some(p => name.includes(p));
     }
@@ -3498,7 +3500,7 @@ class LlamaNetUI {
         console.log(`📊 Network validation: SSE nodes: ${sseNodeCount}, API nodes: ${apiNodeCount}`);
 
         if (Math.abs(sseNodeCount - apiNodeCount) > 2) {
-            console.warn(`⚠️ Node count discrepancy: SSE=${sseNodeCount}, API=${apiNodeCount}`);
+            console.warn(`⚠ Node count discrepancy: SSE=${sseNodeCount}, API=${apiNodeCount}`);
         }
     }
     
@@ -3736,7 +3738,7 @@ class LlamaNetUI {
             this.showToast('success', `Chat history cleared (${historyCount} messages removed)`);
             
             // Log the action for debugging
-            console.log(`🗑️ Chat history cleared by user (${historyCount} messages removed)`);
+            console.log(`🗑 Chat history cleared by user (${historyCount} messages removed)`);
             
             // Focus back to input for better UX
             setTimeout(() => {

@@ -153,6 +153,8 @@ class HFModelDownloader:
                             "filename": filename,
                             "size_bytes": size_bytes,
                             "size_gb": round(size_bytes / (1024**3), 2) if size_bytes else 0,
+                            # Flag vision projectors so the UI can auto-download them
+                            "is_mmproj": filename.lower().startswith("mmproj-"),
                         })
             
             logger.debug(f"Found {len(gguf_files)} GGUF files in {repo_id}")

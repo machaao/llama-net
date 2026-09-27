@@ -252,6 +252,7 @@ class ModelPool:
         model_config = InferenceConfig.__new__(InferenceConfig)
         model_config.model_path = model_path
         model_config.model_name = model_name
+        model_config.mmproj_path = getattr(self.config, 'mmproj_path', "")
         model_config.host = self.config.host
         model_config.port = self.config.port
         model_config.node_id = self.config.node_id

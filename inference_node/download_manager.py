@@ -178,16 +178,33 @@ class DownloadManager:
 
                 logger.info(f"Selected GGUF file: {filename}")
 
+                # ── Detect vision projector (mmproj-*.gguf) for multimodal models ──
+                mmproj_filename = None
+                for f in model_info["gguf_files"]:
+                    fname = f["filename"] if isinstance(f, dict) else f
+                    if fname.lower().startswith("mmproj-") and fname.lower().endswith(".gguf"):
+                        mmproj_filename = fname
+                        break
+
                 hf_url = f"{task.repo_id}:{task.quantization}"
                 task.status = DownloadStatus.DOWNLOADING
                 await self._broadcast_progress(task, "downloading")
 
                 file_path = await self._download_with_progress(task, hf_url, filename=filename)
 
+                # Auto-download the vision projector next to the main model
+                mmproj_path = None
+                if file_path and mmproj_filename and not self._cancel_flags.get(task.download_id):
+                    mmproj_path = await self._download_mmproj(
+                        task.repo_id, mmproj_filename, beside=file_path
+                    )
+
                 if file_path and not self._cancel_flags.get(task.download_id):
                     task.status = DownloadStatus.COMPLETED
                     task.file_path = file_path
                     task.completed_at = time.time()
+                    if mmproj_path:
+                        logger.info(f"Vision projector downloaded: {mmproj_path}")
                     await self._broadcast_progress(task, "completed")
                     logger.info(f"Download completed: {task.download_id} -> {file_path}")
                 elif self._cancel_flags.get(task.download_id):
@@ -286,6 +303,38 @@ class DownloadManager:
         except Exception as e:
             logger.error(f"Download error: {e}")
             task.error_message = str(e)
+            return None
+
+    async def _download_mmproj(self, repo_id: str, filename: str, beside: str) -> Optional[str]:
+        """Download a vision projector (mmproj-*.gguf) next to the main model file.
+
+        Projector files are small enough (~500 MB f16) that a simple
+        aiohttp GET without progress events is sufficient. Resolution is
+        relative to the base model so llama.cpp auto-detects the sibling.
+        """
+        import aiohttp
+
+        try:
+            model_path = Path(beside)
+            local_path = model_path.parent / filename
+
+            if local_path.exists():
+                logger.info(f"Vision projector already present: {local_path}")
+                return str(local_path)
+
+            download_url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+            timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(download_url) as response:
+                    response.raise_for_status()
+                    with open(local_path, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(65536):
+                            f.write(chunk)
+
+            logger.info(f"✅ Vision projector downloaded: {local_path}")
+            return str(local_path)
+        except Exception as e:
+            logger.warning(f"Could not download vision projector {filename}: {e}")
             return None
 
     async def _broadcast_progress(self, task: DownloadTask, event_type: str):

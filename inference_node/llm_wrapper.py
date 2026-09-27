@@ -73,7 +73,7 @@ def _detect_and_fix_metal_compatibility():
 
         # Real Intel Mac — Metal shader incompatibility
         os.environ["LLAMA_NO_METAL"] = "1"
-        logger.warning("⚠️  Intel Mac detected — Metal GPU disabled automatically")
+        logger.warning("⚠  Intel Mac detected — Metal GPU disabled automatically")
         logger.warning("   Reason: Metal shader compilation fails on Intel Macs with llama-cpp-python 0.3.x")
         logger.warning("   Model will run on CPU. To override, set LLAMA_NO_METAL=0")
         return
@@ -150,7 +150,7 @@ def detect_chat_format_from_model_name(model_name: str) -> str:
         'chatml-function-calling': ['chatml-function-calling'],
         'vicuna': ['vicuna'],
         'alpaca': ['alpaca', 'wizard'],
-        'chatml': ['chatml', 'openai', 'oss', 'gpt', 'yi-', 'qwen2']  # Keep chatml patterns last as fallback
+        'chatml': ['chatml', 'openai', 'oss', 'gpt', 'yi-', 'qwen2', 'fara', 'cua']  # Keep chatml patterns last as fallback
     }
     
     # Check each format pattern (order matters for specificity)
@@ -208,22 +208,31 @@ class LlamaWrapper:
         
     def _init_llama(self, model_path: str, config) -> None:
         """Private single-model initializer. Called only from __init__."""
-        self.llm = Llama(
-            model_path=model_path,
-            n_ctx=config.n_ctx,
-            n_batch=config.n_batch,
-            n_ubatch=getattr(config, 'n_ubatch', 512),
-            n_gpu_layers=config.n_gpu_layers,
-            n_slots=getattr(config, 'n_parallel', 1),
-            n_threads=getattr(config, 'n_threads', None) or None,
-            n_threads_batch=getattr(config, 'n_threads_batch', None) or None,
-            verbose=config.verbose,
-            reasoning=True,
-            chat_format=self.detected_chat_format,
-            flash_attn=getattr(config, 'flash_attn', False),
-            type_k=_resolve_kv_cache_type(getattr(config, 'cache_type_k', 'f16')),
-            type_v=_resolve_kv_cache_type(getattr(config, 'cache_type_v', 'f16')),
-        )
+        # Resolve vision projector for multimodal models (Fara, LLaVA, etc.)
+        mmproj_path = self._resolve_mmproj_path()
+        if mmproj_path:
+            logger.info(f"Loading vision projector: {mmproj_path}")
+
+        llama_kwargs = {
+            "model_path": model_path,
+            "n_ctx": config.n_ctx,
+            "n_batch": config.n_batch,
+            "n_ubatch": getattr(config, 'n_ubatch', 512),
+            "n_gpu_layers": config.n_gpu_layers,
+            "n_slots": getattr(config, 'n_parallel', 1),
+            "n_threads": getattr(config, 'n_threads', None) or None,
+            "n_threads_batch": getattr(config, 'n_threads_batch', None) or None,
+            "verbose": config.verbose,
+            "reasoning": True,
+            "chat_format": self.detected_chat_format,
+            "flash_attn": getattr(config, 'flash_attn', False),
+            "type_k": _resolve_kv_cache_type(getattr(config, 'cache_type_k', 'f16')),
+            "type_v": _resolve_kv_cache_type(getattr(config, 'cache_type_v', 'f16')),
+        }
+        if mmproj_path:
+            llama_kwargs["mmproj"] = mmproj_path
+
+        self.llm = Llama(**llama_kwargs)
 
     def _detect_chat_template(self):
         """Detect and log the chat template being used"""
@@ -299,8 +308,44 @@ class LlamaWrapper:
         vision_patterns = [
             "llava", "qwen2-vl", "qwen-vl", "minicpm-v",
             "phi-3-vision", "idefics", "llama-3.2-vision",
+            # Computer-use agents (screenshot → structured tool calls)
+            "fara", "cua", "computer-use",
         ]
         return any(p in name for p in vision_patterns)
+
+    def _resolve_mmproj_path(self) -> Optional[str]:
+        """Resolve the vision projector (mmproj-*.gguf) path for multimodal models.
+
+        Priority:
+          1. Explicitly configured path (env/CLI/config).
+          2. A sibling ``mmproj-*.gguf`` next to the model file (auto-detected).
+        Returns None when no projector can be found.
+        """
+        # 1. Explicitly configured
+        explicit = getattr(self.config, 'mmproj_path', None) or ""
+        if explicit and os.path.exists(explicit):
+            return explicit
+
+        # 2. Auto-detect sibling mmproj-*.gguf next to the model file
+        if self.supports_vision and self.config.model_path:
+            model_dir = os.path.dirname(os.path.abspath(self.config.model_path))
+            if os.path.isdir(model_dir):
+                try:
+                    candidates = sorted(
+                        f for f in os.listdir(model_dir)
+                        if f.lower().startswith("mmproj-") and f.lower().endswith(".gguf")
+                    )
+                except OSError:
+                    candidates = []
+                if candidates:
+                    resolved = os.path.join(model_dir, candidates[0])
+                    logger.info(f"✅ Auto-detected vision projector: {resolved}")
+                    return resolved
+                logger.warning(
+                    f"⚠  Vision model '{self._model_name}' detected but no mmproj-*.gguf "
+                    f"found next to the model file — image input will fail"
+                )
+        return None
 
     def _extract_images(self, messages: List[Dict[str, Any]]) -> list:
         """Extract base64 images from multimodal messages and decode to bytes."""
@@ -530,6 +575,32 @@ class LlamaWrapper:
                 logger.error(f"Error in generate_chat_safe argument preparation: {e}")
                 raise
             
+    async def generate_chat_multimodal(self, messages, max_tokens=512, temperature=0.7,
+                                   top_p=0.9, top_k=40, stop=None, repeat_penalty=1.1,
+                                   reasoning=True) -> Dict[str, Any]:
+        """Thread-safe chat generation that preserves multimodal content arrays.
+
+        Unlike generate_chat_safe() (which stringifies content), this passes
+        the raw ``content: [{type: text|image_url, ...}]`` structure straight
+        through to llama-cpp-python. Required for vision/computer-use models
+        (Fara, LLaVA, etc.) that consume screenshot images.
+        """
+        async with self._processing_lock:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: self.generate_chat(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    stop=stop,
+                    repeat_penalty=repeat_penalty,
+                    reasoning=reasoning,
+                )
+            )
+
     async def generate_safe(self, prompt, max_tokens=100, temperature=0.7, top_p=0.9, 
                            top_k=40, stop=None, repeat_penalty=1.1) -> Dict[str, Any]:
         """Thread-safe version of generate"""

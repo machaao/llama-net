@@ -48,6 +48,8 @@ class InferenceConfig:
             parser = argparse.ArgumentParser(description='LlamaNet Inference Node')
             parser.add_argument('--model-path', required=False, 
                               help='Path to the GGUF model file')
+            parser.add_argument('--mmproj-path', required=False,
+                              help='Path to the vision projector (mmproj-*.gguf) for multimodal models')
             parser.add_argument('--host', default='0.0.0.0',
                               help='Host to bind the inference service')
             parser.add_argument('--port', type=int, default=8000,
@@ -110,6 +112,7 @@ class InferenceConfig:
             
             # Use command line args or fall back to environment variables
             self.model_path = args.model_path or load_env_var("MODEL_PATH", "")
+            self.mmproj_path = args.mmproj_path or load_env_var("MMPROJ_PATH", "")
             self.host = args.host or load_env_var("HOST", "0.0.0.0")
             
             # KV cache and context configuration
@@ -155,6 +158,7 @@ class InferenceConfig:
         else:
             # Direct initialization (for programmatic use)
             self.model_path = model_path
+            self.mmproj_path = load_env_var("MMPROJ_PATH", "")
             self.host = load_env_var("HOST", "0.0.0.0")
             
             # Handle HTTP port using consolidated utilities
