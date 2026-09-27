@@ -179,6 +179,10 @@ class DownloadManager:
                 logger.info(f"Selected GGUF file: {filename}")
 
                 # ── Detect vision projector (mmproj-*.gguf) for multimodal models ──
+                #    Multimodal GGUF models need a `mmproj-*.gguf` projector loaded
+                #    alongside the weights. It may be hosted in the conversion repo
+                #    (e.g. bartowski/*-GGUF), in the original model repo, or the repo
+                #    may reference it via a sibling/model file we can derive.
                 mmproj_filename = None
                 for f in model_info["gguf_files"]:
                     fname = f["filename"] if isinstance(f, dict) else f
@@ -192,12 +196,14 @@ class DownloadManager:
 
                 file_path = await self._download_with_progress(task, hf_url, filename=filename)
 
-                # Auto-download the vision projector next to the main model
+                # Auto-download the vision projector next to the main model.
+                # Only attempt when the model actually needs vision (Fara/LLaVA/etc.)
                 mmproj_path = None
-                if file_path and mmproj_filename and not self._cancel_flags.get(task.download_id):
-                    mmproj_path = await self._download_mmproj(
-                        task.repo_id, mmproj_filename, beside=file_path
-                    )
+                if file_path and not self._cancel_flags.get(task.download_id):
+                    if self._model_requires_vision(task.repo_id):
+                        mmproj_path = await self._download_mmproj(
+                            task.repo_id, mmproj_filename, beside=file_path
+                        )
 
                 if file_path and not self._cancel_flags.get(task.download_id):
                     task.status = DownloadStatus.COMPLETED
@@ -305,37 +311,141 @@ class DownloadManager:
             task.error_message = str(e)
             return None
 
-    async def _download_mmproj(self, repo_id: str, filename: str, beside: str) -> Optional[str]:
+    def _model_requires_vision(self, repo_id: str) -> bool:
+        """Heuristic: does this model repo require a vision (mmproj) projector?
+
+        Fara-class computer-use agents and vision-language models need an
+        `mmproj-*.gguf` projector. We detect by repo/model name to avoid
+        downloading a projector for plain text LLMs (which would be ~500 MB
+        of wasted bandwidth on every download).
+        """
+        name = (repo_id or "").lower()
+        vision_hints = (
+            "fara", "cua", "computer-use",
+            "llava", "bakllava", "moondream", "cogvlm",
+            "qwen-vl", "qwen2-vl", "qwen3-vl", "minicpm-v",
+            "idefics", "pixtral", "llama-3.2-vision", "phi-3-vision",
+            "internvl", "paligemma", "gemma-3-vision",
+        )
+        return any(hint in name for hint in vision_hints)
+
+    @staticmethod
+    def _derive_upstream_repo(repo_id: str) -> List[str]:
+        """Derive candidate upstream (non-GGUF) repo IDs for projector discovery.
+
+        Community GGUF conversions typically mirror the original model repo with
+        a `-GGUF` suffix (e.g. `bartowski/Fara1.5-9B-GGUF` → `microsoft/Fara1.5-9B`).
+        The upstream repo is where the `mmproj-*.gguf` projector usually lives
+        when the conversion repo only hosts quantized weights.
+
+        Returns a list of candidate repo_ids, ordered by likelihood.
+        """
+        candidates = []
+        parts = repo_id.split("/")
+        if len(parts) == 2:
+            namespace, name = parts
+            # Strip a trailing "-GGUF" / "-gguf" from the model name
+            stripped = re.sub(r"-gguf$", "", name, flags=re.IGNORECASE)
+            if stripped and stripped != name:
+                candidates.append(f"{namespace}/{stripped}")
+            # Also preserve the original model name (some repos name differently)
+            if stripped not in (name,):
+                candidates.append(repo_id)
+        return candidates
+
+    def _resolve_mmproj_sources(self, repo_id: str, mmproj_filename: Optional[str]) -> List[Tuple[str, str]]:
+        """Build an ordered list of (repo_id, filename) candidates to download.
+
+        1. If mmproj_filename is already known (present in the conversion repo's
+           gguf_files), try that conversion repo first.
+        2. Otherwise, (and as fallback), discover the projector filename from
+           upstream model repos by querying the HF API for `mmproj-*.gguf`.
+        """
+        sources: List[Tuple[str, str]] = []
+
+        # 1. Known filename in the conversion repo
+        if mmproj_filename:
+            sources.append((repo_id, mmproj_filename))
+
+        # 2. Discover from derived upstream repos
+        for upstream in self._derive_upstream_repo(repo_id):
+            if upstream == repo_id:
+                continue
+            try:
+                info = self.downloader.get_model_info(upstream)
+                for f in info.get("gguf_files", []):
+                    fname = f["filename"] if isinstance(f, dict) else f
+                    if fname.lower().startswith("mmproj-") and fname.lower().endswith(".gguf"):
+                        sources.append((upstream, fname))
+                        break
+            except Exception as e:
+                logger.debug(f"No mmproj in upstream repo {upstream}: {e}")
+
+        return sources
+
+    async def _download_mmproj(
+        self,
+        repo_id: str,
+        filename: Optional[str],
+        beside: str,
+    ) -> Optional[str]:
         """Download a vision projector (mmproj-*.gguf) next to the main model file.
 
-        Projector files are small enough (~500 MB f16) that a simple
-        aiohttp GET without progress events is sufficient. Resolution is
-        relative to the base model so llama.cpp auto-detects the sibling.
+        Resolution order:
+          1. The conversion repo (if it hosts an `mmproj-*.gguf`).
+          2. Derived upstream repos (e.g. `microsoft/Fara1.5-9B`) that host
+             the projector when the GGUF conversion repo only has weights.
+
+        The projector is written beside the model file so llama.cpp's sibling
+        auto-detection (`_resolve_mmproj_path`) finds it.
         """
         import aiohttp
 
-        try:
-            model_path = Path(beside)
-            local_path = model_path.parent / filename
+        model_path = Path(beside)
+        model_dir = model_path.parent
 
-            if local_path.exists():
-                logger.info(f"Vision projector already present: {local_path}")
-                return str(local_path)
+        # Already resolved (either we know the filename, or a sibling exists)
+        sources = self._resolve_mmproj_sources(repo_id, filename)
 
-            download_url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
-            timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(download_url) as response:
-                    response.raise_for_status()
-                    with open(local_path, 'wb') as f:
-                        async for chunk in response.content.iter_chunked(65536):
-                            f.write(chunk)
+        # Fallback: if a sibling mmproj already exists, we're done.
+        if model_dir.is_dir():
+            existing = sorted(
+                p for p in model_dir.iterdir()
+                if p.name.lower().startswith("mmproj-") and p.name.lower().endswith(".gguf")
+            )
+            if existing:
+                logger.info(f"Vision projector already present: {existing[0]}")
+                return str(existing[0])
 
-            logger.info(f"✅ Vision projector downloaded: {local_path}")
-            return str(local_path)
-        except Exception as e:
-            logger.warning(f"Could not download vision projector {filename}: {e}")
+        if not sources:
+            logger.warning(
+                f"No mmproj projector found for '{repo_id}' (no upstream hosts one alphabetically matching) — "
+                "vision input will be unavailable for this model."
+            )
             return None
+
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
+
+        for src_repo, src_filename in sources:
+            local_path = model_dir / src_filename
+            download_url = f"https://huggingface.co/{src_repo}/resolve/main/{src_filename}"
+            logger.info(f"Downloading vision projector from {src_repo}: {src_filename}")
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(download_url) as response:
+                        response.raise_for_status()
+                        with open(local_path, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(65536):
+                                f.write(chunk)
+                logger.info(f"✅ Vision projector downloaded: {local_path}")
+                return str(local_path)
+            except Exception as e:
+                logger.warning(f"Could not download {src_filename} from {src_repo}: {e}")
+                # Try the next candidate repo
+                continue
+
+        logger.warning(f"❌ Failed to download vision projector for '{repo_id}' from all sources")
+        return None
 
     async def _broadcast_progress(self, task: DownloadTask, event_type: str):
         """Broadcast progress to all registered SSE queues"""
