@@ -37,6 +37,45 @@ _FENCED_JSON_RE = re.compile(
 )
 # Bare JSON object anywhere in the text (last resort).
 _BARE_JSON_RE = re.compile(r"\{[^{}]*\"(?:name|action)\"[^{}]*\}", re.DOTALL | re.IGNORECASE)
+# Unclosed <tool_call> block — the loop passes "</tool_call>" as a stop
+# sequence, and llama.cpp consumes it, so the closing tag never appears in
+# the raw output even when the model emitted a complete block.
+_UNCLOSED_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(.*)", re.DOTALL | re.IGNORECASE
+)
+
+
+def _extract_balanced_json(text: str) -> Optional[str]:
+    """Extract the first balanced ``{...}`` object from text.
+
+    String-aware brace-depth scan — tolerant of trailing prose or special
+    tokens that quantized models append after the JSON body.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 # The JSON body may use several known field layouts.
 _ACTION_KEYS = ("action", "action_name", "name", "tool")
@@ -87,6 +126,16 @@ class ToolCallParser:
         m = _TOOL_CALL_RE.search(raw)
         if m:
             return m.group(1).strip()
+
+        # Unclosed <tool_call> block: the loop stops on "</tool_call>", llama.cpp
+        # consumes the stop sequence, so the closing tag is missing even when
+        # the model emitted a complete block. Fall back to a balanced-JSON
+        # scan of everything after the opening tag.
+        m = _UNCLOSED_TOOL_CALL_RE.search(raw)
+        if m:
+            balanced = _extract_balanced_json(m.group(1))
+            if balanced:
+                return balanced.strip()
 
         m = _FENCED_JSON_RE.search(raw)
         if m:
@@ -151,6 +200,20 @@ class ToolCallParser:
         # Sometimes the action name lives at the top level.
         if action_name is None and isinstance(data.get("name"), str):
             action_name = data.get("name")
+
+        # Alternate serialization: {"visit_url": {"url": ...}} — a single-key
+        # object mapping action_name → arguments (common Qwen/Fara quantized
+        # format). Resolve it before failing on a missing action name.
+        if action_name is None and len(data) == 1:
+            only_key = next(iter(data))
+            value = data[only_key]
+            if only_key not in _ACTION_KEYS and isinstance(value, dict):
+                logger.debug(
+                    f"Resolved alternate tool-call serialization: "
+                    f"{{'{only_key}': {{...}}}} → action '{only_key}'"
+                )
+                action_name = only_key
+                arguments = value
 
         if not action_name:
             raise ToolCallParseError("Tool call missing an action name")
