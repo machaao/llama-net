@@ -50,13 +50,17 @@ _UNCLOSED_TOOL_CALL_RE = re.compile(
 #      the name value with no "arguments" key.
 #   2. <name="computer_use", ...}                 — "<" instead of "{" and
 #      name= instead of "name":.
+#   3. <name": "computer_use", ...}               — same as 2 but with the
+#      quote-colon form of the key separator.
 _JSON_REPAIRS: tuple = (
     (
         re.compile(r'\{\s*"name"\s*:\s*("[^"]+")\s*,\s*\{'),
         r'{"name": \1, "arguments": {',
     ),
     (
-        re.compile(r'<\s*name\s*=\s*("[^"]+")'),
+        # Covers both <name="computer_use" and <name": "computer_use" —
+        # anything between "name" and the first quoted value is separator junk.
+        re.compile(r'<\s*name[^"]*("[^"]+")'),
         r'{"name": \1',
     ),
 )
