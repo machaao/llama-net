@@ -61,13 +61,27 @@ class GatewayClient:
         # Self-reported native probe metrics (set after model loads)
         self.probe_metrics: Dict[str, Any] = {}
 
+    @property
+    def model_name(self) -> str:
+        """Active model name, resolved from the pool (single source of truth).
+
+        Falls back to "unknown" when the pool has no active model. This keeps
+        ``self.model_name`` valid without storing a stale duplicate that drifts
+        from the pool's actual active model after hot-swaps/evictions.
+        """
+        if self.model_pool:
+            active = self.model_pool.active_model
+            if active:
+                return active
+        return "unknown"
+
     # ─── lifecycle ───────────────────────────────────────────────
 
     async def register(self) -> bool:
         """Register this node with the gateway. Requires a tunnel URL."""
         self.running = True
         if not self.own_url:
-            logger.warning("⚠️ No tunnel URL detected — node will NOT register with gateway.")
+            logger.warning("⚠ No tunnel URL detected — node will NOT register with gateway.")
             logger.warning("   Start with --tunnel flag: ./start-app.sh run <model> --tunnel")
             return False
         metrics = self._get_metrics()
@@ -134,7 +148,7 @@ class GatewayClient:
                                 else:
                                     # Probe failure is transient — log but keep retrying
                                     logger.warning(
-                                        f"⚠️ Node rejected by probe gate (transient): {reason}"
+                                        f"⚠ Node rejected by probe gate (transient): {reason}"
                                     )
                                     logger.warning(
                                         f"   Will retry registration on next heartbeat."
@@ -142,7 +156,7 @@ class GatewayClient:
                             except Exception:
                                 # Cannot parse response — treat as transient
                                 logger.warning(
-                                    f"⚠️ Quality gate rejection (unparseable) — will retry"
+                                    f"⚠ Quality gate rejection (unparseable) — will retry"
                                 )
                         return False
         except Exception as e:
@@ -182,7 +196,7 @@ class GatewayClient:
             if attempt < 2:
                 await asyncio.sleep(0.5)
 
-        logger.warning("⚠️ Failed to unregister from gateway after 3 attempts")
+        logger.warning("⚠ Failed to unregister from gateway after 3 attempts")
         self.registered = False
 
     # ─── background loops ───────────────────────────────────────
@@ -218,7 +232,7 @@ class GatewayClient:
                         await self.send_event("node_joined")
                         logger.info("✅ Re-registered with gateway after wake")
                     else:
-                        logger.warning("⚠️ Failed to re-register after wake — will retry")
+                        logger.warning("⚠ Failed to re-register after wake — will retry")
 
                     last_heartbeat_time = now
                     await asyncio.sleep(5)  # Brief pause before normal heartbeat
