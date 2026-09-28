@@ -110,7 +110,7 @@ class AgentLoop:
 
         self.browser = BrowserSession(headless=headless)
         self.safety = SafetyController(allowlist=allowlist, blocklist=blocklist)
-        self.system_prompt = build_system_prompt(allowlist or [])
+        self.system_prompt = build_system_prompt(allowlist or [], goal=goal)
 
         self.state = AgentState.IDLE
         self.start_url = start_url
@@ -199,7 +199,6 @@ class AgentLoop:
         messages = self._build_messages(screenshot)
         result = await self.llm.generate_chat_multimodal(
             messages=messages,
-            max_tokens=2048,
             temperature=0.3,
             top_p=0.9,
             stop=["</tool_call>", "<|im_end|>"],
@@ -235,8 +234,11 @@ class AgentLoop:
                     "content": (
                         "Your last response did not contain a valid tool call. "
                         "Respond with EXACTLY one action in a single "
-                        "<tool_call>{\"name\": \"computer_use\", \"arguments\": {...}}</tool_call> "
-                        "block. Do not add extra prose."
+                        "<tool_call>{\"name\": \"computer_use\", \"arguments\": "
+                        "{\"action\": \"<action_name>\", ...}}</tool_call> "
+                        "block, where arguments.action is one of the action "
+                        "names from the schema (e.g. {\"action\": \"visit_url\", "
+                        "\"url\": \"https://...\"}). Do not add extra prose."
                     ),
                 })
                 await self._emit("parse_retry", attempt=self._parse_retries, error=str(e))

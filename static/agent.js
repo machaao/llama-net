@@ -128,12 +128,14 @@ class AgentConsole {
                 break;
             case 'session_started':
                 this._setStatus('Running', 'primary');
-                this._appendLog('system', 'Browser session started', '');
+                this._appendLog('system', 'Browser session started',
+                    data.goal ? 'Goal: ' + data.goal : '');
                 break;
             case 'step_screenshot':
                 if (data.screenshot) {
                     document.getElementById('agent-screenshot').src = data.screenshot;
                 }
+                this._appendLog('system', `Step ${data.index}`, '');
                 break;
             case 'thinking':
                 this._appendLog('thinking', 'Thinking…', data.content || '');

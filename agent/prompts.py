@@ -25,13 +25,17 @@ CRITICAL_POINT_INSTRUCTIONS = """You MUST stop and use the ask_user_question too
 """
 
 
-def build_system_prompt(allowlist: list = None) -> str:
-    """Assemble the full system prompt including action schema and allow-list.
+def build_system_prompt(allowlist: list = None, goal: str = "") -> str:
+    """Assemble the full system prompt including goal, action schema and allow-list.
 
     Args:
         allowlist: Optional list of domains the browser navigation is
             restricted to. When non-empty, it is embedded in the prompt so the
             model is aware navigation outside these domains is impossible.
+        goal: The end-to-end task description. Embedded in the system prompt
+            so the model sees the task on every step — a 9B model can drift
+            to its training examples when the goal appears only in the final
+            user turn.
     """
     prompt = FARA_SYSTEM_PROMPT + "\n" + CRITICAL_POINT_INSTRUCTIONS
 
@@ -40,6 +44,11 @@ def build_system_prompt(allowlist: list = None) -> str:
         prompt += (
             f"\n\nBrowser navigation is restricted to these domains only: {domains}. "
             f"Do not attempt to visit any other domain."
+        )
+
+    if goal:
+        prompt += (
+            f"\n\nCurrent task goal (this is the ONLY task you are working on): {goal}"
         )
 
     prompt += "\n\n" + ACTION_SCHEMA

@@ -41,6 +41,35 @@ _BARE_JSON_RE = re.compile(r"\{[^{}]*\"(?:name|action)\"[^{}]*\}", re.DOTALL | r
 # The JSON body may use several known field layouts.
 _ACTION_KEYS = ("action", "action_name", "name", "tool")
 
+# Argument-shape → canonical action mapping. Used when the model emits the
+# ``computer_use`` *wrapper* name without an inner ``action`` key — quantized
+# models frequently do this. Order matters: most specific first.
+_INFER_FROM_ARGS: tuple = (
+    ("url", "visit_url"),
+    ("query", "web_search"),
+    ("question", "ask_user_question"),
+    ("fact", "pause_and_memorize_fact"),
+    ("summary", "terminate"),
+    ("text", "type"),
+    ("delta", "scroll"),
+)
+
+
+def _infer_action(arguments: Any) -> Optional[str]:
+    """Infer the canonical action name from a bare argument dict.
+
+    Returns None when the arguments are empty or ambiguous (caller fails
+    closed in that case).
+    """
+    if not isinstance(arguments, dict):
+        return None
+    for key, action in _INFER_FROM_ARGS:
+        if key in arguments:
+            return action
+    if "x" in arguments and "y" in arguments:
+        return "left_click"
+    return None
+
 
 class ToolCallParser:
     """Extract chain-of-thought and a validated :class:`AgentAction` from text."""
@@ -127,6 +156,18 @@ class ToolCallParser:
             raise ToolCallParseError("Tool call missing an action name")
 
         action_name = action_name.strip().lower()
+
+        # ``computer_use`` is the tool *wrapper* name, not an action. Quantized
+        # models often omit the inner ``action`` key — infer the real action
+        # from the argument shape instead of failing on the wrapper name.
+        if action_name in ("computer_use", "computer-use", "computer use"):
+            inferred = _infer_action(arguments)
+            if inferred:
+                logger.debug(
+                    f"Inferred action '{inferred}' from arguments "
+                    f"(wrapper name 'computer_use')"
+                )
+                action_name = inferred
 
         # Strip arguments used for dispatch — keep the rest as action args.
         action_args = {k: v for k, v in arguments.items() if k not in _ACTION_KEYS}
