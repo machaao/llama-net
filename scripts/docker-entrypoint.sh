@@ -63,13 +63,6 @@ export CACHE_TYPE_V="${CACHE_TYPE_V:-f16}"
 export MAX_MODELS="${MAX_MODELS:-0}"
 export MEMORY_BUDGET_GB="${MEMORY_BUDGET_GB:-0}"
 
-# ── Ensure Playwright browser is installed (computer-use agent) ──
-if python -c "import playwright" 2>/dev/null; then
-    if ! python -m playwright install chromium 2>/dev/null; then
-        echo "⚠  Could not install Playwright Chromium — computer-use agent unavailable"
-    fi
-fi
-
 # ── Build start-app.sh arguments ──
 ARGS=""
 

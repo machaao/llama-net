@@ -80,7 +80,7 @@ if [ "$LLAMANET_MODE" = "landing" ]; then
     echo "🌐 Starting llamanet.app gateway..."
 
     if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SECRET_KEY" ]; then
-        echo "⚠️  SUPABASE_URL or SUPABASE_SECRET_KEY not detected in shell — Python will validate at startup"
+        echo "⚠  SUPABASE_URL or SUPABASE_SECRET_KEY not detected in shell — Python will validate at startup"
     fi
 
     if ! $PYTHON_CMD -c "import supabase" 2>/dev/null; then
@@ -155,7 +155,7 @@ if [ "$ENABLE_TUNNEL" = "true" ] && ! command -v cloudflared >/dev/null 2>&1; th
             if brew install cloudflared; then
                 INSTALL_OK=true
             else
-                echo "   ⚠️  Homebrew install failed, trying standalone binary..."
+                echo "   ⚠  Homebrew install failed, trying standalone binary..."
             fi
         fi
 
@@ -201,7 +201,7 @@ if [ "$ENABLE_TUNNEL" = "true" ] && ! command -v cloudflared >/dev/null 2>&1; th
     fi
 
     if [ "$INSTALL_OK" = "false" ]; then
-        echo "⚠️  Continuing without tunnel — install cloudflared and re-run with --tunnel"
+        echo "⚠  Continuing without tunnel — install cloudflared and re-run with --tunnel"
         ENABLE_TUNNEL=false
     fi
 fi
@@ -211,7 +211,7 @@ if [ "$ENABLE_TUNNEL" = "true" ]; then
     if command -v cloudflared >/dev/null 2>&1; then
         echo "✅ cloudflared: $(cloudflared --version 2>&1 | head -1)"
     else
-        echo "⚠️  cloudflared not found — continuing without tunnel"
+        echo "⚠  cloudflared not found — continuing without tunnel"
         ENABLE_TUNNEL=false
     fi
 fi
@@ -251,7 +251,7 @@ if [ "$(uname)" = "Darwin" ]; then
 
     if [ "$IS_INTEL_MAC" = "true" ] && [ -z "$LLAMA_NO_METAL" ]; then
         export LLAMA_NO_METAL=1
-        echo "⚠️  Intel Mac detected — setting LLAMA_NO_METAL=1 (CPU-only mode)"
+        echo "⚠  Intel Mac detected — setting LLAMA_NO_METAL=1 (CPU-only mode)"
         echo "   Metal shaders in llama-cpp-python 0.3.x are incompatible with Intel Macs"
         echo "   Set LLAMA_NO_METAL=0 to override (may fail)"
     fi
@@ -302,6 +302,23 @@ fi
 if ! $PYTHON_CMD -c "import inference_node" 2>/dev/null; then
     echo "📦 Installing LlamaNet package..."
     $PYTHON_CMD -m pip install -e .
+fi
+
+# ── Computer-Use Agent: ensure Playwright + Chromium ──
+# Self-healing — reinstalls the browser only if missing (never blocks startup
+# on failure; the agent console surfaces a clear error if unavailable).
+if ! $PYTHON_CMD -c "import playwright" 2>/dev/null; then
+    echo "📦 Installing Playwright (computer-use agent support)..."
+    $PYTHON_CMD -m pip install playwright >/dev/null 2>&1 || \
+        echo "⚠  Playwright install failed — computer-use agent unavailable"
+fi
+if $PYTHON_CMD -c "import playwright" 2>/dev/null; then
+    if ! $PYTHON_CMD -m playwright install chromium >/dev/null 2>&1; then
+        echo "⚠  Chromium browser download failed — computer-use agent unavailable"
+        echo "    Retry manually: $PYTHON_CMD -m playwright install chromium"
+    else
+        echo "✅ Computer-use agent ready (Playwright + Chromium)"
+    fi
 fi
 
 start_cloudflare_tunnel() {
@@ -380,7 +397,7 @@ start_cloudflare_tunnel() {
         if [ "$connected" = "true" ] && [ -n "$EXISTING_DOMAIN" ]; then
             TUNNEL_URL="https://${EXISTING_DOMAIN}"
         elif [ "$connected" = "false" ]; then
-            echo "⚠️  Tunnel may not have connected after ${attempts}s."
+            echo "⚠  Tunnel may not have connected after ${attempts}s."
             echo "   Log output:"
             tail -20 "$tunnel_log"
             echo ""
@@ -420,7 +437,7 @@ start_cloudflare_tunnel() {
         echo "╚══════════════════════════════════════════════════════════════╝"
         echo ""
     else
-        echo "⚠️  Tunnel starting... URL will appear in logs: $tunnel_log"
+        echo "⚠  Tunnel starting... URL will appear in logs: $tunnel_log"
     fi
 }
 
@@ -460,21 +477,21 @@ prevent_sleep() {
                 SLEEP_PID=$!
                 echo "✅ macOS sleep prevention active (caffeinate PID: $SLEEP_PID)"
             else
-                echo "⚠️  caffeinate not found — system may sleep during idle periods"
+                echo "⚠  caffeinate not found — system may sleep during idle periods"
             fi
             ;;
         Linux)
             if [ -w /sys/power/wake_lock ] 2>/dev/null; then
                 echo "llamanet-node" > /sys/power/wake_lock 2>/dev/null && \
                     echo "✅ Linux wake lock acquired" || \
-                    echo "⚠️  Could not acquire wake lock (try running as root)"
+                    echo "⚠  Could not acquire wake lock (try running as root)"
             else
-                echo "⚠️  Cannot write to /sys/power/wake_lock"
+                echo "⚠  Cannot write to /sys/power/wake_lock"
                 echo "   To prevent sleep manually: sudo systemctl mask sleep.target suspend.target"
             fi
             ;;
         *)
-            echo "⚠️  Automatic sleep prevention not supported on $OS"
+            echo "⚠  Automatic sleep prevention not supported on $OS"
             echo "   Please disable sleep manually in your power settings"
             ;;
     esac
@@ -519,7 +536,7 @@ cleanup() {
 
         # SIGINT if still alive
         if kill -0 $SERVER_PID 2>/dev/null; then
-            echo "⚠️ Sending SIGINT for faster shutdown..."
+            echo "⚠ Sending SIGINT for faster shutdown..."
             kill -INT $SERVER_PID 2>/dev/null || true
             for i in $(seq 1 3); do
                 if ! kill -0 $SERVER_PID 2>/dev/null; then
@@ -532,7 +549,7 @@ cleanup() {
 
         # Force kill if still alive
         if kill -0 $SERVER_PID 2>/dev/null; then
-            echo "⚠️ Forcing server shutdown..."
+            echo "⚠ Forcing server shutdown..."
             kill -KILL $SERVER_PID 2>/dev/null || true
         fi
     fi
@@ -557,7 +574,7 @@ cleanup() {
 
         # Force kill process group if still alive
         if kill -0 $TUNNEL_PID 2>/dev/null; then
-            echo "⚠️ Forcing tunnel shutdown..."
+            echo "⚠ Forcing tunnel shutdown..."
             kill -KILL -- -$TUNNEL_PID 2>/dev/null || \
                 kill -KILL $TUNNEL_PID 2>/dev/null || true
         fi
