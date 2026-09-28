@@ -30,6 +30,13 @@ _TOOL_CALL_RE = re.compile(
 _THINK_RE = re.compile(
     r"<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>", re.DOTALL | re.IGNORECASE
 )
+# Markdown-fenced JSON block, e.g. ```json { ... } ``` — quantized models
+# sometimes strip the XML wrapper and emit a fenced JSON object instead.
+_FENCED_JSON_RE = re.compile(
+    r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE
+)
+# Bare JSON object anywhere in the text (last resort).
+_BARE_JSON_RE = re.compile(r"\{[^{}]*\"(?:name|action)\"[^{}]*\}", re.DOTALL | re.IGNORECASE)
 
 # The JSON body may use several known field layouts.
 _ACTION_KEYS = ("action", "action_name", "name", "tool")
@@ -40,22 +47,43 @@ class ToolCallParser:
 
     @staticmethod
     def extract_tool_call_json(text: str) -> Optional[str]:
-        """Return the inner JSON string of the first ``<tool_call>`` block."""
-        m = _TOOL_CALL_RE.search(text or "")
-        if not m:
-            return None
-        return m.group(1).strip()
+        """Return the inner JSON string of the tool-call, trying multiple formats.
+
+        Order of precedence (most explicit → most lenient):
+          1. ``<tool_call>...</tool_call>`` XML block (canonical Fara format)
+          2. Markdown-fenced JSON: ```` ```json { ... } ``` ````
+          3. Bare JSON object containing an ``action``/``name`` key
+        """
+        raw = text or ""
+        m = _TOOL_CALL_RE.search(raw)
+        if m:
+            return m.group(1).strip()
+
+        m = _FENCED_JSON_RE.search(raw)
+        if m:
+            return m.group(1).strip()
+
+        m = _BARE_JSON_RE.search(raw)
+        if m:
+            return m.group(0).strip()
+
+        return None
 
     @staticmethod
     def extract_reasoning(text: str) -> str:
         """Extract the chain-of-thought block (if any) for UI display."""
-        m = _THINK_RE.search(text or "")
+        raw = text or ""
+        m = _THINK_RE.search(raw)
         if m:
             return m.group(1).strip()
-        # Fallback: everything before the tool_call block is the CoT.
-        tool_match = _TOOL_CALL_RE.search(text or "")
+        # Fallback: everything before the tool_call/JSON block is the CoT.
+        tool_match = _TOOL_CALL_RE.search(raw)
+        if not tool_match:
+            tool_match = _FENCED_JSON_RE.search(raw)
+        if not tool_match:
+            tool_match = _BARE_JSON_RE.search(raw)
         if tool_match:
-            preceding = (text or "")[: tool_match.start()]
+            preceding = raw[: tool_match.start()]
             return preceding.strip()
         return ""
 

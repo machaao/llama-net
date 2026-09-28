@@ -121,6 +121,8 @@ class AgentLoop:
         self.steps_completed = 0
         self.final_summary = ""
         self._last_error = ""
+        self._parse_retries = 0          # number of consecutive parse failures
+        self.MAX_PARSE_RETRIES = 2       # corrective nudge attempts before failing
 
         self._task: Optional[asyncio.Task] = None
 
@@ -211,20 +213,51 @@ class AgentLoop:
         try:
             cot, action = ToolCallParser.parse(raw_text)
         except ToolCallParseError as e:
+            self._parse_retries += 1
             message = f"Failed to parse tool call: {e}"
             logger.warning(message)
+            # Surface the raw model output so the operator can diagnose the
+            # actual format the (quantized) model is emitting.
+            logger.warning(f"Raw model output (first 2000 chars):\n{raw_text[:2000]}")
+
             self.history.append({"role": "assistant", "content": raw_text})
+
+            if self._parse_retries < self.MAX_PARSE_RETRIES:
+                # Give the model a corrective nudge and retry rather than
+                # immediately failing — quantized models often drift from the
+                # exact tool-call format on the first attempt.
+                logger.info(
+                    f"🔁 Parse retry {self._parse_retries}/{self.MAX_PARSE_RETRIES} — "
+                    f"nudging model to emit a valid tool call"
+                )
+                self.history.append({
+                    "role": "user",
+                    "content": (
+                        "Your last response did not contain a valid tool call. "
+                        "Respond with EXACTLY one action in a single "
+                        "<tool_call>{\"name\": \"computer_use\", \"arguments\": {...}}</tool_call> "
+                        "block. Do not add extra prose."
+                    ),
+                })
+                await self._emit("parse_retry", attempt=self._parse_retries, error=str(e))
+                # Do not change state to FAILED — let run() call step() again.
+                return
+
+            # Exhausted retries — fail closed.
             self.history.append({
                 "role": "user",
                 "content": message + " Please emit a valid <tool_call> block.",
             })
             self.state = AgentState.FAILED
-            await self._emit("parse_error", error=str(e))
+            await self._emit("parse_error", error=str(e), raw=raw_text[:2000])
             return
 
         if reasoning:
             cot = reasoning or cot
         await self._emit("thinking", content=cot, action=action.to_dict())
+
+        # Reset parse-retry counter on a successful parse.
+        self._parse_retries = 0
 
         # Safety gate (may pause)
         try:

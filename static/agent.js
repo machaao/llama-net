@@ -155,7 +155,16 @@ class AgentConsole {
                 this._setControls('waiting');
                 this._appendLog('paused', 'Safety blocked', data.reason || '');
                 break;
+            case 'parse_retry':
+                this._appendLog('system', `Retrying parse (attempt ${data.attempt})`, data.error || '');
+                break;
             case 'parse_error':
+                {
+                    const detail = data.error || '';
+                    const raw = data.raw || '';
+                    this._appendLog('error', 'Parse error', detail + (raw ? '\n\nModel output:\n' + raw : ''));
+                }
+                break;
             case 'execution_error':
                 this._appendLog('error', 'Error', data.error || '');
                 break;
