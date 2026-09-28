@@ -791,7 +791,16 @@ class LlamaWrapper:
         finally:
             generation_time = time.time() - start_time
             tokens_generated = output.get('usage', {}).get('completion_tokens', 0) if 'output' in locals() else 0
-            prompt_tokens_est = sum(len(m.get("content", "").split()) for m in formatted_messages) if 'formatted_messages' in locals() else 0
+            # Estimate prompt tokens safely — content may be a str OR a
+            # multimodal list (text + image parts). Use the existing helper
+            # which already handles both, instead of assuming string content.
+            prompt_tokens_est = 0
+            if 'formatted_messages' in locals():
+                try:
+                    prompt_text = self._extract_text_from_messages(formatted_messages)
+                    prompt_tokens_est = len(prompt_text.split())
+                except Exception:
+                    prompt_tokens_est = 0
             self.metrics_manager.record_request_end(tokens_generated, generation_time, prompt_tokens=prompt_tokens_est)
     
     def generate_chat_stream(self,
