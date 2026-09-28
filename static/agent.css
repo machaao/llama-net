@@ -1,10 +1,21 @@
 /* Fara1.5-9B computer-use agent console styles */
 
+/* Fill the card width and keep the 1280x800 (8:5) viewport ratio so the
+   screenshot sits flush at the top with no dark letterbox gaps. */
 .agent-screenshot {
-    max-height: 65vh;
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 8 / 5;
     object-fit: contain;
     border-radius: 0.375rem;
     background-color: #1a1a1a;
+}
+
+/* Preserve line breaks in log text (e.g. "Model output:" on parse errors) */
+#agent-log .step-text {
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 #agent-log .step-entry {

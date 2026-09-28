@@ -228,6 +228,7 @@ class AgentConsole {
                 entry.appendChild(code);
             } else {
                 const txt = document.createElement('div');
+                txt.className = 'step-text';
                 txt.textContent = body;
                 entry.appendChild(txt);
             }
