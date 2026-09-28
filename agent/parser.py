@@ -5,14 +5,20 @@ Fara emits:
   2. A ``<tool_call>...</tool_call>`` block whose body is a JSON object:
      {"name": "computer_use", "arguments": {"action": "...", ...}}.
 
-This module extracts both and validates the tool call via
-:mod:`agent.actions`. Any malformed output raises :class:`ToolCallParseError`
-so the caller can fail closed.
+Quantized GGUF checkpoints frequently emit *broken* JSON — missing brackets,
+stray tokens, ``<name`` typed instead of ``{"name``, arguments glued to the
+name value. JSON recovery is delegated to the ``json-repair`` library, which
+is built exactly for repairing LLM output; this module only extracts the XML
+wrapper, applies one trivial pre-normalization, and validates the recovered
+object via :mod:`agent.actions`. Unrecoverable output raises
+:class:`ToolCallParseError` so the caller can fail closed.
 """
 
 import json
 import re
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+from json_repair import loads as repair_json_loads
 
 from common.utils import get_logger
 from agent.actions import AgentAction, parse_action_arguments
@@ -30,13 +36,6 @@ _TOOL_CALL_RE = re.compile(
 _THINK_RE = re.compile(
     r"<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>", re.DOTALL | re.IGNORECASE
 )
-# Markdown-fenced JSON block, e.g. ```json { ... } ``` — quantized models
-# sometimes strip the XML wrapper and emit a fenced JSON object instead.
-_FENCED_JSON_RE = re.compile(
-    r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE
-)
-# Bare JSON object anywhere in the text (last resort).
-_BARE_JSON_RE = re.compile(r"\{[^{}]*\"(?:name|action)\"[^{}]*\}", re.DOTALL | re.IGNORECASE)
 # Unclosed <tool_call> block — the loop passes "</tool_call>" as a stop
 # sequence, and llama.cpp consumes it, so the closing tag never appears in
 # the raw output even when the model emitted a complete block.
@@ -45,70 +44,25 @@ _UNCLOSED_TOOL_CALL_RE = re.compile(
 )
 
 
-# Known malformations emitted by quantized models (observed in real runs):
-#   1. {"name": "computer_use", {"action": ...}}  — arguments object glued to
-#      the name value with no "arguments" key.
-#   2. <name="computer_use", ...}                 — "<" instead of "{" and
-#      name= instead of "name":.
-#   3. <name": "computer_use", ...}               — same as 2 but with the
-#      quote-colon form of the key separator.
-_JSON_REPAIRS: tuple = (
-    (
-        re.compile(r'\{\s*"name"\s*:\s*("[^"]+")\s*,\s*\{'),
-        r'{"name": \1, "arguments": {',
-    ),
-    (
-        # Covers both <name="computer_use" and <name": "computer_use" —
-        # anything between "name" and the first quoted value is separator junk.
-        re.compile(r'<\s*name[^"]*("[^"]+")'),
-        r'{"name": \1',
-    ),
-)
+def _normalize_name_slip(text: str) -> str:
+    """Fix the ``<name`` slip emitted by quantized models.
 
-
-def _repair_tool_call_text(text: str) -> str:
-    """Repair known quantized-model tool-call malformations in raw output.
-
-    Each pattern only matches a malformed shape — never the canonical
-    format — so applying the repairs unconditionally is safe.
+    ``<name": "computer_use", ...}`` and ``<name="computer_use", ...}`` are the
+    canonical ``{"name": "computer_use", ...}`` with ``<`` typed instead of
+    ``{`` (and a missing opening quote on the key). Plain string surgery,
+    guarded so genuine ``<name>``-style prose or HTML tags are left untouched.
     """
-    repaired = text or ""
-    for pattern, replacement in _JSON_REPAIRS:
-        repaired = pattern.sub(replacement, repaired)
-    return repaired
+    idx = text.find("<name")
+    if idx == -1:
+        return text
+    after = idx + len("<name")
+    nxt = text[after : after + 1]
+    if nxt not in ('"', "=", ":"):
+        return text  # not the tool-call slip — leave alone
+    repaired = text[:idx] + '{"name' + text[after:]
+    # The '<name="x"' form lacks the quote-colon key separator — add it.
+    return repaired.replace('{"name="', '{"name":"', 1)
 
-
-def _extract_balanced_json(text: str) -> Optional[str]:
-    """Extract the first balanced ``{...}`` object from text.
-
-    String-aware brace-depth scan — tolerant of trailing prose or special
-    tokens that quantized models append after the JSON body.
-    """
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    in_string = False
-    escaped = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
 
 # The JSON body may use several known field layouts.
 _ACTION_KEYS = ("action", "action_name", "name", "tool")
@@ -148,36 +102,19 @@ class ToolCallParser:
 
     @staticmethod
     def extract_tool_call_json(text: str) -> Optional[str]:
-        """Return the inner JSON string of the tool-call, trying multiple formats.
+        """Return the raw tool-call body, or None when no XML wrapper exists.
 
-        Order of precedence (most explicit → most lenient):
-          1. ``<tool_call>...</tool_call>`` XML block (canonical Fara format)
-          2. Markdown-fenced JSON: ```` ```json { ... } ``` ````
-          3. Bare JSON object containing an ``action``/``name`` key
+        Only the XML wrapper is handled here — closed first, then unclosed
+        (llama.cpp consumes the ``</tool_call>`` stop sequence). Fenced/bare
+        JSON recovery is delegated to json-repair in :meth:`parse`.
         """
         raw = text or ""
         m = _TOOL_CALL_RE.search(raw)
         if m:
             return m.group(1).strip()
-
-        # Unclosed <tool_call> block: the loop stops on "</tool_call>", llama.cpp
-        # consumes the stop sequence, so the closing tag is missing even when
-        # the model emitted a complete block. Fall back to a balanced-JSON
-        # scan of everything after the opening tag.
         m = _UNCLOSED_TOOL_CALL_RE.search(raw)
         if m:
-            balanced = _extract_balanced_json(m.group(1))
-            if balanced:
-                return balanced.strip()
-
-        m = _FENCED_JSON_RE.search(raw)
-        if m:
             return m.group(1).strip()
-
-        m = _BARE_JSON_RE.search(raw)
-        if m:
-            return m.group(0).strip()
-
         return None
 
     @staticmethod
@@ -187,15 +124,14 @@ class ToolCallParser:
         m = _THINK_RE.search(raw)
         if m:
             return m.group(1).strip()
-        # Fallback: everything before the tool_call/JSON block is the CoT.
-        tool_match = _TOOL_CALL_RE.search(raw)
-        if not tool_match:
-            tool_match = _FENCED_JSON_RE.search(raw)
-        if not tool_match:
-            tool_match = _BARE_JSON_RE.search(raw)
+        # Fallback: everything before the tool-call block is the CoT.
+        tool_match = _TOOL_CALL_RE.search(raw) or _UNCLOSED_TOOL_CALL_RE.search(raw)
         if tool_match:
-            preceding = raw[: tool_match.start()]
-            return preceding.strip()
+            return raw[: tool_match.start()].strip()
+        # No XML wrapper — CoT is everything before the first JSON brace.
+        brace = raw.find("{")
+        if brace > 0:
+            return raw[:brace].strip()
         return ""
 
     @classmethod
@@ -204,22 +140,32 @@ class ToolCallParser:
 
         Raises :class:`ToolCallParseError` when no valid tool call is present.
         """
-        # Repair known quantized-model malformations before extraction
-        # ({"name": "computer_use", {...}} and <name="computer_use", ...}).
-        raw = _repair_tool_call_text(text or "")
+        raw = _normalize_name_slip(text or "")
         reasoning = cls.extract_reasoning(raw)
 
-        json_str = cls.extract_tool_call_json(raw)
-        if not json_str:
-            raise ToolCallParseError("No <tool_call> block found in output")
+        body = cls.extract_tool_call_json(raw)
+        if body is None:
+            # No XML wrapper at all — scan from the first brace; json-repair
+            # natively handles fenced ```json blocks and bare JSON objects.
+            brace = raw.find("{")
+            if brace == -1:
+                raise ToolCallParseError("No valid tool-call JSON found in output")
+            body = raw[brace:]
 
-        try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            raise ToolCallParseError(f"<tool_call> body is not valid JSON: {e}")
+        data: Any = None
+        if body.strip():
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                # LLM-broken JSON — delegate to json-repair (built for this).
+                try:
+                    data = repair_json_loads(body)
+                except Exception as e:
+                    logger.debug(f"json-repair could not recover body: {e}")
+                    data = None
 
-        if not isinstance(data, dict):
-            raise ToolCallParseError("<tool_call> body must be a JSON object")
+        if not isinstance(data, dict) or not data:
+            raise ToolCallParseError("No valid tool-call JSON found in output")
 
         arguments = data.get("arguments")
         if not isinstance(arguments, dict):
