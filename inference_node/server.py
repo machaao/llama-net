@@ -382,6 +382,13 @@ async def lifespan(app: FastAPI):
 
     logger.info("🛑 Shutting down...")
 
+    # ── Signal SSE generators to stop FIRST ──
+    # Belt-and-suspenders: the signal handler in start_server() already set
+    # this event on SIGTERM/SIGINT, but doing it here too covers programmatic
+    # shutdown paths (no signal handler registered) so the SSE loops never
+    # hang uvicorn's graceful-shutdown window.
+    _shutdown_event.set()
+
     # ── Departure FIRST: beat vast.ai/Docker SIGKILL grace period ──
     if gateway_client:
         try:
@@ -395,8 +402,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("⚠ Unregister timed out — node may appear stale on gateway")
 
-    # ── THEN signal SSE generators and drain/close them ──
-    _shutdown_event.set()
+    # ── Drain/close any remaining SSE connections (already signaled above) ──
     if _active_sse_tasks:
         logger.info(f"Closing {len(_active_sse_tasks)} SSE connections...")
         # Wait for generators to notice the flag and exit naturally
@@ -2377,10 +2383,38 @@ def start_server():
     if config is None:
         config = InferenceConfig()
     log_level = os.environ.get("LOG_LEVEL", "info")
+
+    # ── Signal-driven SSE shutdown ──
+    # Set _shutdown_event IMMEDIATELY on SIGTERM/SIGINT so the infinite SSE
+    # generators (/events/network, /agent/sessions/{id}/events) exit on their
+    # own during uvicorn's graceful shutdown window. Without this, uvicorn
+    # waits for connections to close BEFORE running lifespan shutdown (which is
+    # where _shutdown_event.set() currently lives), deadlocking: the SSE loops
+    # only break when _shutdown_event is set, but it isn't set until after
+    # uvicorn has already given up (5s timeout) and force-cancelled them,
+    # producing the noisy "Exception in ASGI application / CancelledError".
+    import signal as _signal
+
+    def _signal_shutdown(signum, frame):
+        logger.info(f"📡 Received {_signal.Signals(signum).name} — signaling SSE loops to stop")
+        try:
+            _shutdown_event.set()
+        except RuntimeError:
+            # Event bound to a different loop (rare) — fall back to nothing;
+            # lifespan shutdown still sets it as a failsafe.
+            pass
+
+    for _sig in (_signal.SIGTERM, _signal.SIGINT):
+        try:
+            _signal.signal(_sig, _signal_shutdown)
+        except (ValueError, OSError):
+            # Not in main thread (e.g. under some test runners) — ignore.
+            pass
+
     uvicorn_config = uvicorn.Config(
         "inference_node.server:app",
         host=config.host, port=config.port, log_level=log_level,
-        timeout_keep_alive=2, timeout_graceful_shutdown=5,
+        timeout_keep_alive=2, timeout_graceful_shutdown=25,
         access_log=False, loop="asyncio", http="httptools",
         lifespan="on", proxy_headers=True, forwarded_allow_ips="*",
     )
