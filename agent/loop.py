@@ -120,6 +120,7 @@ class AgentLoop:
         self.screenshot_history: List[str] = []
         self.steps_completed = 0
         self.final_summary = ""
+        self._last_error = ""
 
         self._task: Optional[asyncio.Task] = None
 
@@ -163,7 +164,17 @@ class AgentLoop:
         """Initialize the browser and (optionally) navigate to the start URL."""
         if self.state is not AgentState.IDLE:
             return
-        await self.browser.start(start_url=self.start_url)
+        try:
+            await self.browser.start(start_url=self.start_url)
+        except Exception as e:
+            logger.error(f"Browser session failed to start: {e}")
+            self.state = AgentState.FAILED
+            await self._emit(
+                "execution_error",
+                error=f"Browser failed to start: {e}",
+                action={"name": "browser_start", "arguments": {}},
+            )
+            return
         self.state = AgentState.RUNNING
         await self._emit("session_started", goal=self.goal)
 
@@ -267,10 +278,40 @@ class AgentLoop:
             await self._emit("completed", summary=self.final_summary)
 
     async def run(self) -> None:
-        """Run the loop until a terminal state or pause."""
-        await self.start()
-        while self.state in (AgentState.RUNNING,):
-            await self.step()
+        """Run the loop until a terminal state or pause.
+
+        Any unexpected exception is surfaced as a ``failed`` event and sets the
+        session to ``FAILED`` — never silently swallowed, so the UI always sees
+        *something* (an error) instead of a dead background task.
+        """
+        try:
+            await self.start()
+            while self.state in (AgentState.RUNNING,):
+                try:
+                    await self.step()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Agent step failed: {e}", exc_info=True)
+                    self.state = AgentState.FAILED
+                    self._last_error = str(e)
+                    await self._emit("execution_error", error=str(e))
+                    break
+        except asyncio.CancelledError:
+            self.state = AgentState.ABORTED
+            await self._emit("aborted")
+            raise
+        except Exception as e:
+            logger.error(f"Agent run failed: {e}", exc_info=True)
+            self.state = AgentState.FAILED
+            self._last_error = str(e)
+            await self._emit("execution_error", error=str(e))
+        finally:
+            # Emit a terminal 'failed' event if we ended in a failed state
+            # without a cleaner terminal signal, so the UI status badge and
+            # controls update consistently.
+            if self.state is AgentState.FAILED:
+                await self._emit("failed", error=self._last_error or "Agent failed")
 
     # ── Control API for the router ──────────────────────────────────────
 

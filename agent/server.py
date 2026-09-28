@@ -56,6 +56,33 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
     router = APIRouter(prefix="/agent", tags=["agent"])
     sessions: Dict[str, AgentSession] = {}
 
+    def _start_loop_task(session: AgentSession) -> None:
+        """Launch the loop as a background task with a done-callback that
+        guarantees any unhandled exception is surfaced to the SSE stream.
+
+        Without this callback, a crash inside run()/step() (e.g. a
+        generate_chat_multimodal AttributeError, a browser crash, or a
+        cancellation that bypasses the loop's own handlers) would leave the
+        task dead with no event — the UI would show "running" forever with
+        nothing happening.
+        """
+        async def _done(completed: asyncio.Task) -> None:
+            if completed.cancelled():
+                return
+            exc = completed.exception()
+            if exc is None:
+                return
+            # The loop failed outside its own try/except — surface it.
+            logger.error(f"Agent session {session.id} crashed: {exc}", exc_info=True)
+            from agent.loop import AgentState
+            session.loop.state = AgentState.FAILED
+            await session.emit("execution_error", error=str(exc))
+
+        session.task = asyncio.create_task(session.loop.run())
+        session.task.add_done_callback(
+            lambda t: asyncio.create_task(_done(t))
+        )
+
     def _new_loop(goal: str, body: Dict[str, Any]) -> AgentLoop:
         loop = AgentLoop(
             llm=get_llm(),
@@ -107,7 +134,7 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
         if session.task and not session.task.done():
             raise HTTPException(status_code=409, detail="Session already running")
 
-        session.task = asyncio.create_task(session.loop.run())
+        _start_loop_task(session)
         await session.emit("run_started", {})
         return {"session_id": session_id, "state": session.loop.state.value}
 
@@ -131,7 +158,7 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
         await session.emit("resumed", {"answer": answer})
         # Continue running if not already in an active task
         if not session.task or session.task.done():
-            session.task = asyncio.create_task(session.loop.run())
+            _start_loop_task(session)
         return {"session_id": session_id, "state": session.loop.state.value}
 
     @router.post("/sessions/{session_id}/answer")
@@ -143,7 +170,7 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
         await session.loop.resume(answer)
         await session.emit("answered", {"answer": answer})
         if not session.task or session.task.done():
-            session.task = asyncio.create_task(session.loop.run())
+            _start_loop_task(session)
         return {"session_id": session_id, "state": session.loop.state.value}
 
     @router.post("/sessions/{session_id}/stop")
