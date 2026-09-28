@@ -45,6 +45,35 @@ _UNCLOSED_TOOL_CALL_RE = re.compile(
 )
 
 
+# Known malformations emitted by quantized models (observed in real runs):
+#   1. {"name": "computer_use", {"action": ...}}  — arguments object glued to
+#      the name value with no "arguments" key.
+#   2. <name="computer_use", ...}                 — "<" instead of "{" and
+#      name= instead of "name":.
+_JSON_REPAIRS: tuple = (
+    (
+        re.compile(r'\{\s*"name"\s*:\s*("[^"]+")\s*,\s*\{'),
+        r'{"name": \1, "arguments": {',
+    ),
+    (
+        re.compile(r'<\s*name\s*=\s*("[^"]+")'),
+        r'{"name": \1',
+    ),
+)
+
+
+def _repair_tool_call_text(text: str) -> str:
+    """Repair known quantized-model tool-call malformations in raw output.
+
+    Each pattern only matches a malformed shape — never the canonical
+    format — so applying the repairs unconditionally is safe.
+    """
+    repaired = text or ""
+    for pattern, replacement in _JSON_REPAIRS:
+        repaired = pattern.sub(replacement, repaired)
+    return repaired
+
+
 def _extract_balanced_json(text: str) -> Optional[str]:
     """Extract the first balanced ``{...}`` object from text.
 
@@ -171,7 +200,9 @@ class ToolCallParser:
 
         Raises :class:`ToolCallParseError` when no valid tool call is present.
         """
-        raw = text or ""
+        # Repair known quantized-model malformations before extraction
+        # ({"name": "computer_use", {...}} and <name="computer_use", ...}).
+        raw = _repair_tool_call_text(text or "")
         reasoning = cls.extract_reasoning(raw)
 
         json_str = cls.extract_tool_call_json(raw)
@@ -189,6 +220,14 @@ class ToolCallParser:
         arguments = data.get("arguments")
         if not isinstance(arguments, dict):
             arguments = data
+
+        # Some quantized models emit "coordinate": [x, y] (array) instead of
+        # separate x/y keys — normalize before schema validation.
+        coord = arguments.get("coordinate") or arguments.get("coordinates")
+        if isinstance(coord, (list, tuple)) and len(coord) == 2:
+            arguments = dict(arguments)
+            arguments.setdefault("x", coord[0])
+            arguments.setdefault("y", coord[1])
 
         action_name = None
         for key in _ACTION_KEYS:
