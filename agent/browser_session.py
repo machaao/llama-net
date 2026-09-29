@@ -83,6 +83,48 @@ def _jpeg_dimensions(data: bytes) -> tuple:
     return 0, 0
 
 
+# JS: interactive elements near a viewport point (for click-miss feedback).
+_NEARBY_ELEMENTS_JS = """([x, y, radius]) => {
+    const TAGS = new Set(['a','button','input','select','textarea','summary','label']);
+    const ROLES = new Set(['button','link','tab','menuitem','checkbox','radio','switch','option']);
+    const interactiveAncestor = (node) => {
+        for (let i = 0; node && node.nodeType === 1 && i < 8; i++) {
+            const t = node.tagName.toLowerCase();
+            if (TAGS.has(t) || node.hasAttribute('href') || node.hasAttribute('onclick') ||
+                ROLES.has(node.getAttribute('role') || '')) {
+                if (node.disabled === true || node.getAttribute('aria-disabled') === 'true') return null;
+                return node;
+            }
+            if (t === 'body' || t === 'html') return null;
+            node = node.parentElement;
+        }
+        return null;
+    };
+    const box = {left: x - radius, top: y - radius, right: x + radius, bottom: y + radius};
+    const out = [];
+    const seen = new Set();
+    for (const c of document.querySelectorAll('a, button, input, select, textarea, summary, label, [role], [onclick]')) {
+        const target = interactiveAncestor(c);
+        if (!target || seen.has(target)) continue;
+        seen.add(target);
+        const r = target.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        if (r.right < box.left || r.left > box.right || r.bottom < box.top || r.top > box.bottom) continue;
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        out.push({
+            tag: target.tagName.toLowerCase(),
+            text: (target.textContent || '').trim().slice(0, 40),
+            href: target.href || '',
+            rect: {x: Math.round(r.left), y: Math.round(r.top),
+                   w: Math.round(r.width), h: Math.round(r.height)},
+            d: Math.hypot(cx - x, cy - y),
+        });
+    }
+    out.sort((a, b) => a.d - b.d);
+    return out.slice(0, 8);
+}"""
+
+
 class BrowserSession:
     """Manages a single sandboxed headless-browser session."""
 
@@ -209,6 +251,7 @@ class BrowserSession:
                         if (t === 'body' || t === 'html') break;
                         node = node.parentElement;
                     }
+                    const r = el.getBoundingClientRect();
                     return {
                         tag: el.tagName.toLowerCase(),
                         id: el.id || '',
@@ -216,6 +259,10 @@ class BrowserSession:
                         text: (el.textContent || '').trim().slice(0, 60),
                         href: el.href || '',
                         interactive,
+                        rect: {
+                            x: Math.round(r.left), y: Math.round(r.top),
+                            w: Math.round(r.width), h: Math.round(r.height),
+                        },
                     };
                 }""",
                 [x, y],
@@ -223,6 +270,25 @@ class BrowserSession:
         except Exception as e:
             logger.debug(f"elementFromPoint({x}, {y}) failed: {e}")
             return None
+
+    async def interactive_elements_near(
+        self, x: int, y: int, radius: int = 150,
+    ) -> List[Dict[str, Any]]:
+        """Interactive elements within ``radius`` px of (x, y), nearest first.
+
+        Grounds click-miss feedback: the model learns what it actually hit and
+        which clickable elements are nearby (with viewport-pixel boxes), so it
+        can click the intended element's listed coordinates instead of
+        re-guessing from the screenshot (whose coordinate space may differ
+        from the viewport after llama.cpp's vision preprocessing).
+        """
+        if self._page is None:
+            return []
+        try:
+            return await self._page.evaluate(_NEARBY_ELEMENTS_JS, [x, y, radius])
+        except Exception as e:
+            logger.debug(f"interactive_elements_near({x}, {y}) failed: {e}")
+            return []
 
     async def click_at(
         self,

@@ -35,6 +35,21 @@ def _truncate_history_text(text: str, limit: int) -> str:
     return "[earlier text truncated] " + text[-(limit - 26):]
 
 
+def _format_nearby_elements(elements: List[Dict[str, Any]], limit: int = 6) -> str:
+    """Format nearby interactive elements (with viewport boxes) for feedback."""
+    lines = []
+    for el in elements[:limit]:
+        r = el.get("rect") or {}
+        x2 = (r.get("x") or 0) + (r.get("w") or 0)
+        y2 = (r.get("y") or 0) + (r.get("h") or 0)
+        text = (el.get("text") or "")[:30]
+        lines.append(
+            f"<{el.get('tag')}> '{text}' "
+            f"[{r.get('x', '?')},{r.get('y', '?')} → {x2},{y2}]"
+        )
+    return "; ".join(lines)
+
+
 class AgentState(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
@@ -623,7 +638,31 @@ class AgentLoop:
                     interactive = bool(element and element.get("interactive"))
                     el_text = ((element or {}).get("text") or "").strip()
                     el_href = ((element or {}).get("href") or "").strip()
+                    rect = (element or {}).get("rect") or {}
                     hit_desc = f"<{tag}>" + (f" '{el_text[:40]}'" if el_text else "")
+                    if rect:
+                        hit_desc += (
+                            f" [box {rect.get('x', '?')},{rect.get('y', '?')} → "
+                            f"{(rect.get('x') or 0) + (rect.get('w') or 0)},"
+                            f"{(rect.get('y') or 0) + (rect.get('h') or 0)}]"
+                        )
+                    # What else is clickable near the click point — lets the
+                    # model pivot to the intended element's exact coordinates
+                    # instead of re-guessing from the screenshot (whose
+                    # coordinate space may be scaled by the vision pipeline).
+                    try:
+                        nearby = await self.browser.interactive_elements_near(px, py)
+                    except Exception:
+                        nearby = []
+                    nearby_txt = _format_nearby_elements(nearby)
+                    nearby_section = ""
+                    if nearby_txt:
+                        nearby_section = (
+                            " Interactive elements near the click point "
+                            "(viewport pixel coordinates): " + nearby_txt +
+                            ". If one of these is your target, click its "
+                            "listed coordinates directly."
+                        )
 
                     if exec_result.get("new_tab"):
                         action_feedback = (
@@ -640,6 +679,7 @@ class AgentLoop:
                             f"The coordinates are likely wrong. Recompute the "
                             f"target position from the screenshot, or use "
                             f"visit_url to navigate directly."
+                            + nearby_section
                         )
                         logger.warning(
                             f"🖱 Click missed: ({px}, {py}) → <{tag or 'none'}> "
@@ -648,7 +688,7 @@ class AgentLoop:
                         await self._emit(
                             "click_missed",
                             x=px, y=py, element=element, url=url_after,
-                            reason="inert_element",
+                            reason="inert_element", nearby=nearby,
                             message=action_feedback,
                         )
                     elif url_after == current_url:
@@ -665,6 +705,7 @@ class AgentLoop:
                                 f" The element links to {el_href} — use "
                                 f"visit_url with that URL to navigate directly."
                             )
+                        action_feedback += nearby_section
                         logger.warning(
                             f"🖱 Click had no effect: ({px}, {py}) → {hit_desc} "
                             f"(URL unchanged)"
@@ -672,7 +713,7 @@ class AgentLoop:
                         await self._emit(
                             "click_missed",
                             x=px, y=py, element=element, url=url_after,
-                            reason="no_effect",
+                            reason="no_effect", nearby=nearby,
                             message=action_feedback,
                         )
                 except Exception as e:
