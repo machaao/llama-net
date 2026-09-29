@@ -52,6 +52,7 @@ That's it. Your Mac is now an AI server.
 - [Enterprise & Private Deployments](#enterprise--private-deployments)
 - [Requirements](#requirements)
 - [Built On](#built-on)
+- [Contributing & Security](#contributing--security)
 
 ## Why?
 
@@ -135,6 +136,8 @@ print(response.choices[0].message.content)
 
 Get a free API key at [llamanet.app](https://llamanet.app).
 
+More Python client examples (streaming, plain chat) are in [`examples/`](examples/).
+
 ## How It Works
 
 ```
@@ -176,7 +179,7 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 - **GPU Auto-detect** — NVIDIA, Apple Silicon, CPU fallback
 - **Computer-Use Agent** — Native harness for Fara1.5-9B browser automation with safety controls ([docs/agent.md](docs/agent.md))
 
-## Ollama vs LM Studio vs LlamaNet - Best Local LLM Server & Ollama Alternative
+## Ollama vs LM Studio vs LlamaNet — Best Local LLM Server & Ollama Alternative
 
 | | Ollama | LM Studio | Jan / LocalAI / llama.cpp server | LlamaNet |
 |---|---|---|---|---|
@@ -216,3 +219,9 @@ LlamaNet is built on top of these open-source projects:
 - **[Cloudflare Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)** — Automatic public HTTPS URLs for every node.
 - **[Supabase](https://supabase.com/)** — Backend for gateway authentication, node registry, and API keys.
 - **[Hugging Face](https://huggingface.co/)** — Model discovery and GGUF file hosting.
+
+## Contributing & Security
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, code style, and PR guidelines
+- **[SECURITY.md](.github/SECURITY.md)** — vulnerability reporting policy
+- **[Bug reports & feature requests](https://github.com/machaao/llama-net/issues)** — issue templates included
