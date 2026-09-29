@@ -8,4 +8,4 @@ tqdm>=4.64.0
 huggingface_hub>=0.0.1
 gguf
 # Computer-use agent (Fara1.5-9B) — headless browser automation
-playwright>=1.40.0
+playwright

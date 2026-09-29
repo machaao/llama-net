@@ -8,4 +8,4 @@ aiohttp>=3.8.0,<4.0.0
 httptools
 supabase>=2.0.0
 python-jose[cryptography]>=3.3.0
-json-repair>=0.30.0
+json-repair
