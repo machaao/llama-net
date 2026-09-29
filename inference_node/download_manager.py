@@ -383,6 +383,16 @@ class DownloadManager:
 
         return sources
 
+    async def _remote_content_length(self, session, url: str) -> int:
+        """Return the remote file size (bytes) via HEAD, or 0 if unknown."""
+        try:
+            async with session.head(url, allow_redirects=True) as resp:
+                if resp.status == 200:
+                    return int(resp.headers.get("content-length", 0) or 0)
+        except Exception as e:
+            logger.debug(f"HEAD {url} failed: {e}")
+        return 0
+
     async def _download_mmproj(
         self,
         repo_id: str,
@@ -398,24 +408,48 @@ class DownloadManager:
 
         The projector is written beside the model file so llama.cpp's sibling
         auto-detection (`_resolve_mmproj_path`) finds it.
+
+        Downloads are verified against the remote Content-Length and written to
+        a ``.part`` temp file that is atomically renamed on success. A
+        truncated/interrupted download is therefore never mistaken for a
+        complete one — which would otherwise surface later as
+        "Failed to load mtmd context from: ...".
         """
         import aiohttp
 
         model_path = Path(beside)
         model_dir = model_path.parent
 
-        # Already resolved (either we know the filename, or a sibling exists)
         sources = self._resolve_mmproj_sources(repo_id, filename)
 
-        # Fallback: if a sibling mmproj already exists, we're done.
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
+
+        # ── Check for an existing sibling projector, verifying completeness ──
         if model_dir.is_dir():
             existing = sorted(
                 p for p in model_dir.iterdir()
                 if p.name.lower().startswith("mmproj-") and p.name.lower().endswith(".gguf")
             )
             if existing:
-                logger.info(f"Vision projector already present: {existing[0]}")
-                return str(existing[0])
+                candidate = existing[0]
+                # Resolve the expected remote size for this exact filename.
+                expected = 0
+                for src_repo, src_filename in sources:
+                    if src_filename == candidate.name:
+                        url = f"https://huggingface.co/{src_repo}/resolve/main/{src_filename}"
+                        async with aiohttp.ClientSession(timeout=timeout) as session:
+                            expected = await self._remote_content_length(session, url)
+                        break
+                local_size = candidate.stat().st_size
+                if expected and local_size != expected:
+                    logger.warning(
+                        f"Vision projector {candidate.name} is incomplete "
+                        f"({local_size} / {expected} bytes) — re-downloading"
+                    )
+                    candidate.unlink(missing_ok=True)
+                else:
+                    logger.info(f"Vision projector already present: {candidate}")
+                    return str(candidate)
 
         if not sources:
             logger.warning(
@@ -424,23 +458,34 @@ class DownloadManager:
             )
             return None
 
-        timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=60)
-
         for src_repo, src_filename in sources:
             local_path = model_dir / src_filename
+            part_path = local_path.with_suffix(local_path.suffix + ".part")
             download_url = f"https://huggingface.co/{src_repo}/resolve/main/{src_filename}"
             logger.info(f"Downloading vision projector from {src_repo}: {src_filename}")
             try:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
+                    expected = await self._remote_content_length(session, download_url)
                     async with session.get(download_url) as response:
                         response.raise_for_status()
-                        with open(local_path, 'wb') as f:
+                        written = 0
+                        with open(part_path, 'wb') as f:
                             async for chunk in response.content.iter_chunked(65536):
                                 f.write(chunk)
-                logger.info(f"✅ Vision projector downloaded: {local_path}")
+                                written += len(chunk)
+
+                if expected and written != expected:
+                    raise IOError(f"incomplete download: {written} / {expected} bytes")
+
+                part_path.replace(local_path)  # atomic rename — only on success
+                logger.info(f"✅ Vision projector downloaded: {local_path} ({written} bytes)")
                 return str(local_path)
             except Exception as e:
                 logger.warning(f"Could not download {src_filename} from {src_repo}: {e}")
+                try:
+                    part_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
                 # Try the next candidate repo
                 continue
 
