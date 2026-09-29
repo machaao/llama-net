@@ -24,6 +24,17 @@ from agent.safety import SafetyController, SafetyViolation
 logger = get_logger(__name__)
 
 
+def _truncate_history_text(text: str, limit: int) -> str:
+    """Tail-preserving truncation for text kept in the trajectory history.
+
+    The tail holds the tool call — the part the model needs for continuity —
+    while the long chain-of-thought head is safe to drop.
+    """
+    if not text or len(text) <= limit:
+        return text
+    return "[earlier text truncated] " + text[-(limit - 26):]
+
+
 class AgentState(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
@@ -93,6 +104,13 @@ class AgentLoop:
     MAX_SCREENSHOT_HISTORY = 5
     DEFAULT_MAX_STEPS = 30
 
+    # Sliding window of trajectory turns sent to the model. Re-sending the
+    # FULL history every step re-prefills O(N²) tokens over a run — the
+    # dominant compute cost on 16-24 GB machines (vision prefill included).
+    MAX_HISTORY_TURNS = 12
+    # Prior-turn text kept in history (tail-preserving; see _truncate_history_text).
+    MAX_HISTORY_TEXT = 600
+
     def __init__(
         self,
         llm,
@@ -159,6 +177,13 @@ class AgentLoop:
             except Exception as e:
                 logger.debug(f"Agent event callback error: {e}")
 
+    def _remember(self, role: str, content: str) -> None:
+        """Append a trajectory turn with bounded text (see MAX_HISTORY_TEXT)."""
+        self.history.append({
+            "role": role,
+            "content": _truncate_history_text(content, self.MAX_HISTORY_TEXT),
+        })
+
     # ── Plan construction ────────────────────────────────────────────────
 
     async def _create_plan(self) -> None:
@@ -221,8 +246,10 @@ class AgentLoop:
             {"role": "system", "content": self.system_prompt},
         ]
 
-        # Trajectory history (thoughts + actions as plain-text user/assistant turns).
-        for turn in self.history:
+        # Trajectory history — sliding window only. The full trajectory grows
+        # without bound; re-prefilling all of it every step is what overwhelms
+        # a local 9B vision model on long runs.
+        for turn in self.history[-self.MAX_HISTORY_TURNS:]:
             messages.append(turn)
 
         # Current user turn: goal + page context + latest screenshot.
@@ -410,7 +437,7 @@ class AgentLoop:
             # actual format the (quantized) model is emitting.
             logger.warning(f"Raw model output (first 2000 chars):\n{raw_text[:2000]}")
 
-            self.history.append({"role": "assistant", "content": raw_text})
+            self._remember("assistant", raw_text)
 
             if self._parse_retries < self.MAX_PARSE_RETRIES:
                 # Give the model a corrective nudge and retry rather than
@@ -466,13 +493,13 @@ class AgentLoop:
         if action.name == "terminate":
             self.final_summary = action.arguments.get("summary", "")
             self.state = AgentState.COMPLETED
-            self.history.append({"role": "assistant", "content": raw_text})
+            self._remember("assistant", raw_text)
             await self._emit("completed", summary=self.final_summary)
             return
 
         if action.name == "complete_step":
             # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
+            self._remember("assistant", raw_text)
             completed_index = self.plan_index
             completed_step = self.plan[completed_index]
             note = action.arguments.get("note", "")
@@ -668,7 +695,7 @@ class AgentLoop:
             self._repeat_count = 0
 
         self.steps_completed += 1
-        self.history.append({"role": "assistant", "content": raw_text})
+        self._remember("assistant", raw_text)
 
         if self._repeat_count >= self.MAX_IDENTICAL_REPEATS:
             # Same action repeated with no effect — break the loop.

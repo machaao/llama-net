@@ -441,12 +441,12 @@ class LlamaWrapper:
                 parts.append(content)
         return " ".join(parts)
 
-    def _cap_max_tokens(self, max_tokens: int, formatted_messages: list) -> int:
-        """Cap max_tokens based only on available context window.
+    def _cap_max_tokens(self, max_tokens: Optional[int], formatted_messages: list) -> int:
+        """Cap max_tokens to the remaining context window.
 
-        The requested max_tokens from the API is ignored — let llama.cpp
-        auto-determine the optimal generation length.  Only cap to ensure
-        prompt + completion fits within n_ctx.
+        An explicit max_tokens is honored (min(requested, available)) so long
+        agent steps can't burn the whole context window; when it is None the
+        generation length is auto-determined from the remaining context.
         """
         try:
             n_ctx = self.llm.n_ctx() if self.llm else 4096
@@ -459,9 +459,17 @@ class LlamaWrapper:
                     f"No context space for completion: prompt={prompt_tokens}, n_ctx={n_ctx}"
                 )
                 return 1
+            if max_tokens is not None and max_tokens > 0:
+                capped = min(max_tokens, available)
+                if capped < max_tokens:
+                    logger.info(
+                        f"max_tokens capped: {max_tokens} → {capped} "
+                        f"(prompt={prompt_tokens}, n_ctx={n_ctx})"
+                    )
+                return capped
             logger.info(
                 f"max_tokens auto-set: {available} tokens available "
-                f"(prompt={prompt_tokens}, n_ctx={n_ctx}, requested={max_tokens} ignored)"
+                f"(prompt={prompt_tokens}, n_ctx={n_ctx})"
             )
             return available
         except Exception:
@@ -599,9 +607,13 @@ class LlamaWrapper:
         """Check if the LLM is currently processing a request"""
         return self._processing_lock.locked()
         
-    async def generate_chat_safe(self, messages, max_tokens=100, temperature=0.7, top_p=0.9, 
+    async def generate_chat_safe(self, messages, max_tokens=None, temperature=0.7, top_p=0.9, 
                                top_k=40, stop=None, repeat_penalty=1.1, reasoning=True) -> Dict[str, Any]:
-        """Thread-safe version of generate_chat"""
+        """Thread-safe version of generate_chat.
+
+        ``max_tokens=None`` means auto-detect from the remaining context;
+        an explicit value is honored (capped to fit n_ctx).
+        """
         async with self._processing_lock:
             loop = asyncio.get_event_loop()
             
@@ -626,7 +638,7 @@ class LlamaWrapper:
                     None, 
                     lambda: self.generate_chat(
                         messages=formatted_messages,  # Use formatted messages
-                        max_tokens=int(max_tokens),
+                        max_tokens=int(max_tokens) if max_tokens is not None else None,
                         temperature=float(temperature),
                         top_p=float(top_p),
                         top_k=int(top_k) if top_k is not None else 40,
@@ -766,7 +778,7 @@ class LlamaWrapper:
     
     def generate_chat(self,
                      messages: List[Dict[str, str]],
-                     max_tokens: int = 100,
+                     max_tokens: Optional[int] = None,
                      temperature: float = 0.7,
                      top_p: float = 0.9,
                      top_k: int = 40,
@@ -869,7 +881,7 @@ class LlamaWrapper:
     
     def generate_chat_stream(self,
                            messages: List[Dict[str, str]],
-                           max_tokens: int = 100,
+                           max_tokens: Optional[int] = None,
                            temperature: float = 0.7,
                            top_p: float = 0.9,
                            top_k: int = 40,
@@ -1062,7 +1074,7 @@ class LlamaWrapper:
         
     def generate(self, 
                 prompt: str, 
-                max_tokens: int = 100,
+                max_tokens: Optional[int] = None,
                 temperature: float = 0.7,
                 top_p: float = 0.9,
                 top_k: int = 40,
@@ -1079,7 +1091,7 @@ class LlamaWrapper:
             # Generate text
             output = self.llm(
                 prompt=prompt,
-                max_tokens=max_tokens,
+                max_tokens=max_tokens if max_tokens is not None else 100,
                 temperature=temperature,
                 top_p=top_p,
                 top_k=top_k,
@@ -1103,7 +1115,7 @@ class LlamaWrapper:
     
     def generate_stream(self, 
                        prompt: str, 
-                       max_tokens: int = 100,
+                       max_tokens: Optional[int] = None,
                        temperature: float = 0.7,
                        top_p: float = 0.9,
                        top_k: int = 40,
@@ -1123,7 +1135,7 @@ class LlamaWrapper:
         # Create streaming generator
         stream = self.llm(
             prompt=prompt,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens if max_tokens is not None else 100,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,

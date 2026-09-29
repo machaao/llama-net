@@ -173,6 +173,27 @@ def get_vram_context_cap(
         return 2048
 
 
+VISION_MODEL_HINTS = (
+    "fara", "cua", "computer-use",
+    "llava", "bakllava", "moondream", "cogvlm",
+    "qwen-vl", "qwen2-vl", "qwen3-vl", "minicpm-v",
+    "idefics", "pixtral", "llama-3.2-vision", "phi-3-vision",
+    "internvl", "paligemma", "gemma-3-vision",
+)
+
+# Vision/vlm auto-detected context cap. Vision prefill (mmproj CLIP encode of
+# a full screenshot) is far more expensive per token than text prefill, so an
+# auto-detected 64K+ window is a trap on 16-24 GB machines: the KV cache plus
+# screenshot history overwhelms unified memory long before n_ctx is reached.
+VISION_CTX_CAP = 32768
+
+
+def is_vision_model_name(name: str) -> bool:
+    """True when the model name looks like a vision/computer-use model."""
+    lowered = (name or "").lower()
+    return any(hint in lowered for hint in VISION_MODEL_HINTS)
+
+
 def calculate_optimal_context(
     model_path: str,
     cache_type_k: str = "f16",
@@ -200,14 +221,29 @@ def calculate_optimal_context(
         # Get raw available memory (VRAM if present, else RAM)
         raw_available = (specs.get("available_vram_gb", 0) or specs.get("available_ram_gb", 0)) / 2
 
+        # Vision models (Fara, LLaVA, Qwen-VL, ...) encode a full screenshot
+        # through the mmproj projector on every turn — reserve extra headroom
+        # and cap the auto-detected window harder than for text-only models.
+        vision = is_vision_model_name(os.path.basename(model_path or ""))
+        effective_memory = raw_available
+        if vision and raw_available > 0:
+            effective_memory = raw_available * 0.6
+
         ctx = get_model_context_length(
             model_path,
-            total_memory_gb=raw_available if raw_available > 0 else None,
+            total_memory_gb=effective_memory if effective_memory > 0 else None,
             concurrent_models=max_concurrent,
             keep_system_responsive=True,
         )
 
         if ctx is not None and ctx > 0:
+            if vision and ctx > VISION_CTX_CAP:
+                logger.info(
+                    f"✅ Context optimizer (vision model): {VISION_CTX_CAP} tokens "
+                    f"(capped from {ctx}; memory={raw_available:.1f} GB, "
+                    f"concurrent={max_concurrent})"
+                )
+                return VISION_CTX_CAP, True
             logger.info(
                 f"✅ Context optimizer: {ctx} tokens "
                 f"(memory={raw_available:.1f} GB, concurrent={max_concurrent})"

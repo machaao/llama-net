@@ -71,7 +71,9 @@ class OpenAICompletionRequest(BaseModel):
     """OpenAI-compatible completion request"""
     model: str = "llamanet"
     prompt: Union[str, List[str]]
-    max_tokens: Optional[int] = Field(default=100, ge=1, le=_MAX_MAX_TOKENS)
+    # None = auto-detect from remaining context (OpenAI-compatible default).
+    # An explicit value is honored (capped to fit n_ctx).
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=_MAX_MAX_TOKENS)
     temperature: Optional[float] = Field(default=0.7, ge=0, le=2.0)
     top_p: Optional[float] = Field(default=0.9, ge=0, le=1.0)
     n: Optional[int] = 1
@@ -92,7 +94,9 @@ class OpenAIChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request with reasoning support"""
     model: str = "llamanet"
     messages: List[OpenAIMessage] = Field(..., min_items=1, max_items=_MAX_MESSAGE_COUNT)
-    max_tokens: Optional[int] = Field(default=100, ge=1, le=_MAX_MAX_TOKENS)
+    # None = auto-detect from remaining context (OpenAI-compatible default).
+    # An explicit value is honored (capped to fit n_ctx).
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=_MAX_MAX_TOKENS)
     temperature: Optional[float] = Field(default=0.7, ge=0, le=2.0)
     top_p: Optional[float] = Field(default=0.9, ge=0, le=1.0)
     n: Optional[int] = 1

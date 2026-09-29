@@ -9,7 +9,7 @@ from typing import Optional, Dict
 from common.utils import load_env_var, get_logger
 from common.port_utils import PortManager
 from inference_node.model_manager import ModelManager
-from common.context_optimizer import calculate_optimal_context
+from common.context_optimizer import calculate_optimal_context, is_vision_model_name
 
 logger = get_logger(__name__)
 
@@ -211,6 +211,28 @@ class InferenceConfig:
             logger.warning(f"Model file not found: {self.model_path} - starting in no-model mode")
             self.no_model_mode = True
             self.model_path = ""
+
+        # Vision models (Fara, LLaVA, Qwen-VL, ...) default to a quantized KV
+        # cache unless the user explicitly chose one. f16 KV on a vision
+        # workload is the single biggest memory consumer on 16-24 GB machines
+        # (screenshot prefill + history), and q8_0 halves it at negligible
+        # quality cost. Explicit --cache-type-k/v or CACHE_TYPE_K/V always wins.
+        if self.model_path and not self.no_model_mode and \
+                is_vision_model_name(os.path.basename(self.model_path)):
+            cache_explicit = (
+                "CACHE_TYPE_K" in os.environ or "CACHE_TYPE_V" in os.environ
+                or "--cache-type-k" in sys.argv or "--cache-type-v" in sys.argv
+            )
+            if not cache_explicit:
+                if self.cache_type_k == "f16":
+                    self.cache_type_k = "q8_0"
+                if self.cache_type_v == "f16":
+                    self.cache_type_v = "q8_0"
+                logger.info(
+                    "Vision model detected — defaulting KV cache to "
+                    "K=q8_0 V=q8_0 (override with --cache-type-k/v or "
+                    "CACHE_TYPE_K/V)"
+                )
 
         # Auto-detect context size from model if n_ctx == 0 (or legacy default 4096)
         # Treat 4096 as "unset" ONLY when it came from env (not CLI)

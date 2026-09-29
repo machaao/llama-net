@@ -1059,7 +1059,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
                     # Use the thread-safe streaming method
                     async for chunk in llm.generate_stream_safe(
                         prompt=prompt,
-                        max_tokens=request.max_tokens or 100,
+                        max_tokens=request.max_tokens,
                         temperature=request.temperature or 0.7,
                         top_p=request.top_p or 0.9,
                         stop=stop_tokens,
@@ -1104,7 +1104,7 @@ async def _handle_completion_locally_queued(request: OpenAICompletionRequest):
         # NON-STREAMING: Use thread-safe method
         result = await llm.generate_safe(
             prompt,
-            request.max_tokens or 100,
+            request.max_tokens,
             request.temperature or 0.7,
             request.top_p or 0.9,
             stop_tokens,
@@ -1185,7 +1185,7 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
                     def create_stream():
                         return llm.generate_stream(
                             prompt=prompt,
-                            max_tokens=request.max_tokens or 100,
+                            max_tokens=request.max_tokens,
                             temperature=request.temperature or 0.7,
                             top_p=request.top_p or 0.9,
                             stop=stop_tokens,
@@ -1248,7 +1248,7 @@ async def _handle_completion_locally(request: OpenAICompletionRequest):
             None,  # Use default thread pool
             llm.generate,
             prompt,
-            request.max_tokens or 100,
+            request.max_tokens,
             request.temperature or 0.7,
             request.top_p or 0.9,
             stop_tokens,
@@ -1496,7 +1496,7 @@ async def _handle_chat_completion_locally_queued(request: OpenAIChatCompletionRe
         # NON-STREAMING: Use thread-safe method
         result = await active_llm.generate_chat_safe(
             messages,
-            request.max_tokens or 100,
+            request.max_tokens,
             request.temperature or 0.7,
             request.top_p or 0.9,
             stop_tokens,
@@ -1660,7 +1660,7 @@ async def _handle_chat_completion_locally(request: OpenAIChatCompletionRequest):
         def generate_with_reasoning():
             return llm.generate_chat(
                 messages,
-                request.max_tokens or 100,
+                request.max_tokens,
                 request.temperature or 0.7,
                 request.top_p or 0.9,
                 stop_tokens,

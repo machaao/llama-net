@@ -19,7 +19,42 @@ from common.utils import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_VIEWPORT = {"width": 1280, "height": 800}
-_SCREENSHOT_QUALITY = 90  # JPEG quality — small nav text needs sharpness for accurate clicks
+_SCREENSHOT_QUALITY = 75  # JPEG quality — sharp enough for clicks, ~30% smaller payload per step
+
+# ── Shared Chromium singleton ──
+# One Chromium process is reused across agent sessions. Launching a browser
+# per session costs seconds and ~200-400 MB of RSS churn each run. Per-session
+# *contexts* remain isolated (fresh cookies/storage), so sandboxing is intact.
+_shared_playwright = None
+_shared_browser = None
+_shared_browser_headless: Optional[bool] = None
+
+
+async def _get_shared_playwright():
+    global _shared_playwright
+    if _shared_playwright is None:
+        from playwright.async_api import async_playwright
+        _shared_playwright = await async_playwright().start()
+    return _shared_playwright
+
+
+async def _get_shared_browser(playwright, headless: bool):
+    """Return the shared Chromium, launching it only if absent or mode-mismatched."""
+    global _shared_browser, _shared_browser_headless
+    if _shared_browser is not None and _shared_browser_headless != headless:
+        # Headless mode is fixed at launch — close and relaunch if it changed.
+        try:
+            await _shared_browser.close()
+        except Exception:
+            pass
+        _shared_browser = None
+    if _shared_browser is None:
+        _shared_browser = await playwright.chromium.launch(
+            headless=headless,
+            args=["--disable-dev-shm-usage", "--no-first-run"],
+        )
+        _shared_browser_headless = headless
+    return _shared_browser
 
 
 def _jpeg_dimensions(data: bytes) -> tuple:
@@ -78,23 +113,19 @@ class BrowserSession:
                 "Install with: pip install playwright && playwright install chromium"
             ) from e
 
-        self._playwright = await async_playwright().start()
-        # Launch with a persistent but isolated context (no host access).
-        self._context = await self._playwright.chromium.launch_persistent_context(
-            user_data_dir="",  # in-memory ephemeral profile — no disk persistence
-            headless=self.headless,
+        # Reuse the shared Chromium across sessions; each session gets its own
+        # isolated context (fresh cookies/storage — no host access).
+        self._playwright = await _get_shared_playwright()
+        self._browser = await _get_shared_browser(self._playwright, self.headless)
+        self._context = await self._browser.new_context(
             viewport=self.viewport,
             # Pin the capture space: screenshot px ≡ CSS px ≡ click px.
-            # Without this, a non-1 device_scale_factor (Retina emulation,
-            # persisted profile) doubles the screenshot while page.mouse.click()
-            # still takes CSS px — every click lands off-target.
+            # Without this, a non-1 device_scale_factor (Retina emulation)
+            # doubles the screenshot while page.mouse.click() still takes
+            # CSS px — every click lands off-target.
             device_scale_factor=1,
-            # Security: disable filesystem access via browser flags where supported
-            args=["--disable-dev-shm-usage", "--no-first-run"],
-            no_viewport=False,
         )
-        self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
-        await self._page.set_viewport_size(self.viewport)
+        self._page = await self._context.new_page()
 
         if start_url:
             await self._page.goto(start_url, wait_until="domcontentloaded")
@@ -417,11 +448,8 @@ class BrowserSession:
                 await self._context.close()
         except Exception as e:
             logger.debug(f"Browser context close error: {e}")
-        try:
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception as e:
-            logger.debug(f"Playwright stop error: {e}")
+        # Intentionally do NOT stop the shared Playwright/Chromium — the next
+        # session reuses them (see _get_shared_browser).
         self._browser = None
         self._context = None
         self._page = None
