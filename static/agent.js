@@ -135,7 +135,11 @@ class AgentConsole {
                 if (data.screenshot) {
                     document.getElementById('agent-screenshot').src = data.screenshot;
                 }
-                this._appendLog('system', `Step ${data.index}`, '');
+                if (data.url) {
+                    document.getElementById('agent-url').textContent = data.url;
+                }
+                this._appendLog('system', `Step ${data.index}`,
+                    data.url ? `URL: ${data.url}${data.title ? ' — ' + data.title : ''}` : '');
                 break;
             case 'thinking':
                 this._appendLog('thinking', 'Thinking…', data.content || '');

@@ -281,6 +281,14 @@ class LlamaWrapper:
                     })
                 else:
                     # Not a vision model — extract text parts only, ignore images.
+                    has_image = any(p.get("type") == "image_url" for p in content)
+                    if has_image:
+                        logger.warning(
+                            f"⚠  Dropping image input: model '{self._model_name}' is not "
+                            f"detected as vision-capable (supports_vision=False). The model "
+                            f"will only see text. Load a Fara/LLaVA-class model with an "
+                            f"mmproj-*.gguf projector to enable screenshots."
+                        )
                     text_parts = []
                     for part in content:
                         if part.get("type") == "text":

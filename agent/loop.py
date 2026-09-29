@@ -138,8 +138,15 @@ class AgentLoop:
 
     # ── Message construction ─────────────────────────────────────────────
 
-    def _build_messages(self, screenshot: str) -> List[Dict[str, Any]]:
-        """Assemble the multimodal message list for the model."""
+    def _build_messages(self, screenshot: str, url: str = "", title: str = "") -> List[Dict[str, Any]]:
+        """Assemble the multimodal message list for the model.
+
+        The current page URL and title are included as *text* alongside the
+        screenshot. This grounds the model even when the screenshot is blank or
+        vision is degraded — without it, a model that receives no usable visual
+        signal reports "the page did not visibly load" and flails (retrying
+        http://, falling back to web_search) instead of acting on the page.
+        """
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
         ]
@@ -148,9 +155,12 @@ class AgentLoop:
         for turn in self.history:
             messages.append(turn)
 
-        # Current user turn: goal + latest screenshot(s).
+        # Current user turn: goal + page context + latest screenshot.
+        page_context = f"Current page URL: {url or 'about:blank'}"
+        if title:
+            page_context += f"\nCurrent page title: {title}"
         content_parts: List[Dict[str, Any]] = [
-            {"type": "text", "text": f"Goal: {self.goal}\nWhat is the next action?"},
+            {"type": "text", "text": f"Goal: {self.goal}\n{page_context}\nWhat is the next action?"},
         ]
         if screenshot:
             content_parts.append({
@@ -194,13 +204,23 @@ class AgentLoop:
         if len(self.screenshot_history) > self.MAX_SCREENSHOT_HISTORY:
             self.screenshot_history = self.screenshot_history[-self.MAX_SCREENSHOT_HISTORY:]
 
+        # Capture page context as text so the model is grounded even when the
+        # screenshot is blank or vision is degraded.
+        try:
+            current_url = await self.browser.current_url()
+            current_title = await self.browser.current_title()
+        except Exception:
+            current_url, current_title = "", ""
+
         await self._emit(
             "step_screenshot",
             index=self.steps_completed + 1,
             screenshot=screenshot,
+            url=current_url,
+            title=current_title,
         )
 
-        messages = self._build_messages(screenshot)
+        messages = self._build_messages(screenshot, url=current_url, title=current_title)
         result = await self.llm.generate_chat_multimodal(
             messages=messages,
             temperature=0.3,
