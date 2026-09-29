@@ -236,7 +236,11 @@ class AgentLoop:
         if vp.get("width"):
             page_context += (
                 f"\nViewport: {vp['width']}x{vp['height']} pixels. "
-                f"Click coordinates are absolute viewport pixels."
+                f"Click coordinates are absolute viewport pixels. "
+                f"The screenshot shows ONLY this visible viewport — click "
+                f"coordinates MUST be within 0-{vp['width'] - 1} x "
+                f"0-{vp['height'] - 1}. Content below the fold is not "
+                f"visible; scroll first."
             )
         # Scroll grounding — the decisive facts the model needs to stop
         # probing up/down: position, max, bottom/top reached, sign convention.
@@ -523,32 +527,61 @@ class AgentLoop:
             py = action.arguments["y"]
 
             if not exec_result.get("clicked", True):
-                # Mode 1: native click was blocked by an interceptor.
                 element = exec_result.get("element") or {}
-                tag = element.get("tag", "unknown")
-                if exec_result.get("intercepted"):
+                err_text = exec_result.get("error", "") or ""
+
+                if exec_result.get("out_of_bounds") or "outside viewport" in err_text:
+                    # Mode 0: coordinates outside the viewport (and therefore
+                    # outside the screenshot's coordinate space). The screenshot
+                    # is viewport-only, so a point like (291, 983) in a
+                    # 1280x800 viewport maps to nothing — a raw click would be
+                    # a silent no-op. Direct the model to scroll first.
+                    vp = getattr(self.browser, "viewport", None) or {}
+                    vp_desc = f"{vp.get('width', '?')}x{vp.get('height', '?')}"
                     action_feedback = (
-                        f"The click at ({px}, {py}) was BLOCKED — <{tag}> "
-                        f"(or an overlay above it) is intercepting pointer "
-                        f"events. The page did not change. Try different "
-                        f"coordinates, or use visit_url to navigate directly."
+                        f"The click at ({px}, {py}) is OUTSIDE the {vp_desc} "
+                        f"viewport — the screenshot shows only the visible "
+                        f"area. If the target is below the fold, scroll down "
+                        f"first (positive delta), then recompute coordinates "
+                        f"from the new screenshot."
+                    )
+                    logger.warning(
+                        f"🖱 Click out of bounds: ({px}, {py}) (viewport {vp_desc})"
+                    )
+                    await self._emit(
+                        "click_missed",
+                        x=px, y=py, element=element,
+                        url=await self.browser.current_url(),
+                        reason="out_of_bounds",
+                        message=action_feedback,
                     )
                 else:
-                    action_feedback = (
-                        f"The click at ({px}, {py}) failed on <{tag}>: "
-                        f"{exec_result.get('error', 'unknown error')}. "
-                        f"Recompute coordinates from the screenshot."
+                    # Mode 1: native click was blocked by an interceptor.
+                    tag = element.get("tag", "unknown")
+                    if exec_result.get("intercepted"):
+                        action_feedback = (
+                            f"The click at ({px}, {py}) was BLOCKED — <{tag}> "
+                            f"(or an overlay above it) is intercepting pointer "
+                            f"events. The page did not change. Try different "
+                            f"coordinates, or use visit_url to navigate directly."
+                        )
+                    else:
+                        action_feedback = (
+                            f"The click at ({px}, {py}) failed on <{tag}>: "
+                            f"{err_text or 'unknown error'}. "
+                            f"Recompute coordinates from the screenshot."
+                        )
+                    logger.warning(
+                        f"🖱 Click blocked: ({px}, {py}) → "
+                        f"{'intercepted' if exec_result.get('intercepted') else err_text}"
                     )
-                logger.warning(
-                    f"🖱 Click blocked: ({px}, {py}) → "
-                    f"{'intercepted' if exec_result.get('intercepted') else exec_result.get('error')}"
-                )
-                await self._emit(
-                    "click_missed",
-                    x=px, y=py, element=element,
-                    url=await self.browser.current_url(),
-                    reason="intercepted" if exec_result.get("intercepted") else "error",
-                )
+                    await self._emit(
+                        "click_missed",
+                        x=px, y=py, element=element,
+                        url=await self.browser.current_url(),
+                        reason="intercepted" if exec_result.get("intercepted") else "error",
+                        message=action_feedback,
+                    )
             else:
                 # Mode 2: click succeeded — verify URL changed / element interactive.
                 try:
@@ -575,6 +608,8 @@ class AgentLoop:
                         await self._emit(
                             "click_missed",
                             x=px, y=py, element=element, url=url_after,
+                            reason="inert_element",
+                            message=action_feedback,
                         )
                 except Exception as e:
                     logger.debug(f"Click verification failed: {e}")

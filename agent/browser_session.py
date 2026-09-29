@@ -210,24 +210,38 @@ class BrowserSession:
 
         Returns:
             {"clicked": bool, "element": dict|None, "intercepted": bool,
-             "error": str|None}
+             "out_of_bounds": bool, "error": str|None}
         """
         if self._page is None:
             return {"clicked": False, "element": None, "intercepted": False,
-                    "error": "no page"}
+                    "out_of_bounds": False, "error": "no page"}
+
+        # ── Bounds check ──
+        # The screenshot captures ONLY the viewport (full_page=False), so click
+        # coordinates MUST be viewport pixels. An out-of-viewport point (e.g. a
+        # footer link at y=983 in a 1280x800 viewport) has no
+        # elementFromPoint hit and page.mouse.click() would silently no-op —
+        # reject explicitly so the loop can tell the model to scroll first.
+        vp_w = int(self.viewport.get("width", 0) or 0)
+        vp_h = int(self.viewport.get("height", 0) or 0)
+        if vp_w and vp_h and not (0 <= x < vp_w and 0 <= y < vp_h):
+            return {
+                "clicked": False, "element": None, "intercepted": False,
+                "out_of_bounds": True,
+                "error": f"coordinates ({x}, {y}) outside viewport {vp_w}x{vp_h}",
+            }
 
         element_info = await self.element_at(x, y)
 
-        # No element at point — fall back to raw mouse click (background).
+        # No element at point (elementFromPoint is null for detached or fully
+        # transparent targets) — a raw mouse click would silently no-op.
+        # Fail closed so the loop reports the miss instead of pretending.
         if element_info is None:
-            try:
-                await self._page.mouse.click(x, y, button=button,
-                                             click_count=click_count)
-                return {"clicked": True, "element": None, "intercepted": False,
-                        "error": None}
-            except Exception as e:
-                return {"clicked": False, "element": None, "intercepted": False,
-                        "error": str(e)}
+            return {
+                "clicked": False, "element": None, "intercepted": False,
+                "out_of_bounds": False,
+                "error": f"no element at point ({x}, {y})",
+            }
 
         # Resolve to an ElementHandle for native click with hit-target checks.
         handle = await self._page.evaluate_handle(
