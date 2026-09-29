@@ -5,9 +5,9 @@
 [![Live Demo](https://img.shields.io/badge/demo-llamanet.app-green)](https://llamanet.app)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
-[![Mac Apple Silicon](https://img.shields.io/badge/Mac-Apple_Silicon-black.svg)](#setup)
+[![Mac Apple Silicon](https://img.shields.io/badge/Mac-Apple_Silicon-black.svg)](docs/deployment.md)
 
-**Turn your idle Mac or GPU into a free public AI API. Local GGUF LLM server with OpenAI-compatible `/v1/chat/completions`, public HTTPS URL in 60s. Ollama alternative with sharing built-in.**
+**Turn your idle Mac or GPU into a free public AI API. Local GGUF LLM server with OpenAI-compatible /v1/chat/completions, public HTTPS URL in 60s. Ollama alternative with sharing built-in.**
 
 > Your Mac is idle 18 hours a day. Let it do something useful.
 
@@ -28,21 +28,30 @@ llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 
 That's it. Your Mac is now an AI server.
 
+![LlamaNet Web UI - local LLM GGUF server with model manager, chat interface and network dashboard](./static/images/screenshot-v2.png)
+
+## Documentation
+
+| Guide | What's inside |
+|---|---|
+| [Quick Start](#quick-start) | Install, run, and call the API in under 2 minutes |
+| [Models & Multi-Model Pool](docs/models.md) | Supported models, hardware tiers, pool with LRU eviction |
+| [Computer-Use Agent](docs/agent.md) | Fara1.5-9B browser agent + REST/SSE API for custom apps |
+| [Gateway & Enterprise Hosting](docs/gateway.md) | Architecture, run your own gateway, **internal hosting for teams** |
+| [Deployment](docs/deployment.md) | macOS, Linux, Windows, cloud VPS, RunPod, vast.ai, Docker |
+| [API Reference](docs/api-reference.md) | All endpoints, environment variables, rate limits |
+| [FAQ](docs/faq.md) | Common questions |
+
 ## Contents
 
 - [Why?](#why)
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
 - [Features](#features)
-- [Ollama vs LM Studio vs LlamaNet](#ollama-vs-lm-studio-vs-llamanet)
-- [Multi-Model Pool](#multi-model-pool)
-- [Recommended Models by Tier](#recommended-models-by-tier)
-- [Architecture](#architecture)
-- [Web UI](#web-ui)
-- [Run on a GPU Cloud Provider](#run-on-a-gpu-cloud-provider-no-hardware-needed)
-- [FAQ](#faq)
-
-![LlamaNet Web UI - local LLM GGUF server with model manager, chat interface and network dashboard](./static/images/screenshot-v2.png)
+- [Ollama vs LM Studio vs LlamaNet](#ollama-vs-lm-studio-vs-llamanet--best-local-llm-server--ollama-alternative)
+- [Enterprise & Private Deployments](#enterprise--private-deployments)
+- [Requirements](#requirements)
+- [Built On](#built-on)
 
 ## Why?
 
@@ -94,7 +103,7 @@ pip install llamanet
 llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
 ```
 
-Models can be switched at any time via the Web UI without restarting the node.
+Models can be switched at any time via the Web UI without restarting the node. Full platform instructions (macOS, Linux, Windows, cloud) are in [docs/deployment.md](docs/deployment.md).
 
 ### Uninstall
 
@@ -112,13 +121,13 @@ irm https://llamanet.app/uninstall.ps1 | iex
 import openai
 
 client = openai.OpenAI(
-    base_url="https://llamanet.app/v1",
-    api_key="your-api-key"
+    base_url='https://llamanet.app/v1',
+    api_key='your-api-key'
 )
 
 response = client.chat.completions.create(
-    model="Meta-Llama-3.1-8B-Instruct",
-    messages=[{"role": "user", "content": "Hello!"}]
+    model='Meta-Llama-3.1-8B-Instruct',
+    messages=[{'role': 'user', 'content': 'Hello!'}]
 )
 
 print(response.choices[0].message.content)
@@ -165,134 +174,7 @@ No Docker. No Kubernetes. No port forwarding. Just a tunnel and a registry.
 - **Gateway Routing** — Central gateway with automatic node discovery and load balancing
 - **Real-time Network** — SSE-powered live updates for node status, model availability, and metrics
 - **GPU Auto-detect** — NVIDIA, Apple Silicon, CPU fallback
-
-## Computer-Use Agent (Fara1.5-9B)
-
-LlamaNet bundles a native harness for **computer-use agent** models like
-[Microsoft Research's Fara1.5-9B](https://huggingface.co/microsoft/Fara1.5-9B)
-(and its [GGUF conversions](https://huggingface.co/bartowski/Fara1.5-9B-GGUF)).
-
-Fara is a multimodal agent that observes a live browser through **screenshots
-(no DOM access)** and emits structured tool calls — `left_click`, `type`,
-`scroll`, `visit_url`, `web_search`, and more — to complete tasks end-to-end.
-
-### Requirements
-
-- A Fara-class vision model loaded (the Web UI auto-detects `fara`/`cua`
-  models and enables image input).
-- The model's vision projector (`mmproj-*.gguf`) downloaded alongside the
-  weights — the Model Manager flags and auto-downloads it.
-- **Playwright** — installed automatically via `requirements-inference.txt`
-  (or `pip install playwright && playwright install chromium`).
-
-### Usage
-
-1. Download and load `bartowski/Fara1.5-9B-GGUF` (any quantization; `Q4_K_M`
-   ≈ 5.91 GB) via the Model Manager.
-2. Open the **Agent** console (`/agent` in the Web UI, or click **Agent** in
-   the navbar).
-3. Enter a goal (optionally a start URL and domain allow-list), then **Run**.
-
-### Using the Agent as an API (custom apps)
-
-The agent is a plain REST + SSE API on the inference node — any HTTP client
-can drive it, no browser UI required. See the
-[API Reference](#api-reference) for the full endpoint list.
-
-**Minimal Python client:**
-
-```python
-import json
-import requests
-import sseclient  # pip install sseclient-py
-
-BASE = "http://localhost:8000"  # or the node's tunnel URL
-
-# 1. Create the session
-r = requests.post(f"{BASE}/agent/sessions", json={
-    "goal": "goto google.com and search for latest ai news",
-    "allowlist": ["google.com"],   # optional domain restriction
-    "headless": True,
-    "max_steps": 30,
-})
-session_id = r.json()["session_id"]
-
-# 2. Start the loop (returns immediately — runs in the background)
-requests.post(f"{BASE}/agent/sessions/{session_id}/run")
-
-# 3. Consume the SSE event stream
-resp = requests.get(f"{BASE}/agent/sessions/{session_id}/events", stream=True)
-for event in sseclient.SSEClient(resp):
-    data = json.loads(event.data)
-    t = data.get("type")
-    if t == "step_screenshot":
-        print(f"Step {data['index']}: {data.get('url')}")
-    elif t == "thinking":
-        print("CoT:", data.get("content", "")[:200])
-    elif t == "waiting_for_user":
-        # Critical point — answer to continue
-        ans = input(f"Agent asks: {data.get('question')} > ")
-        requests.post(f"{BASE}/agent/sessions/{session_id}/answer",
-                      json={"answer": ans})
-    elif t in ("completed", "aborted", "failed"):
-        print("Terminal:", data)
-        break
-```
-
-`curl` works too:
-
-```bash
-# Create + run
-SID=$(curl -s -X POST localhost:8000/agent/sessions \
-  -H 'Content-Type: application/json' \
-  -d '{"goal":"open google.com and search for ai news"}' | jq -r .session_id)
-
-curl -s -X POST localhost:8000/agent/sessions/$SID/run
-
-# Stream events
-curl -N localhost:8000/agent/sessions/$SID/events
-```
-
-**Key integration points:**
-
-- **Events** — the SSE stream emits per-step events: `session_started`,
-  `plan_created`, `step_screenshot` (base64 screenshot + URL/title/scroll),
-  `thinking` (chain-of-thought), `action_executed`, `plan_step_completed`,
-  `click_missed` / `action_repeat_warning` (action feedback),
-  `waiting_for_user` (critical point), `safety_blocked`, `parse_retry` /
-  `parse_error` / `execution_error`, and terminal `completed` / `aborted` /
-  `failed`.
-- **Critical points are mandatory** — the agent pauses on `ask_user_question`,
-  `pause_and_memorize_fact`, and irreversible actions. Your app must handle
-  `waiting_for_user` and call `/answer` (or `/resume`) or the session stays
-  paused.
-- **State polling** — `GET /agent/sessions/{id}` returns the full state
-  (`state`, `goal`, `plan`, `plan_index`, `steps_completed`,
-  `final_summary`, `trace`) for dashboards or when you can't hold an SSE
-  connection.
-- **Safety options** — pass `allowlist`/`blocklist` at session creation;
-  navigation outside the allow-list raises `safety_blocked`.
-- **Errors arrive as SSE data events** (`execution_error`, `parse_error`),
-  not HTTP error codes — per SSE conventions the stream stays 200.
-- **Model requirement** — the loop uses the active pool model; make sure a
-  Fara-class vision model is loaded first (via `POST /models/select`).
-
-### Safety (read this)
-
-The agent drives a **real web browser**. It ships with the controls the model
-card requires:
-
-- **Domain allow-list / block-list** — navigation outside approved domains is
-  blocked before the browser moves.
-- **Critical-point pause** — the agent stops and asks before entering personal
-  info, making payments, submitting forms, signing in, or sending messages
-  (Fara's built-in Cases 1/2/3).
-- **Watch-mode trace log** — every screenshot, action, and reasoning step is
-  recorded and visible in the step log.
-- **Immediate halt** — the Stop button tears down the browser session.
-
-> ⚠ Do **not** run the agent on a machine with anything sensitive on it — run
-> it in a VM/container or a disposable environment.
+- **Computer-Use Agent** — Native harness for Fara1.5-9B browser automation with safety controls ([docs/agent.md](docs/agent.md))
 
 ## Ollama vs LM Studio vs LlamaNet - Best Local LLM Server & Ollama Alternative
 
@@ -306,533 +188,23 @@ card requires:
 | Reasoning models (DeepSeek-R1, Qwen, GPT-OSS streaming) | partial | partial | partial | yes |
 | Run on Mac Apple Silicon (Metal) | yes | yes | varies | yes - Metal auto-detect |
 
-## Multi-Model Pool
-
-LlamaNet supports loading multiple models simultaneously in a pool with automatic LRU (Least Recently Used) eviction. This lets you:
-
-- **Instant model switching** — switch between loaded models without reload time
-- **Memory-aware capacity** — auto-detects how many models fit in your RAM/VRAM
-- **LRU eviction** — when pool is full, the least recently used model is evicted to make room
-
-### Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAX_MODELS` | `0` (auto) | Max models in memory (0 = auto-detect from RAM) |
-| `MEMORY_BUDGET_GB` | `0` (auto) | Max RAM for models (0 = auto-detect) |
-
-### How It Works
-
-1. **First model** loads normally on startup (or via Web UI)
-2. **Loading a second model** adds it to the pool (if capacity allows)
-3. **When pool is full**, the least recently used model is evicted
-4. **Switching between pool models** is instant — no reload overlay
-5. **Pool state persists** across restarts via `~/.llamanet/pool_history.json`
-
-## Supported Models - Llama 3, Mistral, Qwen, Phi, Gemma, DeepSeek-R1
-
-Works with any GGUF file from Hugging Face: Llama 3.2, Llama 3.1 8B, Mistral 7B, Qwen 2.5 4B / 14B / 32B, Phi-4 Mini, Gemma 3 12B, DeepSeek-R1 Distill 32B, GPT-OSS 20B. Search by name in the Web UI Model Manager.
-
-## Recommended Models by Tier
-
-| Tier | Model | Size (Q4_K_M) | Min RAM | Best For |
-|------|-------|---------------|---------|----------|
-| **Tiny** | Phi-4 Mini | ~1.5 GB | 8 GB | Quick tasks, edge devices, fast iteration |
-| **Fast** | Qwen 4B | ~2.5 GB | 8 GB | Daily driver — fast responses, solid quality |
-| **Fast** | Llama 3.1 8B Instruct (abliterated) | ~4.7 GB | 16 GB | Daily driver — fast, uncensored, strong quality |
-| **Versatile** | Gemma 3 12B | ~7 GB | 24 GB | General-purpose, multilingual, strong reasoning |
-| **Coding** | Qwen 14B | ~8 GB | 32 GB | Code generation, technical tasks |
-| **Premium** | GPT-OSS 20B | ~12 GB | 32 GB | High-quality general-purpose inference |
-| **High Quality** | Qwen 35B-A3B | ~20 GB | 48 GB | Expert-level reasoning, long-form generation |
-| **Reasoning** | DeepSeek-R1 Distill 32B | ~18 GB | 48 GB | Chain-of-thought reasoning, math, analysis |
-
-### Which Tier Fits Your Hardware?
-
-| Your Hardware | Recommended Tiers | Notes |
-|---------------|-------------------|-------|
-| Mac M1/M2 8GB | Tiny, Fast | Use Q4_K_M quantization |
-| Mac M1/M2 Pro 16GB | Tiny → Fast | Fast tier runs great on Pro chips |
-| Mac M3/M4 Pro 18GB+ | Tiny → Versatile | Gemma 3 12B runs well on Pro chips |
-| Mac M2/M3 Max 32GB+ | All tiers | Max chips handle even the largest models |
-| Mac M2 Ultra 64GB+ | All tiers | No compromises — run anything |
-| NVIDIA 8GB VRAM | Tiny, Fast | RTX 3070, 4060, etc. |
-| NVIDIA 12GB VRAM | Tiny → Versatile | RTX 3060 12GB, 4070 |
-| NVIDIA 24GB VRAM | Tiny → Premium | RTX 3090, 4090 |
-| NVIDIA 48GB+ VRAM | All tiers | A6000, A100, multi-GPU setups |
-
-## Architecture
-
-LlamaNet uses a **gateway-centric, tunnel-only** architecture:
-
-- **Gateway** (`llamanet.app`) — Central registry, authentication, request routing
-- **Inference Nodes** — GPU owners running models behind Cloudflare tunnels
-- **Tunnel URLs** — Every node has a public HTTPS URL. No IP:port addressing.
-
-All peer discovery and communication goes through the gateway. There is no peer-to-peer networking, DHT, or distributed hash table. This keeps the system simple, reliable, and NAT-friendly.
-
-### Running Your Own Gateway
-
-You can run a private gateway for your organization or team. The gateway is a lightweight FastAPI server that handles node registration, authentication, request routing, and real-time SSE updates.
-
-#### 1. Set Up Supabase
-
-The gateway requires a [Supabase](https://supabase.com/) project for persistence:
-
-1. Create a free project at [supabase.com](https://supabase.com)
-2. Run the schema from `sql/schema.sql` in the SQL Editor
-3. Enable Google OAuth in **Authentication → Providers** (optional)
-
-#### 2. Configure Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SUPABASE_URL` | ✅ | Your Supabase project URL |
-| `SUPABASE_SECRET_KEY` | ✅ | Supabase service role secret key |
-| `SUPABASE_PUBLISHABLE_KEY` | — | Supabase anon/publishable key |
-| `PORT` | — | Gateway port (default: 8000) |
-| `LLAMANET_DAILY_TOKEN_BUDGET` | — | Daily token limit per API key (default: 500000) |
-| `LLAMANET_HOURLY_COMPUTE_BUDGET` | — | Hourly compute units per API key (default: 10000) |
-| `LLAMANET_MAX_KEY_CONCURRENT` | — | Max concurrent requests per API key (default: 3) |
-| `CF_API_TOKEN` | — | Cloudflare API token (for managed tunnels) |
-| `CF_ACCOUNT_ID` | — | Cloudflare account ID |
-| `CF_ZONE_ID` | — | Cloudflare DNS zone ID |
-| `CF_TUNNEL_DOMAIN` | — | Domain for managed tunnels (default: `llamanet.app`) |
-
-#### 3. Start the Gateway
-
-```bash
-# Set environment variables
-export SUPABASE_URL="https://your-project.supabase.co"
-export SUPABASE_SECRET_KEY="your-service-role-key"
-
-# Start gateway
-LLAMANET_MODE=landing sh start-app.sh
-```
-
-#### 4. Connect Nodes to Your Gateway
-
-```bash
-# On inference nodes, point to your gateway
-llamanet run hf.co/user/Model:Q4_K_M --bootstrap-peers https://your-gateway.com
-```
-
-#### Quality Gate
-
-The gateway includes a configurable quality gate that validates nodes at registration time. All thresholds default to disabled — set environment variables to enable:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLAMANET_REQUIRE_GPU` | `false` | Reject nodes without GPU acceleration |
-| `LLAMANET_REQUIRE_TUNNEL` | `false` | Reject nodes without a tunnel URL |
-| `LLAMANET_EXCLUDE_HARDWARE` | — | Comma-separated hardware patterns to reject (e.g. `intel-mac,cpu-only`) |
-| `LLAMANET_MAX_TTFT` | `0` | Maximum time-to-first-token in seconds (0 = disabled) |
-| `LLAMANET_MAX_LATENCY` | `0` | Maximum latency in seconds (0 = disabled) |
-| `LLAMANET_MIN_TPS` | `0` | Minimum tokens-per-second (0 = disabled) |
-
-Quality gate operates in two phases:
-1. **Hardware check** — Instant, no network call (platform, GPU, tunnel URL)
-2. **Performance check** — Uses self-reported native probe metrics from the inference node
-
-## Web UI
-
-Every inference node serves a built-in web UI at `http://localhost:8000`:
-
-- **Model Manager** — Search Hugging Face for GGUF models, download with real-time progress, switch models without restarting. Opens automatically when no model is loaded.
-- **Chat Interface** — Talk to your model with streaming responses and markdown rendering
-- **Network Dashboard** — See all connected nodes, models, and real-time metrics via SSE
-- **System Prompt** — Configure custom system prompts with presets
-
-The typical workflow is: start your node → open the Web UI → download a model → chat. Switching models is instant — no restart required.
-
-**No-Model Mode:** When started without a model, the node launches in router-only mode. It can still forward requests to other nodes on the network. Use the Model Manager to download and hot-load a model when ready.
-
-## URL Formats
-
-These formats work with `./start-app.sh run` and the Web UI Model Manager:
-
-```bash
-hf.co/user/model                 # Latest
-hf.co/user/model:Q4_K_M         # With quantization
-user/model:Q4_K_M               # Short format
-```
-
-The Model Manager also accepts plain search queries — just type a model name and browse results.
-
-## Cloudflare Tunnels
-
-A tunnel URL is **required** to join the LlamaNet network. The `--tunnel` flag handles everything automatically.
-
-### Quick Tunnel (No Account Needed)
-
-```bash
-sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel
-```
-
-Generates a temporary URL that changes on restart. No Cloudflare account needed.
-
-### Named Tunnel (Persistent URL, Free Account)
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create bootstrap
-cloudflared tunnel route dns bootstrap bootstrap.llamanet.app
-sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel
-```
-
-The URL persists across restarts.
-
-## Environment Variables
-
-### Inference Node
-
-| Variable | Default                | Description |
-|----------|------------------------|-------------|
-| `MODEL_PATH` | —                      | Path to GGUF model file |
-| `PORT` | `8000`                 | HTTP API port |
-| `HOST` | `0.0.0.0`              | Bind address |
-| `N_GPU_LAYERS` | `-1`                   | GPU layers (-1 = all, 0 = CPU only) |
-| `N_CTX` | `0`                    | Context window in tokens (0 = auto-detect from model) |
-| `N_BATCH` | `256`                  | Batch size in tokens |
-| `N_UBATCH` | `512`                  | Physical micro-batch size in tokens |
-| `N_PARALLEL` | `1`                    | Number of parallel slots |
-| `N_THREADS` | `0`                    | CPU threads for generation (0 = auto) |
-| `N_THREADS_BATCH` | `0`                    | CPU threads for prefill (0 = auto) |
-| `FLASH_ATTN` | `false`                | Enable FlashAttention |
-| `CACHE_TYPE_K` | `f16`                  | KV cache key type: f16, q8_0, q4_0 |
-| `CACHE_TYPE_V` | `f16`                  | KV cache value type: f16, q8_0, q4_0 |
-| `MAX_MODELS` | `0`                    | Max models in pool (0 = auto-detect from RAM) |
-| `MEMORY_BUDGET_GB` | `0`                    | Max RAM for models (0 = auto-detect) |
-| `BOOTSTRAP_PEERS` | `https://llamanet.app` | Gateway URL (auto-set by installer) |
-| `PUBLIC_IP` | —                      | Override public IP detection |
-| `LLAMANET_TUNNEL_URL` | —                      | Override tunnel URL |
-| `NODE_ID` | —                      | Override auto-generated node ID |
-| `VERBOSE` | `false`                | Enable verbose llama-cpp-python logging |
-
-### Gateway
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SUPABASE_URL` | — | Supabase project URL (required) |
-| `SUPABASE_SECRET_KEY` | — | Supabase service role key (required) |
-| `SUPABASE_PUBLISHABLE_KEY` | — | Supabase anon key |
-| `LLAMANET_DAILY_TOKEN_BUDGET` | `500000` | Daily token limit per API key |
-| `LLAMANET_HOURLY_COMPUTE_BUDGET` | `10000` | Hourly compute units per API key |
-| `LLAMANET_MAX_KEY_CONCURRENT` | `3` | Max concurrent requests per API key |
-| `LLAMANET_REQUIRE_GPU` | `false` | Quality gate: require GPU |
-| `LLAMANET_REQUIRE_TUNNEL` | `false` | Quality gate: require tunnel URL |
-| `LLAMANET_EXCLUDE_HARDWARE` | — | Quality gate: excluded hardware patterns |
-| `LLAMANET_MAX_TTFT` | `0` | Quality gate: max TTFT in seconds |
-| `LLAMANET_MAX_LATENCY` | `0` | Quality gate: max latency in seconds |
-| `LLAMANET_MIN_TPS` | `0` | Quality gate: min tokens per second |
-
-## Token Budget & Rate Limiting
-
-The gateway enforces several rate limits and budgets to ensure fair usage:
-
-| Limit | Default | Scope |
-|-------|---------|-------|
-| Daily token budget | 500,000 tokens | Per API key (resets midnight UTC) |
-| Hourly compute budget | 10,000 units | Per API key |
-| Concurrent requests | 3 | Per API key |
-| API RPM | 60 | Per API key |
-| Global RPM | 500 | All keys combined |
-
-Compute units are estimated based on model size and `max_tokens`:
-- Small models (≤3B): 1× multiplier
-- Medium models (7-8B): 2× multiplier
-- Large models (13-20B): 4-6× multiplier
-- Very large models (≥35B): 8× multiplier
-
-Check your usage at **/auth/token-usage** (requires authentication).
-
-## API Reference
-
-### Inference Node (local)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/v1/chat/completions` | POST | Chat completion (streaming supported) |
-| `/v1/completions` | POST | Text completion (streaming supported) |
-| `/v1/models` | GET | List all models in the pool |
-| `/v1/models/network` | GET | List local models with node metadata |
-| `/models/search` | GET | Search Hugging Face for GGUF models |
-| `/models/details/{repo_id}` | GET | Get model details including GGUF files |
-| `/models/download` | POST | Start downloading a model |
-| `/models/download/status` | GET | SSE stream for download progress |
-| `/models/download/{id}` | DELETE | Cancel an active download |
-| `/models/local` | GET | List locally cached models |
-| `/models/local/{id}` | DELETE | Delete a local model |
-| `/models/select` | POST | Switch or load a model (pool or replace mode) |
-| `/models/pool` | GET | Current pool status |
-| `/models/pool/evict` | POST | Manually evict a model from the pool |
-| `/models/pool/capacity` | GET | Pool capacity info |
-| `/models/statistics` | GET | Local model statistics |
-| `/models/system-info` | GET | Hardware specs for client-side filtering |
-| `/events/network` | GET | SSE stream for real-time network events |
-| `/agent/sessions` | POST | Create a computer-use agent session (goal + allow-list) |
-| `/agent/sessions/{id}/run` | POST | Start the agent loop |
-| `/agent/sessions/{id}/pause` | POST | Pause the agent |
-| `/agent/sessions/{id}/resume` | POST | Resume the agent |
-| `/agent/sessions/{id}/answer` | POST | Answer a critical-point question and resume |
-| `/agent/sessions/{id}/stop` | POST | Abort the agent session |
-| `/agent/sessions/{id}` | GET | Session state + trace log |
-| `/agent/sessions/{id}/events` | GET | SSE stream (screenshots, steps, reasoning) |
-| `/health` | GET | Health check |
-| `/status` | GET | Node status and metrics |
-| `/info` | GET | Node configuration info |
-| `/tunnel/status` | GET | Tunnel status and URL |
-
-### Gateway (`llamanet.app`)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/v1/chat/completions` | POST | Route chat completion to best node (requires API key) |
-| `/v1/completions` | POST | Route completion to best node (requires API key) |
-| `/v1/models` | GET | List all available models (requires API key) |
-| `/api/models` | GET | Public model listing |
-| `/api/models/{slug}` | GET | Get nodes for a specific model |
-| `/api/network/stats` | GET | Network statistics |
-| `/events/network` | GET | SSE stream for network events |
-| `/auth/google` | GET | Google OAuth login |
-| `/auth/me` | GET | Current authenticated user |
-| `/auth/api-keys` | GET | List user's API keys |
-| `/auth/api-keys` | POST | Create a new API key |
-| `/auth/api-keys/{id}` | DELETE | Revoke an API key |
-| `/auth/token-usage` | GET | Today's token usage for user's API keys |
-| `/health` | GET | Gateway health check |
-
-## Setup
-
-### macOS
-
-**Apple Silicon (M1/M2/M3/M4)** — full GPU acceleration via Metal, no extra steps:
-
-```bash
-# One-liner install (recommended)
-curl -sSL https://llamanet.app/install.sh | sh
-llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
-```
-
-Or install from source:
-
-```bash
-git clone https://github.com/machaao/llama-net.git
-cd llama-net
-pip install -r requirements-inference.txt
-sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
-```
-
-**Intel Macs** — Metal shaders in `llama-cpp-python` 0.3.x are incompatible with Intel GPUs.
-LlamaNet auto-detects Intel Macs and disables Metal at startup (CPU-only mode). No manual configuration needed.
-
-If you need to force it manually:
-
-```bash
-export LLAMA_NO_METAL=1
-llamanet
-```
-
-You can also pass `--no-gpu` to the inference node directly:
-
-```bash
-python -m inference_node.server --no-gpu --tunnel --bootstrap-peers https://llamanet.app
-```
-
-### Linux
-
-Works on any Linux distro with Python 3.9+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
-
-```bash
-# One-liner install (recommended)
-curl -sSL https://llamanet.app/install.sh | sh
-llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
-```
-
-Or install from source:
-
-```bash
-git clone https://github.com/machaao/llama-net.git
-cd llama-net
-pip install -r requirements-inference.txt
-sh start-app.sh run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
-```
-
-For CPU-only or non-NVIDIA setups:
-
-```bash
-N_GPU_LAYERS=0 llamanet
-```
-
-### Windows
-
-Works on Windows 10/11 with Python 3.9+. For NVIDIA GPUs, ensure drivers and CUDA are installed:
-
-```powershell
-# One-liner install (recommended)
-irm https://llamanet.app/install.ps1 | iex
-llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
-```
-
-Or install from source:
-
-```cmd
-git clone https://github.com/machaao/llama-net.git
-cd llama-net
-pip install -r requirements-inference.txt
-start-app.bat run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel --bootstrap-peers https://llamanet.app
-```
-
-For CPU-only mode:
-
-```cmd
-set N_GPU_LAYERS=0
-start-app.bat --tunnel --bootstrap-peers https://llamanet.app
-```
-
-**Notes:**
-- Use `start-app.bat` instead of `sh start-app.sh` on Windows
-- Python must be in your PATH (install from python.org with "Add to PATH" checked)
-- `cloudflared` for tunnels can be downloaded from https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/
-
-### Cloud / Remote Operators
-
-Run a node on any VPS or cloud instance (AWS, GCP, Azure, Hetzner, etc.):
-
-```bash
-curl -sSL https://llamanet.app/install.sh | sh
-llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
-```
-
-**GPU instances:** Install NVIDIA drivers + CUDA toolkit before running. The node auto-detects GPU availability.
-
-**CPU instances:** Set `N_GPU_LAYERS=0` or use `--no-gpu`. Smaller models (≤3B parameters) work well on CPU.
-
-**Persistent tunnel:** For a stable URL across restarts, set up a named Cloudflare tunnel:
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create my-node
-cloudflared tunnel route dns my-node node.mydomain.com
-llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M --tunnel
-```
-
-## Run on a GPU Cloud Provider (No Hardware Needed)
-
-Don't have a GPU? Rent one by the hour and run LlamaNet in 2 minutes.
-
-### RunPod (Recommended)
-
-1. Go to [runpod.io](https://runpod.io) and create an account
-2. Click **Deploy** → **Custom** → paste Docker image: `machaao/llamanet:latest`
-3. Select a GPU (see sizing table below)
-4. Set **Environment Variables**:
-   - `MODEL_URL` = `hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M`
-5. Expose **Port 8000** (TCP)
-6. Click **Deploy**
-7. Open the proxy URL — Web UI loads automatically
-8. Your node joins the `llamanet.app` network
-
-| GPU | VRAM | Recommended Models | ~Cost/hr |
-|-----|------|--------------------|----------|
-| RTX 4060 | 8 GB | Phi-4 Mini, Qwen 4B | ~$0.20 |
-| RTX 4090 | 24 GB | Llama 3.1 8B, Gemma 12B, Qwen 14B | ~$0.44 |
-| A100 80GB | 80 GB | Qwen 35B, DeepSeek-R1 32B | ~$1.64 |
-
-**Environment Variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL_URL` | *(empty)* | HuggingFace model URL (e.g. `hf.co/user/Model:Q4_K_M`) |
-| `ENABLE_TUNNEL` | `true` | Join public llamanet.app network |
-| `N_GPU_LAYERS` | `-1` | GPU layers (-1 = all) |
-| `N_CTX` | `4096` | Context window in tokens |
-| `BOOTSTRAP_PEERS` | `https://llamanet.app` | Gateway URL |
-
-### vast.ai
-
-1. Go to [vast.ai](https://vast.ai) and create an account
-2. Search for GPU rentals → click **Rent** on a machine
-3. Set **Docker Image**: `machaao/llamanet:latest`
-4. Set **Environment Variables** (same as RunPod above)
-5. Set **Port Mapping**: `8000`
-6. Launch — Web UI available at the instance proxy URL
-
-### Docker Hub
-
-The image is published at `machaao/llamanet:latest`:
-
-```bash
-# Run locally with GPU
-docker run --gpus all -p 8000:8000 \
-  -e MODEL_URL="hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M" \
-  machaao/llamanet:latest
-
-# Run without GPU (CPU only)
-docker run -p 8000:8000 \
-  -e MODEL_URL="hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M" \
-  -e N_GPU_LAYERS=0 \
-  machaao/llamanet:latest
-```
-
-> **Note:** The MACHAAO cloud platform handles containerization automatically — a `Dockerfile` is not required for cloud deployment. Use `start-app.sh` as the entrypoint and deploy via the `/deploy` command.
-
-### Build & Push Your Own Image
-
-```bash
-git clone https://github.com/machaao/llama-net.git
-cd llama-net
-docker build -t yourusername/llamanet:latest .
-docker push yourusername/llamanet:latest
-```
-
-### Operating Your Own Rig
-
-For dedicated GPU machines (desktop, workstation, or server):
-
-1. **Install with one command:**
-   ```bash
-   curl -sSL https://llamanet.app/install.sh | sh
-   ```
-
-2. **Start with a model:**
-   ```bash
-   llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M
-   ```
-
-3. **Or start empty and download via Web UI:**
-   ```bash
-   llamanet
-   ```
-   Open `http://localhost:8000` → Model Manager → search → download → chat.
-
-4. **Switch models at any time** via the Web UI without restarting.
-
-**Tips:**
-- Use `--ctx-size` to control context window (default: 4096)
-- Use `--gpu-layers -1` to offload all layers to GPU (default)
-- Use `--gpu-layers N` to split between GPU and CPU for large models
-- The node auto-generates a persistent ID stored in `~/.llamanet_node_id`
-- The node auto-joins the public network at `llamanet.app` (override with `--bootstrap-peers`)
-
-## FAQ
-
-**How to run LLM on Mac for free?**
-`curl -sSL https://llamanet.app/install.sh | sh` then `llamanet run hf.co/mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated-GGUF:Q4_K_M`. Open `http://localhost:8000`.
-
-**How to get a free OpenAI API?**
-Run LlamaNet, get public URL via tunnel, call `/v1/chat/completions` with any OpenAI client. Or use `https://llamanet.app/v1` with free API key.
-
-**How to share local LLM publicly?**
-Start with `--tunnel`. Node gets HTTPS URL, joins `llamanet.app` gateway. No port forwarding.
-
-**Is it an Ollama alternative?**
-Yes for local GGUF + OpenAI API, plus built-in sharing, browser model manager, and multi-model pool.
-
-**Can I run Llama 3 / Mistral / Qwen locally on Apple Silicon?**
-Yes. LlamaNet uses llama.cpp with Metal acceleration. Download any GGUF quantization (Q4_K_M recommended) via the Model Manager and chat at `http://localhost:8000`.
-
-**Do I need a GPU or Docker or port forwarding?**
-No. Runs on Mac CPU, Apple Silicon GPU, NVIDIA CUDA, or plain CPU. No Docker, no Kubernetes, no port forwarding — tunnel provides public HTTPS URL.
+## Enterprise & Private Deployments
+
+Running LlamaNet inside a company, team, or research lab? The gateway is a lightweight FastAPI service you can host internally — nodes and API consumers stay on your network, with your own auth, budgets, and quality gate.
+
+See **[docs/gateway.md](docs/gateway.md)** for:
+- One-afternoon internal gateway setup (Supabase + gateway + team rollout)
+- Pointing team nodes at an internal gateway (`--bootstrap-peers https://your-gateway`)
+- Per-key token budgets, concurrency limits, and the node quality gate
+- Security and operations notes for private deployments
+
+## Requirements
+
+- Python 3.9+
+- GGUF format models
+- 4GB+ RAM (depends on model size)
+- `cloudflared` (auto-installed by the installer and `start-app.sh` on macOS/Linux)
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) — C/C++ inference engine that powers all GGUF model execution via [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
 
 ## Built On
 
@@ -844,11 +216,3 @@ LlamaNet is built on top of these open-source projects:
 - **[Cloudflare Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)** — Automatic public HTTPS URLs for every node.
 - **[Supabase](https://supabase.com/)** — Backend for gateway authentication, node registry, and API keys.
 - **[Hugging Face](https://huggingface.co/)** — Model discovery and GGUF file hosting.
-
-## Requirements
-
-- Python 3.9+
-- GGUF format models
-- 4GB+ RAM (depends on model size)
-- `cloudflared` (auto-installed by the installer and `start-app.sh` on macOS/Linux)
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) — C/C++ inference engine that powers all GGUF model execution via [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
