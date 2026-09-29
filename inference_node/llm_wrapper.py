@@ -210,8 +210,14 @@ class LlamaWrapper:
         """Private single-model initializer. Called only from __init__."""
         # Resolve vision projector for multimodal models (Fara, LLaVA, etc.)
         mmproj_path = self._resolve_mmproj_path()
+        self._mmproj_path = mmproj_path
         if mmproj_path:
             logger.info(f"Loading vision projector: {mmproj_path}")
+        elif self.supports_vision:
+            logger.warning(
+                f"⚠  Vision model '{self._model_name}' has NO mmproj projector — "
+                f"images will be ignored by llama.cpp"
+            )
 
         llama_kwargs = {
             "model_path": model_path,
@@ -275,6 +281,13 @@ class LlamaWrapper:
                 if self.supports_vision:
                     # Preserve multimodal content for vision-capable models.
                     # llama-cpp-python expects the OpenAI-style content array.
+                    n_images = sum(1 for p in content if p.get("type") == "image_url")
+                    if n_images:
+                        logger.info(
+                            f"🖼  Passing {n_images} image(s) to vision model "
+                            f"'{self._model_name}' "
+                            f"(mmproj={'yes' if getattr(self, '_mmproj_path', None) else 'NO'})"
+                        )
                     formatted.append({
                         "role": role,
                         "content": content

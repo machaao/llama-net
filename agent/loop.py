@@ -168,6 +168,10 @@ class AgentLoop:
                 "image_url": {"url": screenshot},
             })
         messages.append({"role": "user", "content": content_parts})
+        logger.debug(
+            f"📝 Built {len(messages)} messages; text grounding sent to model:\n"
+            f"Goal: {self.goal}\n{page_context}"
+        )
         return messages
 
     # ── Core loop ────────────────────────────────────────────────────────
@@ -212,6 +216,12 @@ class AgentLoop:
         except Exception:
             current_url, current_title = "", ""
 
+        logger.info(
+            f"🔎 Step {self.steps_completed + 1}: url={current_url or 'about:blank'} "
+            f"title={current_title!r} screenshot={'yes' if screenshot else 'NO'} "
+            f"({len(screenshot)} chars)"
+        )
+
         await self._emit(
             "step_screenshot",
             index=self.steps_completed + 1,
@@ -221,6 +231,23 @@ class AgentLoop:
         )
 
         messages = self._build_messages(screenshot, url=current_url, title=current_title)
+        # Log the exact message shape sent to the model so we can confirm the
+        # image part is present and vision is actually engaged.
+        last_user = messages[-1] if messages else {}
+        last_content = last_user.get("content")
+        if isinstance(last_content, list):
+            part_types = [p.get("type") for p in last_content]
+            logger.info(
+                f"🧠 Sending {len(messages)} messages to model; "
+                f"last user content parts={part_types}; "
+                f"vision={'on' if getattr(self.llm, 'supports_vision', False) else 'OFF'}"
+            )
+        else:
+            logger.warning(
+                f"🧠 Sending {len(messages)} messages; last user content is "
+                f"{type(last_content).__name__} (no image part!)"
+            )
+
         result = await self.llm.generate_chat_multimodal(
             messages=messages,
             temperature=0.3,
@@ -229,6 +256,8 @@ class AgentLoop:
         )
         raw_text = result.get("content", "") or result.get("text", "")
         reasoning = result.get("reasoning", "")
+
+        logger.info(f"🤖 Model output ({len(raw_text)} chars): {raw_text[:300]!r}")
 
         await self._emit("model_response", reasoning=reasoning, raw=raw_text)
 

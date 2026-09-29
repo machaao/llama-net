@@ -79,11 +79,25 @@ class BrowserSession:
         Returns ``""`` (empty string) if the page is not available.
         """
         if self._page is None:
+            logger.warning("📸 Screenshot requested but no page is open")
             return ""
         data = await self._page.screenshot(
             type="jpeg", quality=_SCREENSHOT_QUALITY, full_page=False
         )
         b64 = base64.b64encode(data).decode("ascii")
+        # A blank/white page compresses to a tiny JPEG. Log the size so we can
+        # tell "page rendered" from "page is blank" without eyeballing images.
+        size_kb = len(data) / 1024
+        if size_kb < 5:
+            logger.warning(
+                f"📸 Screenshot suspiciously small ({size_kb:.1f} KB) — page may be "
+                f"blank. url={self._page.url}"
+            )
+        else:
+            logger.info(
+                f"📸 Screenshot captured: {size_kb:.1f} KB JPEG, "
+                f"b64={len(b64)} chars, url={self._page.url}"
+            )
         return f"data:image/jpeg;base64,{b64}"
 
     async def wait_for_settle(self, timeout_ms: int = 5000, settle_ms: int = 800) -> None:
@@ -98,11 +112,18 @@ class BrowserSession:
         """
         if self._page is None:
             return
+        url_before = self._page.url
+        load_state = "unknown"
         try:
             await self._page.wait_for_load_state("load", timeout=timeout_ms)
-        except Exception:
-            pass  # load state may already be reached or the page may be slow
+            load_state = "load"
+        except Exception as e:
+            load_state = f"timeout/error ({type(e).__name__})"
         await asyncio.sleep(settle_ms / 1000)
+        logger.info(
+            f"⏳ Settled after action: load_state={load_state}, "
+            f"url={url_before} → {self._page.url}, waited {settle_ms}ms"
+        )
 
     @property
     def page(self):
