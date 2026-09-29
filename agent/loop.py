@@ -16,7 +16,9 @@ from common.utils import get_logger
 from agent.actions import AgentAction
 from agent.browser_session import BrowserSession
 from agent.parser import ToolCallParser, ToolCallParseError
-from agent.prompts import build_system_prompt
+from json_repair import loads as repair_json_loads
+
+from agent.prompts import build_system_prompt, PLAN_INSTRUCTIONS
 from agent.safety import SafetyController, SafetyViolation
 
 logger = get_logger(__name__)

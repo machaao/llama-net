@@ -131,8 +131,16 @@ class AgentConsole {
                 if (data.url) {
                     document.getElementById('agent-url').textContent = data.url;
                 }
-                this._appendLog('system', `Step ${data.index}`,
-                    data.url ? `URL: ${data.url}${data.title ? ' — ' + data.title : ''}` : '');
+                {
+                    let body = data.url
+                        ? `URL: ${data.url}${data.title ? ' — ' + data.title : ''}`
+                        : '';
+                    if (data.max_scroll_y > 0) {
+                        const pct = Math.round((data.scroll_y / data.max_scroll_y) * 100);
+                        body += `${body ? ' · ' : ''}scroll ${pct}%`;
+                    }
+                    this._appendLog('system', `Step ${data.index}`, body);
+                }
                 break;
             case 'thinking':
                 this._appendLog('thinking', 'Thinking…', data.content || '');

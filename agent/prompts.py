@@ -56,8 +56,17 @@ def build_system_prompt(allowlist: list = None, goal: str = "") -> str:
     return prompt
 
 
+PLAN_INSTRUCTIONS = """Plan usage:
+- An ordered plan for this goal is provided below. Work through the steps in order.
+- When the current plan step is fully achieved, emit exactly one complete_step tool call with a short note describing what was accomplished, then continue with the next step.
+- Emit terminate {summary} only when every plan step is done (or the task is impossible).
+- Scroll convention: a POSITIVE delta scrolls DOWN (increases scrollY); a NEGATIVE delta scrolls UP.
+"""
+
+
 __all__ = [
     "FARA_SYSTEM_PROMPT",
+    "PLAN_INSTRUCTIONS",
     "CRITICAL_POINT_INSTRUCTIONS",
     "build_system_prompt",
 ]

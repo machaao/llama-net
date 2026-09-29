@@ -91,6 +91,7 @@ _INFER_FROM_ARGS: tuple = (
     ("fact", "pause_and_memorize_fact"),
     ("description", "top_level_memory"),
     ("summary", "terminate"),
+    ("note", "complete_step"),
     ("text", "type"),
     ("delta", "scroll"),
 )

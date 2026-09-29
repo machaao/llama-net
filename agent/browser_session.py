@@ -278,6 +278,42 @@ class BrowserSession:
         finally:
             await handle.dispose()
 
+    async def _scroll_state(self) -> Dict[str, Any]:
+        """Combined scroll position state in a single evaluate."""
+        return await self._page.evaluate(
+            """() => {
+                const el = document.scrollingElement || document.documentElement;
+                const y = window.scrollY || 0;
+                const x = window.scrollX || 0;
+                const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                return {
+                    x, y, max,
+                    at_bottom: y >= max - 2,
+                    at_top: y <= 2,
+                    can_scroll: max > 10,
+                };
+            }"""
+        )
+
+    async def current_scroll(self) -> Dict[str, Any]:
+        """Authoritative scroll position for prompt grounding.
+
+        Returns ``{"x", "y", "max_y", "at_bottom", "at_top", "can_scroll"}``.
+        Empty defaults when no page is open or the evaluate fails.
+        """
+        empty = {"x": 0, "y": 0, "max_y": 0, "at_bottom": False,
+                 "at_top": True, "can_scroll": False}
+        if self._page is None:
+            return dict(empty)
+        try:
+            s = await self._scroll_state()
+        except Exception as e:
+            logger.debug(f"current_scroll failed: {e}")
+            return dict(empty)
+        return {"x": s["x"], "y": s["y"], "max_y": s["max"],
+                "at_bottom": s["at_bottom"], "at_top": s["at_top"],
+                "can_scroll": s["can_scroll"]}
+
     async def scroll_by(self, delta_x: int, delta_y: int) -> Dict[str, Any]:
         """Scroll by (delta_x, delta_y) pixels and verify the page moved.
 

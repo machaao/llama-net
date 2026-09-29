@@ -24,6 +24,7 @@ CONTROL_ACTIONS = {
     "ask_user_question",
     "terminate",
     "top_level_memory",
+    "complete_step",
 }
 
 ALL_ACTION_NAMES = (
