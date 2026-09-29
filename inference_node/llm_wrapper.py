@@ -219,6 +219,17 @@ class LlamaWrapper:
                 f"images will be ignored by llama.cpp"
             )
 
+        # Invariant: quantized V cache requires FlashAttention. Enforce it here
+        # too (the pool's synthetic configs bypass InferenceConfig.__init__).
+        flash_attn = getattr(config, 'flash_attn', False)
+        cache_type_v = getattr(config, 'cache_type_v', 'f16')
+        if cache_type_v in ('q8_0', 'q4_0') and not flash_attn:
+            logger.warning(
+                "⚠  Quantized V cache without flash_attn is invalid — "
+                "auto-enabling FlashAttention for this model load"
+            )
+            flash_attn = True
+
         llama_kwargs = {
             "model_path": model_path,
             "n_ctx": config.n_ctx,
@@ -231,7 +242,7 @@ class LlamaWrapper:
             "verbose": config.verbose,
             "reasoning": True,
             "chat_format": self.detected_chat_format,
-            "flash_attn": getattr(config, 'flash_attn', False),
+            "flash_attn": flash_attn,
             "type_k": _resolve_kv_cache_type(getattr(config, 'cache_type_k', 'f16')),
             "type_v": _resolve_kv_cache_type(getattr(config, 'cache_type_v', 'f16')),
         }

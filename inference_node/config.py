@@ -234,6 +234,17 @@ class InferenceConfig:
                     "CACHE_TYPE_K/V)"
                 )
 
+        # ── Invariant: quantized V cache requires FlashAttention ──
+        # llama.cpp rejects context creation with type_v quantized unless
+        # flash_attn is on ("quantized V cache requires flash_attn to be
+        # enabled"). Auto-enable instead of crashing at model-load time.
+        if self.cache_type_v in ("q8_0", "q4_0") and not self.flash_attn:
+            self.flash_attn = True
+            logger.info(
+                "Quantized V cache requested — enabling FlashAttention "
+                "(required by llama.cpp; override by setting CACHE_TYPE_V=f16)"
+            )
+
         # Auto-detect context size from model if n_ctx == 0 (or legacy default 4096)
         # Treat 4096 as "unset" ONLY when it came from env (not CLI)
         # because it was the old hardcoded default and stale N_CTX=4096
