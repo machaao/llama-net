@@ -717,7 +717,7 @@ class AgentLoop:
                 logger.warning(
                     f"📜 Scroll had no effect: delta={delta} "
                     f"scrollY={exec_result.get('scroll_y', 0)} "
-                    `can_scroll={exec_result.get('can_scroll', '?')}`
+                    f"can_scroll={exec_result.get('can_scroll', '?')}"
                 )
             await self._emit("action_feedback", action=action.to_dict(), message=action_feedback)
 
