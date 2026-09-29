@@ -143,6 +143,10 @@ class AgentConsole {
             case 'action_executed':
                 this._appendLog('action', 'Action', this._formatAction(data.result || data));
                 break;
+            case 'action_repeat_warning':
+                this._appendLog('paused', `Repeated action ×${data.count} — no effect`,
+                    'The same action keeps failing. Nudging the model to try a different approach.');
+                break;
             case 'waiting_for_user':
                 this._setStatus('Waiting for user', 'warning');
                 this._setControls('waiting');

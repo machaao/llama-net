@@ -124,6 +124,11 @@ class AgentLoop:
         self._parse_retries = 0          # number of consecutive parse failures
         self.MAX_PARSE_RETRIES = 2       # corrective nudge attempts before failing
 
+        # Repeated-action detection (breaks no-effect click loops)
+        self._last_action_key: Optional[str] = None
+        self._repeat_count = 0
+        self.MAX_IDENTICAL_REPEATS = 3
+
         self._task: Optional[asyncio.Task] = None
 
     # ── Event helpers ───────────────────────────────────────────────────
@@ -175,6 +180,19 @@ class AgentLoop:
         return messages
 
     # ── Core loop ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _action_key(action: AgentAction) -> str:
+        """Stable key for repeat detection — coordinates rounded to tolerate
+        ±4px jitter so (827,36) and (829,36) count as the same click."""
+        args = action.arguments
+        parts = [action.name]
+        for k in sorted(args):
+            v = args[k]
+            if k in ("x", "y") and isinstance(v, (int, float)):
+                v = int(round(v / 4)) * 4
+            parts.append(f"{k}={v}")
+        return "|".join(parts)
 
     async def start(self) -> None:
         """Initialize the browser and (optionally) navigate to the start URL."""
@@ -354,13 +372,43 @@ class AgentLoop:
             await self._emit("execution_error", error=str(e), action=action.to_dict())
             return
 
+        # ── Repeated-action detection ──
+        # A quantized 9B model can loop on the same no-effect click. Detect
+        # identical consecutive actions (with coordinate tolerance) and inject
+        # a corrective nudge so it tries a different approach.
+        action_key = self._action_key(action)
+        if action_key == self._last_action_key:
+            self._repeat_count += 1
+        else:
+            self._last_action_key = action_key
+            self._repeat_count = 0
+
         self.steps_completed += 1
         self.history.append({"role": "assistant", "content": raw_text})
-        # Note the action just taken (as a short user-turn so the model sees it).
-        self.history.append({
-            "role": "user",
-            "content": f"Executed action: {action.name} {action.arguments}",
-        })
+
+        if self._repeat_count >= self.MAX_IDENTICAL_REPEATS:
+            # Same action repeated with no effect — break the loop.
+            nudge = (
+                f"The action {action.name} {action.arguments} has been repeated "
+                f"{self._repeat_count + 1} times with no effect (URL still "
+                f"{current_url or 'about:blank'}). Do NOT repeat the same "
+                f"coordinates. Try different coordinates, or use visit_url / "
+                f"web_search to reach the target directly."
+            )
+            self.history.append({"role": "user", "content": nudge})
+            await self._emit(
+                "action_repeat_warning",
+                count=self._repeat_count + 1,
+                action=action.to_dict(),
+                url=current_url,
+            )
+            self._repeat_count = 0
+            self._last_action_key = None
+        else:
+            self.history.append({
+                "role": "user",
+                "content": f"Executed action: {action.name} {action.arguments}",
+            })
 
         await self._emit("action_executed", result=exec_result, step=self.steps_completed)
 
