@@ -237,8 +237,51 @@ class LlamaWrapper:
         }
         if mmproj_path:
             llama_kwargs["mmproj"] = mmproj_path
+            # chatml is text-only and silently drops image content — attach a
+            # vision-capable chat handler so screenshots actually reach the model.
+            handler = self._build_vision_chat_handler(mmproj_path)
+            if handler is not None:
+                llama_kwargs["chat_handler"] = handler
+                llama_kwargs.pop("chat_format", None)
 
         self.llm = Llama(**llama_kwargs)
+
+    def _build_vision_chat_handler(self, mmproj_path: str):
+        """Return a vision-capable chat handler for the loaded model.
+
+        llama-cpp-python's text chat formats (e.g. ``chatml``) silently drop
+        ``image_url`` content, so a multimodal model never sees the screenshot
+        and reports "the page did not visibly load". Attach the handler that
+        matches the model family instead.
+        """
+        name = self._model_name.lower()
+        try:
+            from llama_cpp import llama_chat_format as cf
+        except Exception as e:
+            logger.warning(f"llama_chat_format unavailable: {e}")
+            return None
+
+        candidates = []
+        if any(k in name for k in ("qwen", "fara", "cua", "computer-use")):
+            candidates.append("Qwen25VLChatHandler")
+        candidates += ["Llava16ChatHandler", "Llava15ChatHandler"]
+
+        for cls_name in candidates:
+            cls = getattr(cf, cls_name, None)
+            if cls is None:
+                continue
+            try:
+                handler = cls(clip_model_path=mmproj_path)
+                logger.info(f"✅ Vision chat handler attached: {cls_name}")
+                return handler
+            except Exception as e:
+                logger.debug(f"{cls_name} init failed: {e}")
+
+        logger.warning(
+            "⚠  No vision chat handler available — image input will be dropped "
+            "by llama.cpp (model will only see text)"
+        )
+        return None
 
     def _detect_chat_template(self):
         """Detect and log the chat template being used"""
