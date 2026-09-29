@@ -82,6 +82,27 @@ curl -s -X POST localhost:8000/agent/sessions/$SID/run
 curl -N localhost:8000/agent/sessions/$SID/events
 ```
 
+**Ready-made example clients** in [`examples/`](../examples/):
+
+| File | Stack | Shows |
+|---|---|---|
+| [`agent_client.py`](../examples/agent_client.py) | plain `requests` | Full REST + SSE client class (`AgentClient`), event loop with critical-point answers, CLI |
+| [`agent_langchain_example.py`](../examples/agent_langchain_example.py) | LangChain | Computer-use agent as a `@tool` — an LLM orchestrates browser work via tool calling |
+| [`agent_litellm_example.py`](../examples/agent_litellm_example.py) | LiteLLM | `litellm.completion()` against the node/gateway (streaming + reasoning) + agent driver with trace summarization |
+
+```bash
+# Plain client
+python examples/agent_client.py 'goto google.com and search for ai news' --allowlist google.com
+
+# LangChain: run the agent directly, or let an LLM delegate to it
+python examples/agent_langchain_example.py 'find the fastapi install command'
+python examples/agent_langchain_example.py '...' --use-llm
+
+# LiteLLM: chat through the node, or run an agent session
+python examples/agent_litellm_example.py chat 'explain quantization' --stream
+python examples/agent_litellm_example.py agent 'goto pypi.org and find the fastapi install command' --summarize
+```
+
 **Key integration points:**
 
 - **Events** — the SSE stream emits per-step events: `session_started`,
@@ -108,7 +129,7 @@ curl -N localhost:8000/agent/sessions/$SID/events
 
 ## Safety (read this)
 
-> **⚠️ This model drives a real web browser.** The Fara1.5-9B model card is explicit: if you integrate it directly, *you* are responsible for safety controls. Don't run this model with unrestricted browser access on a machine that has anything sensitive on it.
+> **⚠ This model drives a real web browser.** The Fara1.5-9B model card is explicit: if you integrate it directly, *you* are responsible for safety controls. Don't run this model with unrestricted browser access on a machine that has anything sensitive on it.
 
 LlamaNet implements the model's **critical-point** design as a safety controller:
 

@@ -136,7 +136,7 @@ print(response.choices[0].message.content)
 
 Get a free API key at [llamanet.app](https://llamanet.app).
 
-More Python client examples (streaming, plain chat) are in [`examples/`](examples/).
+More Python client examples (streaming, plain chat, [computer-use agent](docs/agent.md), LangChain, LiteLLM) are in [`examples/`](examples/).
 
 ## How It Works
 
