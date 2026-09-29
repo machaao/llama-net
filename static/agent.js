@@ -143,6 +143,12 @@ class AgentConsole {
             case 'action_executed':
                 this._appendLog('action', 'Action', this._formatAction(data.result || data));
                 break;
+            case 'click_missed':
+                this._appendLog('paused', `Click missed at (${data.x}, ${data.y})`,
+                    data.element
+                        ? `Landed on <${data.element.tag}> — not interactive. URL unchanged: ${data.url || 'about:blank'}`
+                        : `No element at point. URL unchanged: ${data.url || 'about:blank'}`);
+                break;
             case 'action_repeat_warning':
                 this._appendLog('paused', `Repeated action ×${data.count} — no effect`,
                     'The same action keeps failing. Nudging the model to try a different approach.');

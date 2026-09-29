@@ -19,7 +19,33 @@ from common.utils import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_VIEWPORT = {"width": 1280, "height": 800}
-_SCREENSHOT_QUALITY = 70  # JPEG quality — smaller payloads than PNG
+_SCREENSHOT_QUALITY = 90  # JPEG quality — small nav text needs sharpness for accurate clicks
+
+
+def _jpeg_dimensions(data: bytes) -> tuple:
+    """Read (width, height) from a JPEG's SOF marker. Returns (0, 0) on failure.
+
+    Decodes only the frame header — no image decode — so it's cheap enough to
+    run on every screenshot. Used to assert the capture geometry matches the
+    viewport (Gap 2: an unpinned device_scale_factor silently doubles the
+    screenshot, sending every model click to the wrong place).
+    """
+    i = 2  # skip SOI marker
+    while i < len(data) - 9:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in (0xC0, 0xC1, 0xC2):  # SOF0/1/2 — carries dimensions
+            height = (data[i + 5] << 8) | data[i + 6]
+            width = (data[i + 7] << 8) | data[i + 8]
+            return width, height
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            i += 2  # standalone marker — no length field
+            continue
+        seg_len = (data[i + 2] << 8) | data[i + 3]
+        i += 2 + seg_len
+    return 0, 0
 
 
 class BrowserSession:
@@ -58,6 +84,11 @@ class BrowserSession:
             user_data_dir="",  # in-memory ephemeral profile — no disk persistence
             headless=self.headless,
             viewport=self.viewport,
+            # Pin the capture space: screenshot px ≡ CSS px ≡ click px.
+            # Without this, a non-1 device_scale_factor (Retina emulation,
+            # persisted profile) doubles the screenshot while page.mouse.click()
+            # still takes CSS px — every click lands off-target.
+            device_scale_factor=1,
             # Security: disable filesystem access via browser flags where supported
             args=["--disable-dev-shm-usage", "--no-first-run"],
             no_viewport=False,
@@ -82,8 +113,21 @@ class BrowserSession:
             logger.warning("📸 Screenshot requested but no page is open")
             return ""
         data = await self._page.screenshot(
-            type="jpeg", quality=_SCREENSHOT_QUALITY, full_page=False
+            type="jpeg", quality=_SCREENSHOT_QUALITY, full_page=False,
+            scale="css",  # capture in CSS px so screenshot px ≡ click px
         )
+        # ── Gap 2: verify capture geometry ──
+        # If the JPEG isn't exactly viewport-sized, model coordinates and
+        # page.mouse.click() coordinates are in different spaces and every
+        # click lands off-target. Fail loudly rather than silently mis-clicking.
+        img_w, img_h = _jpeg_dimensions(data)
+        exp_w, exp_h = self.viewport["width"], self.viewport["height"]
+        if (img_w, img_h) != (exp_w, exp_h):
+            logger.warning(
+                f"📸 Screenshot geometry mismatch: got {img_w}x{img_h}, "
+                f"expected {exp_w}x{exp_h} — model coordinates will NOT map "
+                f"1:1 to click coordinates!"
+            )
         b64 = base64.b64encode(data).decode("ascii")
         # A blank/white page compresses to a tiny JPEG. Log the size so we can
         # tell "page rendered" from "page is blank" without eyeballing images.
@@ -99,6 +143,36 @@ class BrowserSession:
                 f"b64={len(b64)} chars, url={self._page.url}"
             )
         return f"data:image/jpeg;base64,{b64}"
+
+    async def element_at(self, x: int, y: int) -> Optional[Dict[str, Any]]:
+        """Return info about the DOM element at viewport point (x, y), or None.
+
+        Uses ``document.elementFromPoint`` — the authoritative answer to "what
+        would a click at this coordinate actually hit?". Lets the loop detect a
+        coordinate-space mismatch (click lands on <body>) and report the real
+        element back to the model instead of silently looping.
+        """
+        if self._page is None:
+            return None
+        try:
+            return await self._page.evaluate(
+                """([x, y]) => {
+                    const el = document.elementFromPoint(x, y);
+                    if (!el) return null;
+                    const cls = typeof el.className === 'string' ? el.className : '';
+                    return {
+                        tag: el.tagName.toLowerCase(),
+                        id: el.id || '',
+                        cls: cls.slice(0, 80),
+                        text: (el.textContent || '').trim().slice(0, 60),
+                        href: el.href || '',
+                    };
+                }""",
+                [x, y],
+            )
+        except Exception as e:
+            logger.debug(f"elementFromPoint({x}, {y}) failed: {e}")
+            return None
 
     async def wait_for_settle(self, timeout_ms: int = 5000, settle_ms: int = 800) -> None:
         """Wait for the page to finish loading/rendering after an action.

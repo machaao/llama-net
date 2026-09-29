@@ -164,6 +164,15 @@ class AgentLoop:
         page_context = f"Current page URL: {url or 'about:blank'}"
         if title:
             page_context += f"\nCurrent page title: {title}"
+        # Ground the coordinate space explicitly — a 9B model has no way to
+        # infer it from the image alone, and a wrong assumption here is the
+        # root cause of systematically off-target clicks.
+        vp = getattr(self.browser, "viewport", None) or {}
+        if vp.get("width"):
+            page_context += (
+                f"\nViewport: {vp['width']}x{vp['height']} pixels. "
+                f"Click coordinates are absolute viewport pixels."
+            )
         content_parts: List[Dict[str, Any]] = [
             {"type": "text", "text": f"Goal: {self.goal}\n{page_context}\nWhat is the next action?"},
         ]
@@ -372,6 +381,39 @@ class AgentLoop:
             await self._emit("execution_error", error=str(e), action=action.to_dict())
             return
 
+        # ── Click verification (Gap 3/4) ──
+        # A pointer action that lands on background and leaves the URL unchanged
+        # has definitively missed its target. Report the element actually at the
+        # point so the model gets actionable feedback instead of silently looping.
+        click_feedback: Optional[str] = None
+        if action.is_pointer:
+            try:
+                px = action.arguments["x"]
+                py = action.arguments["y"]
+                url_after = await self.browser.current_url()
+                element = await self.browser.element_at(px, py)
+                tag = (element or {}).get("tag", "")
+                missed = (
+                    url_after == current_url
+                    and (element is None or tag in ("body", "html"))
+                )
+                if missed:
+                    click_feedback = (
+                        f"The click at ({px}, {py}) landed on "
+                        f"'{tag or 'nothing'}' — not an interactive element — "
+                        f"and the page did not change (URL still "
+                        f"{url_after or 'about:blank'}). The coordinates are "
+                        f"likely wrong. Recompute the target position from the "
+                        f"screenshot, or use visit_url to navigate directly."
+                    )
+                    logger.warning(f"🖱 Click missed: ({px}, {py}) → <{tag or 'none'}>")
+                    await self._emit(
+                        "click_missed",
+                        x=px, y=py, element=element, url=url_after,
+                    )
+            except Exception as e:
+                logger.debug(f"Click verification failed: {e}")
+
         # ── Repeated-action detection ──
         # A quantized 9B model can loop on the same no-effect click. Detect
         # identical consecutive actions (with coordinate tolerance) and inject
@@ -404,6 +446,9 @@ class AgentLoop:
             )
             self._repeat_count = 0
             self._last_action_key = None
+        elif click_feedback:
+            # Immediate miss feedback — don't wait for the repeat threshold.
+            self.history.append({"role": "user", "content": click_feedback})
         else:
             self.history.append({
                 "role": "user",
