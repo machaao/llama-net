@@ -189,7 +189,7 @@ single <tool_call> block with `name` = "computer_use"):
 - double_click {x, y}        — double-click at pixel (x, y)
 - triple_click {x, y}        — triple-click at pixel (x, y)
 - type {text}                — type text at the current focus
-- scroll {delta}             — vertical scroll by delta pixels (sign = direction)
+- scroll {delta}             — vertical scroll; POSITIVE delta scrolls DOWN, NEGATIVE scrolls UP
 - hscroll {delta}            — horizontal scroll by delta pixels
 - visit_url {url}            — navigate to an http(s) URL
 - web_search {query}         — perform a web search for the query

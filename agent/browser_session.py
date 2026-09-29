@@ -262,6 +262,13 @@ class BrowserSession:
                 "error": f"coordinates ({x}, {y}) outside viewport {vp_w}x{vp_h}",
             }
 
+        # Snapshot open pages so a target="_blank" click can be detected and
+        # adopted after the click (see _adopt_new_tab).
+        try:
+            pages_before = list(self._context.pages)
+        except Exception:
+            pages_before = []
+
         element_info = await self.element_at(x, y)
 
         # No element at point (elementFromPoint is null for detached or fully
@@ -284,8 +291,9 @@ class BrowserSession:
             try:
                 await self._page.mouse.click(x, y, button=button,
                                              click_count=click_count)
+                new_tab = self._adopt_new_tab(pages_before)
                 return {"clicked": True, "element": element_info,
-                        "intercepted": False, "error": None}
+                        "intercepted": False, "error": None, "new_tab": new_tab}
             except Exception as e:
                 return {"clicked": False, "element": element_info,
                         "intercepted": False, "error": str(e)}
@@ -294,7 +302,17 @@ class BrowserSession:
 
         try:
             box = await element.bounding_box()
-            if box:
+            if box and element_info.get("tag") == "a" and element_info.get("href"):
+                # Links: click the element CENTER, not the exact pixel. Model
+                # inference takes seconds and the page can shift in between
+                # (fonts, lazy content, sticky headers) — an exact-pixel
+                # offset computed from a stale box lands on a neighbor. The
+                # model already resolved this element via elementFromPoint,
+                # so its center IS the intended target.
+                await element.click(
+                    button=button, click_count=click_count, timeout=3000,
+                )
+            elif box:
                 # Click at the EXACT (x, y) via position offset — preserves
                 # the model's intended target while engaging hit-target
                 # verification (Playwright checks elementFromPoint at the
@@ -309,8 +327,9 @@ class BrowserSession:
                 # No bounding box (detached/hidden) — raw click fallback.
                 await self._page.mouse.click(x, y, button=button,
                                              click_count=click_count)
+            new_tab = self._adopt_new_tab(pages_before)
             return {"clicked": True, "element": element_info,
-                    "intercepted": False, "error": None}
+                    "intercepted": False, "error": None, "new_tab": new_tab}
         except Exception as e:
             err = str(e)
             intercepted = "intercept" in err.lower()
@@ -322,6 +341,24 @@ class BrowserSession:
                     "intercepted": intercepted, "error": err}
         finally:
             await handle.dispose()
+
+    def _adopt_new_tab(self, pages_before: list) -> bool:
+        """Switch to a page opened by the last action (target="_blank" links).
+
+        A new-tab click leaves the current page's URL/scroll unchanged, which
+        the loop would misread as "click had no effect". Adopting the newest
+        page keeps the next screenshot on what the user actually opened.
+        Returns True when a new page was adopted.
+        """
+        try:
+            opened = [p for p in self._context.pages if p not in pages_before]
+            if opened:
+                self._page = opened[-1]
+                logger.info(f"🔗 New tab opened — adopted: {self._page.url}")
+                return True
+        except Exception as e:
+            logger.debug(f"New-tab check failed: {e}")
+        return False
 
     async def _scroll_state(self) -> Dict[str, Any]:
         """Combined scroll position state in a single evaluate."""

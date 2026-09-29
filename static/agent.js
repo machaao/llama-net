@@ -164,6 +164,7 @@ class AgentConsole {
                     out_of_bounds: 'Click out of viewport',
                     intercepted: 'Click intercepted',
                     inert_element: 'Click missed',
+                    no_effect: 'Click had no effect',
                     error: 'Click failed',
                 }[data.reason] || 'Click missed';
                 this._appendLog('paused', `${reasonLabel} at (${data.x}, ${data.y})`,
@@ -173,6 +174,9 @@ class AgentConsole {
                         : `No element at point. URL unchanged: ${data.url || 'about:blank'}`));
                 break;
             }
+            case 'action_feedback':
+                this._appendLog('paused', 'Action feedback', data.message || '');
+                break;
             case 'action_repeat_warning':
                 this._appendLog('paused', `Repeated action ×${data.count} — no effect`,
                     'The same action keeps failing. Nudging the model to try a different approach.');

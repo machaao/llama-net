@@ -610,16 +610,29 @@ class AgentLoop:
                         message=action_feedback,
                     )
             else:
-                # Mode 2: click succeeded — verify URL changed / element interactive.
+                # Mode 2: click succeeded — verify the click had an effect.
+                # A click on an interactive element that changes nothing (a
+                # link to the current page, a target="_blank" handled
+                # elsewhere, a JS handler that no-ops) previously produced NO
+                # feedback at all — the model only learned the failure from
+                # the next screenshot and repeated the same click.
                 try:
                     url_after = await self.browser.current_url()
                     element = await self.browser.element_at(px, py)
                     tag = (element or {}).get("tag", "")
                     interactive = bool(element and element.get("interactive"))
-                    missed = url_after == current_url and not interactive
-                    if missed:
-                        el_text = ((element or {}).get("text") or "").strip()
-                        hit_desc = f"<{tag}>" + (f" '{el_text[:40]}'" if el_text else "")
+                    el_text = ((element or {}).get("text") or "").strip()
+                    el_href = ((element or {}).get("href") or "").strip()
+                    hit_desc = f"<{tag}>" + (f" '{el_text[:40]}'" if el_text else "")
+
+                    if exec_result.get("new_tab"):
+                        action_feedback = (
+                            f"The click at ({px}, {py}) opened a NEW TAB "
+                            f"({url_after or 'about:blank'} is now the active "
+                            f"page). Continue working in the new tab."
+                        )
+                    elif url_after == current_url and not interactive:
+                        missed = True
                         action_feedback = (
                             f"The click at ({px}, {py}) landed on {hit_desc} "
                             f"— not an interactive element — and the page did "
@@ -636,6 +649,30 @@ class AgentLoop:
                             "click_missed",
                             x=px, y=py, element=element, url=url_after,
                             reason="inert_element",
+                            message=action_feedback,
+                        )
+                    elif url_after == current_url:
+                        # Interactive element, but the page did not change.
+                        # Tell the model exactly what it hit and what the
+                        # element points to — a link to the current URL or a
+                        # no-op handler is the usual cause.
+                        action_feedback = (
+                            f"Clicked {hit_desc} at ({px}, {py}) — the page "
+                            f"did not change (URL still {url_after or 'about:blank'})."
+                        )
+                        if el_href and el_href != url_after:
+                            action_feedback += (
+                                f" The element links to {el_href} — use "
+                                f"visit_url with that URL to navigate directly."
+                            )
+                        logger.warning(
+                            f"🖱 Click had no effect: ({px}, {py}) → {hit_desc} "
+                            f"(URL unchanged)"
+                        )
+                        await self._emit(
+                            "click_missed",
+                            x=px, y=py, element=element, url=url_after,
+                            reason="no_effect",
                             message=action_feedback,
                         )
                 except Exception as e:
@@ -680,8 +717,9 @@ class AgentLoop:
                 logger.warning(
                     f"📜 Scroll had no effect: delta={delta} "
                     f"scrollY={exec_result.get('scroll_y', 0)} "
-                    f"can_scroll={exec_result.get('can_scroll', '?')}"
+                    `can_scroll={exec_result.get('can_scroll', '?')}`
                 )
+            await self._emit("action_feedback", action=action.to_dict(), message=action_feedback)
 
         # ── Repeated-action detection ──
         # A quantized 9B model can loop on the same no-effect click. Detect
