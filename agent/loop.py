@@ -18,23 +18,7 @@ from agent.browser_session import BrowserSession
 from agent.parser import ToolCallParser, ToolCallParseError
 from json_repair import loads as repair_json_loads
 
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from json_repair import loads as repair_json_loads
-
-from agent.prompts import build_system_prompt, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS
+from agent.prompts import build_system_prompt, PLAN_INSTRUCTIONS
 from agent.safety import SafetyController, SafetyViolation
 
 logger = get_logger(__name__)
@@ -143,46 +127,6 @@ class AgentLoop:
 
         self.state = AgentState.IDLE
         self.start_url = start_url
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
-
-        # Ordered plan for the goal — advisory grounding, not a safety gate.
-        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
-        self.plan: List[str] = [goal]
-        self.plan_index: int = 0
 
         # Ordered plan for the goal — advisory grounding, not a safety gate.
         # Seeded with the goal; replaced by a decomposed plan in _create_plan().
@@ -560,138 +504,6 @@ class AgentLoop:
             self.state = AgentState.COMPLETED
             self.history.append({"role": "assistant", "content": raw_text})
             await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
             return
 
         if action.name == "complete_step":
