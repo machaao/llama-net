@@ -19,7 +19,12 @@ POINTER_ACTIONS = {"left_click", "right_click", "double_click", "triple_click"}
 KEYBOARD_ACTIONS = {"type"}
 SCROLL_ACTIONS = {"scroll", "hscroll"}
 NAVIGATION_ACTIONS = {"visit_url", "web_search", "history_back"}
-CONTROL_ACTIONS = {"pause_and_memorize_fact", "ask_user_question", "terminate"}
+CONTROL_ACTIONS = {
+    "pause_and_memorize_fact",
+    "ask_user_question",
+    "terminate",
+    "top_level_memory",
+}
 
 ALL_ACTION_NAMES = (
     POINTER_ACTIONS
@@ -159,6 +164,12 @@ def parse_action_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, An
         summary = arguments.get("summary", "")
         return {"summary": summary if isinstance(summary, str) else ""}
 
+    if name == "top_level_memory":
+        # Fara's memory action — accepts a free-form description/fact. Not a
+        # browser operation; the loop records it and continues.
+        text = arguments.get("description") or arguments.get("fact") or ""
+        return {"description": text if isinstance(text, str) else str(text)}
+
     return dict(arguments)
 
 
@@ -178,6 +189,7 @@ single <tool_call> block with `name` = "computer_use"):
 - history_back {}            — go back one page in history
 - pause_and_memorize_fact {fact}  — store a fact and pause
 - ask_user_question {question}    — ask the user a question and pause
+- top_level_memory {description}  — record a memory/observation and continue
 - terminate {summary}        — finish the task with a final summary"""
 
 __all__ = [

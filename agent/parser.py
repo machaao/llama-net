@@ -2,21 +2,23 @@
 
 Fara emits:
   1. A chain-of-thought block (free text, may be XML-tagged as thinking).
-  2. A ``<tool_call>...</tool_call>`` block whose body is a JSON object:
-     {"name": "computer_use", "arguments": {"action": "...", ...}}.
+  2. One or more ``<tool_call>...</tool_call>`` blocks whose body is a JSON
+     object: {"name": "computer_use", "arguments": {"action": "...", ...}}.
 
 Quantized GGUF checkpoints frequently emit *broken* JSON — missing brackets,
 stray tokens, ``<name`` typed instead of ``{"name``, arguments glued to the
-name value. JSON recovery is delegated to the ``json-repair`` library, which
-is built exactly for repairing LLM output; this module only extracts the XML
-wrapper, applies one trivial pre-normalization, and validates the recovered
-object via :mod:`agent.actions`. Unrecoverable output raises
-:class:`ToolCallParseError` so the caller can fail closed.
+name value, coordinates as arrays, and ``<tool_call>`` repeated as both the
+opening and closing tag (with several blocks per turn). JSON recovery is
+delegated to the ``json-repair`` library, which is built exactly for repairing
+LLM output; this module extracts the XML wrapper(s), applies a few trivial
+pre-normalizations, and validates the recovered object via
+:mod:`agent.actions`. Unrecoverable output raises :class:`ToolCallParseError`
+so the caller can fail closed.
 """
 
 import json
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from json_repair import loads as repair_json_loads
 
@@ -30,18 +32,15 @@ class ToolCallParseError(ValueError):
     """Raised when Fara output cannot be parsed into a valid tool call."""
 
 
-_TOOL_CALL_RE = re.compile(
-    r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL | re.IGNORECASE
-)
 _THINK_RE = re.compile(
     r"<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>", re.DOTALL | re.IGNORECASE
 )
-# Unclosed <tool_call> block — the loop passes "</tool_call>" as a stop
-# sequence, and llama.cpp consumes it, so the closing tag never appears in
-# the raw output even when the model emitted a complete block.
-_UNCLOSED_TOOL_CALL_RE = re.compile(
-    r"<tool_call>\s*(.*)", re.DOTALL | re.IGNORECASE
-)
+# Models frequently emit `<tool_call>` as BOTH the opening and closing tag
+# (repeating the opening tag instead of writing `</tool_call>`), and may emit
+# several blocks per turn (e.g. a memory/observation block followed by the
+# real action). Split on the opening tag and treat each segment as a candidate.
+_TOOL_CALL_SPLIT_RE = re.compile(r"<tool_call>", re.IGNORECASE)
+_TOOL_CALL_CLOSE_RE = re.compile(r"</tool_call>", re.IGNORECASE)
 
 
 def _normalize_name_slip(text: str) -> str:
@@ -64,6 +63,21 @@ def _normalize_name_slip(text: str) -> str:
     return repaired.replace('{"name="', '{"name":"', 1)
 
 
+def _normalize_missing_arguments_key(text: str) -> str:
+    """Fix ``{"name": "computer_use", {"action": ...}}`` (missing "arguments").
+
+    Quantized models frequently glue the arguments object directly after the
+    name value, omitting the ``"arguments":`` key. Insert it so the body is
+    valid JSON.
+    """
+    return re.sub(
+        r'("name"\s*:\s*"[^"]*")\s*,\s*\{',
+        r'\1, "arguments": {',
+        text,
+        count=1,
+    )
+
+
 # The JSON body may use several known field layouts.
 _ACTION_KEYS = ("action", "action_name", "name", "tool")
 
@@ -75,6 +89,7 @@ _INFER_FROM_ARGS: tuple = (
     ("query", "web_search"),
     ("question", "ask_user_question"),
     ("fact", "pause_and_memorize_fact"),
+    ("description", "top_level_memory"),
     ("summary", "terminate"),
     ("text", "type"),
     ("delta", "scroll"),
@@ -97,25 +112,51 @@ def _infer_action(arguments: Any) -> Optional[str]:
     return None
 
 
+def _normalize_coordinates(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize coordinate encodings into separate integer x/y keys.
+
+    Handles the shapes quantized models emit:
+      - ``"coordinate": [x, y]`` / ``"coordinates": [x, y]``
+      - ``"x": [x, y]`` (the whole pair under the x key)
+      - ``"y": [x, y]``
+    """
+    args = dict(arguments)
+
+    coord = args.get("coordinate") or args.get("coordinates")
+    if isinstance(coord, (list, tuple)) and len(coord) == 2:
+        args.setdefault("x", coord[0])
+        args.setdefault("y", coord[1])
+
+    # The pair may be packed under the x (or y) key as a 2-element array.
+    for key in ("x", "y"):
+        val = args.get(key)
+        if isinstance(val, (list, tuple)) and len(val) == 2:
+            args["x"] = val[0]
+            args["y"] = val[1]
+            break
+
+    return args
+
+
 class ToolCallParser:
     """Extract chain-of-thought and a validated :class:`AgentAction` from text."""
 
     @staticmethod
-    def extract_tool_call_json(text: str) -> Optional[str]:
-        """Return the raw tool-call body, or None when no XML wrapper exists.
+    def extract_tool_call_bodies(text: str) -> List[str]:
+        """Return every candidate tool-call body found in the output.
 
-        Only the XML wrapper is handled here — closed first, then unclosed
-        (llama.cpp consumes the ``</tool_call>`` stop sequence). Fenced/bare
-        JSON recovery is delegated to json-repair in :meth:`parse`.
+        Splits on the opening ``<tool_call>`` tag (which models often repeat in
+        place of the closing tag) and trims any trailing ``</tool_call>``. Each
+        non-empty segment is a candidate JSON body, in emission order.
         """
         raw = text or ""
-        m = _TOOL_CALL_RE.search(raw)
-        if m:
-            return m.group(1).strip()
-        m = _UNCLOSED_TOOL_CALL_RE.search(raw)
-        if m:
-            return m.group(1).strip()
-        return None
+        parts = _TOOL_CALL_SPLIT_RE.split(raw)
+        bodies: List[str] = []
+        for seg in parts[1:]:  # parts[0] is prose before the first tag
+            seg = _TOOL_CALL_CLOSE_RE.split(seg, 1)[0].strip()
+            if seg:
+                bodies.append(seg)
+        return bodies
 
     @staticmethod
     def extract_reasoning(text: str) -> str:
@@ -124,10 +165,10 @@ class ToolCallParser:
         m = _THINK_RE.search(raw)
         if m:
             return m.group(1).strip()
-        # Fallback: everything before the tool-call block is the CoT.
-        tool_match = _TOOL_CALL_RE.search(raw) or _UNCLOSED_TOOL_CALL_RE.search(raw)
-        if tool_match:
-            return raw[: tool_match.start()].strip()
+        # Fallback: everything before the first tool-call block is the CoT.
+        first_tag = _TOOL_CALL_SPLIT_RE.search(raw)
+        if first_tag:
+            return raw[: first_tag.start()].strip()
         # No XML wrapper — CoT is everything before the first JSON brace.
         brace = raw.find("{")
         if brace > 0:
@@ -135,49 +176,35 @@ class ToolCallParser:
         return ""
 
     @classmethod
-    def parse(cls, text: str) -> Tuple[str, AgentAction]:
-        """Parse model output into (reasoning, AgentAction).
+    def _parse_body(cls, body: str) -> Optional[Tuple[str, AgentAction]]:
+        """Parse a single candidate body into (reasoning, action), or None."""
+        body = _normalize_name_slip(body)
+        body = _normalize_missing_arguments_key(body)
 
-        Raises :class:`ToolCallParseError` when no valid tool call is present.
-        """
-        raw = _normalize_name_slip(text or "")
-        reasoning = cls.extract_reasoning(raw)
-
-        body = cls.extract_tool_call_json(raw)
-        if body is None:
-            # No XML wrapper at all — scan from the first brace; json-repair
-            # natively handles fenced ```json blocks and bare JSON objects.
-            brace = raw.find("{")
-            if brace == -1:
-                raise ToolCallParseError("No valid tool-call JSON found in output")
-            body = raw[brace:]
+        # Trim to the first JSON object so trailing prose doesn't confuse repair.
+        brace = body.find("{")
+        if brace == -1:
+            return None
+        body = body[brace:]
 
         data: Any = None
-        if body.strip():
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
             try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                # LLM-broken JSON — delegate to json-repair (built for this).
-                try:
-                    data = repair_json_loads(body)
-                except Exception as e:
-                    logger.debug(f"json-repair could not recover body: {e}")
-                    data = None
+                data = repair_json_loads(body)
+            except Exception as e:
+                logger.debug(f"json-repair could not recover body: {e}")
+                data = None
 
         if not isinstance(data, dict) or not data:
-            raise ToolCallParseError("No valid tool-call JSON found in output")
+            return None
 
         arguments = data.get("arguments")
         if not isinstance(arguments, dict):
             arguments = data
 
-        # Some quantized models emit "coordinate": [x, y] (array) instead of
-        # separate x/y keys — normalize before schema validation.
-        coord = arguments.get("coordinate") or arguments.get("coordinates")
-        if isinstance(coord, (list, tuple)) and len(coord) == 2:
-            arguments = dict(arguments)
-            arguments.setdefault("x", coord[0])
-            arguments.setdefault("y", coord[1])
+        arguments = _normalize_coordinates(arguments)
 
         action_name = None
         for key in _ACTION_KEYS:
@@ -202,10 +229,10 @@ class ToolCallParser:
                     f"{{'{only_key}': {{...}}}} → action '{only_key}'"
                 )
                 action_name = only_key
-                arguments = value
+                arguments = _normalize_coordinates(value)
 
         if not action_name:
-            raise ToolCallParseError("Tool call missing an action name")
+            return None
 
         action_name = action_name.strip().lower()
 
@@ -227,9 +254,49 @@ class ToolCallParser:
         try:
             normalized = parse_action_arguments(action_name, action_args)
         except ValueError as e:
-            raise ToolCallParseError(f"Invalid action '{action_name}': {e}")
+            logger.debug(f"Candidate body rejected: Invalid action '{action_name}': {e}")
+            return None
 
-        return reasoning, AgentAction(name=action_name, arguments=normalized)
+        return action_name, AgentAction(name=action_name, arguments=normalized)
+
+    @classmethod
+    def parse(cls, text: str) -> Tuple[str, AgentAction]:
+        """Parse model output into (reasoning, AgentAction).
+
+        When several tool-call blocks are present (e.g. a memory/observation
+        block followed by the real action), the *last* block that validates is
+        used — that is the action the model intends to execute this turn.
+
+        Raises :class:`ToolCallParseError` when no valid tool call is present.
+        """
+        raw = text or ""
+        reasoning = cls.extract_reasoning(raw)
+
+        bodies = cls.extract_tool_call_bodies(raw)
+        if not bodies:
+            # No XML wrapper at all — scan from the first brace; json-repair
+            # natively handles fenced ```json blocks and bare JSON objects.
+            brace = raw.find("{")
+            if brace == -1:
+                raise ToolCallParseError("No valid tool-call JSON found in output")
+            bodies = [raw[brace:]]
+
+        last_error: Optional[str] = None
+        result: Optional[Tuple[str, AgentAction]] = None
+        for body in bodies:
+            try:
+                parsed = cls._parse_body(body)
+            except Exception as e:  # defensive — never let one body abort the scan
+                last_error = str(e)
+                continue
+            if parsed is not None:
+                result = parsed  # keep the last valid action
+
+        if result is None:
+            detail = f": {last_error}" if last_error else ""
+            raise ToolCallParseError(f"No valid tool-call JSON found in output{detail}")
+
+        return reasoning, result[1]
 
 
 __all__ = ["ToolCallParser", "ToolCallParseError"]

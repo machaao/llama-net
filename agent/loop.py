@@ -64,7 +64,7 @@ async def execute_action(page, action: AgentAction) -> Dict[str, Any]:
         await page.goto(url, wait_until="domcontentloaded")
     elif name == "history_back":
         await page.go_back(wait_until="domcontentloaded")
-    elif name in ("pause_and_memorize_fact", "ask_user_question", "terminate"):
+    elif name in ("pause_and_memorize_fact", "ask_user_question", "terminate", "top_level_memory"):
         # Control actions — no browser operation; handled by the loop/safety.
         pass
     else:
