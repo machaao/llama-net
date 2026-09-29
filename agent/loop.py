@@ -346,46 +346,6 @@ class AgentLoop:
         except Exception:
             scroll = {}
 
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
-        try:
-            scroll = await self.browser.current_scroll()
-        except Exception:
-            scroll = {}
-
         logger.info(
             f"🔎 Step {self.steps_completed + 1}: url={current_url or 'about:blank'} "
             f"title={current_title!r} screenshot={'yes' if screenshot else 'NO'} "
@@ -504,28 +464,6 @@ class AgentLoop:
             self.state = AgentState.COMPLETED
             self.history.append({"role": "assistant", "content": raw_text})
             await self._emit("completed", summary=self.final_summary)
-            return
-
-        if action.name == "complete_step":
-            # Plan-advance control action — no browser operation.
-            self.history.append({"role": "assistant", "content": raw_text})
-            completed_index = self.plan_index
-            completed_step = self.plan[completed_index]
-            note = action.arguments.get("note", "")
-            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
-            # Counts toward max_steps so complete_step spam can't loop forever.
-            self.steps_completed += 1
-            await self._emit(
-                "plan_step_completed",
-                index=completed_index + 1,
-                completed_step=completed_step,
-                note=note,
-                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
-            )
-            if self.steps_completed >= self.max_steps:
-                self.state = AgentState.COMPLETED
-                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
-                await self._emit("completed", summary=self.final_summary)
             return
 
         if action.name == "complete_step":
