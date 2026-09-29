@@ -171,6 +171,12 @@ def parse_action_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, An
         text = arguments.get("description") or arguments.get("fact") or ""
         return {"description": text if isinstance(text, str) else str(text)}
 
+    if name == "complete_step":
+        # Plan-advance control action — no browser operation; the loop marks
+        # the current plan step done and continues with the next one.
+        note = arguments.get("note", "")
+        return {"note": note if isinstance(note, str) else str(note)}
+
     return dict(arguments)
 
 
@@ -191,6 +197,7 @@ single <tool_call> block with `name` = "computer_use"):
 - pause_and_memorize_fact {fact}  — store a fact and pause
 - ask_user_question {question}    — ask the user a question and pause
 - top_level_memory {description}  — record a memory/observation and continue
+- complete_step {note}       — mark the current plan step accomplished (no browser action) and continue
 - terminate {summary}        — finish the task with a final summary"""
 
 __all__ = [

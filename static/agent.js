@@ -124,6 +124,70 @@ class AgentConsole {
                 this._appendLog('system', 'Browser session started',
                     data.goal ? 'Goal: ' + data.goal : '');
                 break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
+            case 'plan_created':
+                this._appendLog('system', 'Plan created',
+                    (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n'));
+                break;
+            case 'plan_step_completed':
+                this._appendLog('action', `Plan step ${data.index} complete`,
+                    data.note || data.completed_step || '');
+                break;
             case 'step_screenshot':
                 if (data.screenshot) {
                     document.getElementById('agent-screenshot').src = data.screenshot;

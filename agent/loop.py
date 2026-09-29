@@ -18,7 +18,23 @@ from agent.browser_session import BrowserSession
 from agent.parser import ToolCallParser, ToolCallParseError
 from json_repair import loads as repair_json_loads
 
-from agent.prompts import build_system_prompt, PLAN_INSTRUCTIONS
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from json_repair import loads as repair_json_loads
+
+from agent.prompts import build_system_prompt, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS, PLAN_INSTRUCTIONS
 from agent.safety import SafetyController, SafetyViolation
 
 logger = get_logger(__name__)
@@ -128,6 +144,51 @@ class AgentLoop:
         self.state = AgentState.IDLE
         self.start_url = start_url
 
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
+        # Ordered plan for the goal — advisory grounding, not a safety gate.
+        # Seeded with the goal; replaced by a decomposed plan in _create_plan().
+        self.plan: List[str] = [goal]
+        self.plan_index: int = 0
+
         # Trajectory: interleaved history of (role, content dict).
         self.history: List[Dict[str, Any]] = []
         self.screenshot_history: List[str] = []
@@ -154,9 +215,56 @@ class AgentLoop:
             except Exception as e:
                 logger.debug(f"Agent event callback error: {e}")
 
+    # ── Plan construction ────────────────────────────────────────────────
+
+    async def _create_plan(self) -> None:
+        """Decompose the goal into an ordered plan and append it to the prompt.
+
+        Advisory grounding only — any failure falls back to the goal as a
+        single-step plan so the session never blocks on planning.
+        """
+        steps: List[str] = []
+        try:
+            result = await self.llm.generate_chat_safe(
+                messages=[
+                    {"role": "system", "content": (
+                        "You break a browser-automation goal into 2-6 short "
+                        "imperative steps. Reply with ONLY a JSON array of "
+                        "strings, no prose."
+                    )},
+                    {"role": "user", "content": f"Goal: {self.goal}"},
+                ],
+                max_tokens=400,
+                temperature=0.2,
+            )
+            raw = (result.get("content") or result.get("text") or "").strip()
+            start, end = raw.find("["), raw.rfind("]")
+            if start != -1 and end > start:
+                parsed = repair_json_loads(raw[start:end + 1])
+                if isinstance(parsed, list):
+                    steps = [str(s).strip() for s in parsed if str(s).strip()]
+        except Exception as e:
+            logger.warning(f"Plan creation failed, using goal as single step: {e}")
+
+        self.plan = steps[:6] or [self.goal]
+        self.plan_index = 0
+        self.system_prompt = (
+            self.system_prompt
+            + "\n\n" + PLAN_INSTRUCTIONS
+            + "Plan:\n"
+            + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(self.plan))
+        )
+        await self._emit("plan_created", steps=self.plan)
+
     # ── Message construction ─────────────────────────────────────────────
 
-    def _build_messages(self, screenshot: str, url: str = "", title: str = "") -> List[Dict[str, Any]]:
+    def _build_messages(
+        self,
+        screenshot: str,
+        url: str = "",
+        title: str = "",
+        scroll: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """Assemble the multimodal message list for the model.
 
         The current page URL and title are included as *text* alongside the
@@ -186,8 +294,40 @@ class AgentLoop:
                 f"\nViewport: {vp['width']}x{vp['height']} pixels. "
                 f"Click coordinates are absolute viewport pixels."
             )
+        # Scroll grounding — the decisive facts the model needs to stop
+        # probing up/down: position, max, bottom/top reached, sign convention.
+        if scroll:
+            y = int(scroll.get("y", 0))
+            max_y = int(scroll.get("max_y", 0))
+            pct = int((y / max_y) * 100) if max_y > 0 else 0
+            page_context += (
+                f"\nScroll position: y={y} of {max_y} px ({pct}% from top; "
+                f"positive delta scrolls down)"
+            )
+            if scroll.get("at_bottom"):
+                page_context += "\nPage is at the BOTTOM — no more content below."
+            elif scroll.get("at_top"):
+                page_context += "\nPage is at the TOP."
+
+        # Plan block — keeps the model oriented in multi-phase goals.
+        plan_lines = []
+        for i, step in enumerate(self.plan):
+            if i < self.plan_index:
+                marker = "[done]"
+            elif i == self.plan_index:
+                marker = "[CURRENT]"
+            else:
+                marker = "[ ]"
+            plan_lines.append(f"  {i + 1}. {marker} {step}")
+        plan_block = (
+            f"Goal: {self.goal}\n"
+            f"Plan:\n" + "\n".join(plan_lines) + "\n"
+            f"Current plan step: {self.plan_index + 1} of {len(self.plan)} "
+            f"— {self.plan[self.plan_index]}\n"
+        )
+
         content_parts: List[Dict[str, Any]] = [
-            {"type": "text", "text": f"Goal: {self.goal}\n{page_context}\nWhat is the next action?"},
+            {"type": "text", "text": f"{plan_block}{page_context}\nWhat is the next action?"},
         ]
         if screenshot:
             content_parts.append({
@@ -236,6 +376,7 @@ class AgentLoop:
             )
             return
         self.state = AgentState.RUNNING
+        await self._create_plan()
         await self._emit("session_started", goal=self.goal)
 
     async def step(self) -> None:
@@ -256,6 +397,51 @@ class AgentLoop:
         except Exception:
             current_url, current_title = "", ""
 
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
+        try:
+            scroll = await self.browser.current_scroll()
+        except Exception:
+            scroll = {}
+
         logger.info(
             f"🔎 Step {self.steps_completed + 1}: url={current_url or 'about:blank'} "
             f"title={current_title!r} screenshot={'yes' if screenshot else 'NO'} "
@@ -268,9 +454,13 @@ class AgentLoop:
             screenshot=screenshot,
             url=current_url,
             title=current_title,
+            scroll_y=scroll.get("y", 0),
+            max_scroll_y=scroll.get("max_y", 0),
         )
 
-        messages = self._build_messages(screenshot, url=current_url, title=current_title)
+        messages = self._build_messages(
+            screenshot, url=current_url, title=current_title, scroll=scroll,
+        )
         # Log the exact message shape sent to the model so we can confirm the
         # image part is present and vision is actually engaged.
         last_user = messages[-1] if messages else {}
@@ -372,6 +562,182 @@ class AgentLoop:
             await self._emit("completed", summary=self.final_summary)
             return
 
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
+        if action.name == "complete_step":
+            # Plan-advance control action — no browser operation.
+            self.history.append({"role": "assistant", "content": raw_text})
+            completed_index = self.plan_index
+            completed_step = self.plan[completed_index]
+            note = action.arguments.get("note", "")
+            self.plan_index = min(completed_index + 1, len(self.plan) - 1)
+            # Counts toward max_steps so complete_step spam can't loop forever.
+            self.steps_completed += 1
+            await self._emit(
+                "plan_step_completed",
+                index=completed_index + 1,
+                completed_step=completed_step,
+                note=note,
+                remaining=self.plan[self.plan_index:] if self.plan_index < len(self.plan) else [],
+            )
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
         if self.safety.paused:
             self.state = AgentState.WAITING_FOR_USER
             await self._emit(
@@ -464,25 +830,46 @@ class AgentLoop:
                     logger.debug(f"Click verification failed: {e}")
 
         # ── Scroll verification ──
-        if action.is_scroll and not exec_result.get("scrolled", True):
-            if not exec_result.get("can_scroll", True):
+        # Report scroll results on SUCCESS too — position, max, bottom-reached
+        # and the sign convention are the decisive facts that stop the model
+        # from probing up/down.
+        if action.is_scroll:
+            delta = action.arguments.get("delta", 0)
+            if exec_result.get("scrolled", True):
+                if action.name == "scroll":
+                    direction = "DOWN" if delta >= 0 else "UP"
+                else:
+                    direction = "RIGHT" if delta >= 0 else "LEFT"
+                action_feedback = (
+                    f"Scrolled {direction} by {delta}px: scrollY "
+                    f"{exec_result.get('scroll_y_before', 0)} → "
+                    f"{exec_result.get('scroll_y', 0)} (max "
+                    f"{exec_result.get('max_scroll_y', 0)}px). "
+                    f"Positive delta scrolls DOWN."
+                )
+                if exec_result.get("at_bottom"):
+                    action_feedback += (
+                        " Page is at the BOTTOM — no more content below; "
+                        "the scroll goal is achieved."
+                    )
+            elif not exec_result.get("can_scroll", True):
                 action_feedback = (
                     "The page has no more content to scroll — it fits the "
                     "viewport. Use visit_url or history_back to navigate instead."
                 )
             else:
                 action_feedback = (
-                    f"The scroll by {action.arguments.get('delta', 0)}px did "
-                    f"not move the page (scrollY stayed at "
-                    f"{exec_result.get('scroll_y', 0)}). The delta sign may "
-                    f"be inverted — try the opposite sign, or an overlay may "
-                    f"be intercepting the wheel event."
+                    f"The scroll by {delta}px did not move the page (scrollY "
+                    f"stayed at {exec_result.get('scroll_y', 0)}). Remember: "
+                    f"positive delta scrolls DOWN, negative scrolls UP. An "
+                    f"overlay may also be intercepting the wheel event."
                 )
-            logger.warning(
-                f"📜 Scroll had no effect: delta={action.arguments.get('delta')} "
-                f"scrollY={exec_result.get('scroll_y', 0)} "
-                f"can_scroll={exec_result.get('can_scroll', '?')}"
-            )
+            if not exec_result.get("scrolled", True):
+                logger.warning(
+                    f"📜 Scroll had no effect: delta={delta} "
+                    f"scrollY={exec_result.get('scroll_y', 0)} "
+                    f"can_scroll={exec_result.get('can_scroll', '?')}"
+                )
 
         # ── Repeated-action detection ──
         # A quantized 9B model can loop on the same no-effect click. Detect
@@ -603,6 +990,8 @@ class AgentLoop:
             "final_summary": self.final_summary,
             "paused": self.safety.paused,
             "pause_reason": self.safety.pause_reason,
+            "plan": self.plan,
+            "plan_index": self.plan_index,
             "trace": self.safety.get_trace(),
         }
 

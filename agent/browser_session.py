@@ -327,20 +327,15 @@ class BrowserSession:
         """
         if self._page is None:
             return {"scrolled": False, "scroll_x": 0, "scroll_y": 0,
+                    "scroll_y_before": 0, "max_scroll_y": 0,
+                    "at_bottom": False, "at_top": True,
                     "can_scroll": False, "delta_x": delta_x, "delta_y": delta_y}
 
         vp = self.viewport
         # Park pointer at viewport center so the wheel targets main content.
         await self._page.mouse.move(vp["width"] // 2, vp["height"] // 2)
 
-        can_scroll = await self._page.evaluate(
-            "() => { const el = document.scrollingElement || document.documentElement;"
-            " return (el.scrollHeight - el.clientHeight) > 10; }"
-        )
-
-        before = await self._page.evaluate(
-            "() => ({ x: window.scrollX || 0, y: window.scrollY || 0 })"
-        )
+        before = await self._scroll_state()
 
         await self._page.mouse.wheel(delta_x, delta_y)
 
@@ -348,9 +343,7 @@ class BrowserSession:
         after = before
         for _ in range(10):
             await asyncio.sleep(0.05)
-            after = await self._page.evaluate(
-                "() => ({ x: window.scrollX || 0, y: window.scrollY || 0 })"
-            )
+            after = await self._scroll_state()
             if after["x"] != before["x"] or after["y"] != before["y"]:
                 break
 
@@ -359,7 +352,11 @@ class BrowserSession:
             "scrolled": scrolled,
             "scroll_x": after["x"],
             "scroll_y": after["y"],
-            "can_scroll": can_scroll,
+            "scroll_y_before": before["y"],
+            "max_scroll_y": after["max"],
+            "at_bottom": after["at_bottom"],
+            "at_top": after["at_top"],
+            "can_scroll": before["can_scroll"],
             "delta_x": delta_x,
             "delta_y": delta_y,
         }
