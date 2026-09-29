@@ -168,6 +168,10 @@ class AgentLoop:
             return
         try:
             await self.browser.start(start_url=self.start_url)
+            # If a start URL was provided, let it finish rendering before the
+            # first screenshot so the model sees real content, not a blank page.
+            if self.start_url:
+                await self.browser.wait_for_settle()
         except Exception as e:
             logger.error(f"Browser session failed to start: {e}")
             self.state = AgentState.FAILED
@@ -291,6 +295,10 @@ class AgentLoop:
         # Execute the action
         try:
             exec_result = await execute_action(self.browser.page, action)
+            # Let the page finish loading/rendering before the next screenshot.
+            # Without this, the next step captures a blank/loading page and the
+            # model wrongly concludes the navigation failed.
+            await self.browser.wait_for_settle()
         except Exception as e:
             logger.error(f"Action execution error: {e}")
             self.state = AgentState.FAILED

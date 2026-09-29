@@ -86,6 +86,24 @@ class BrowserSession:
         b64 = base64.b64encode(data).decode("ascii")
         return f"data:image/jpeg;base64,{b64}"
 
+    async def wait_for_settle(self, timeout_ms: int = 5000, settle_ms: int = 800) -> None:
+        """Wait for the page to finish loading/rendering after an action.
+
+        Uses the ``load`` state (NOT ``networkidle``) because pages with
+        long-lived connections (SSE, websockets) never reach networkidle and
+        would hang until timeout. A short fixed settle delay follows so
+        client-side rendering completes before the next screenshot — without
+        it, the next screenshot captures a blank/loading page and the model
+        wrongly concludes the navigation failed.
+        """
+        if self._page is None:
+            return
+        try:
+            await self._page.wait_for_load_state("load", timeout=timeout_ms)
+        except Exception:
+            pass  # load state may already be reached or the page may be slow
+        await asyncio.sleep(settle_ms / 1000)
+
     @property
     def page(self):
         return self._page
