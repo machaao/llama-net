@@ -160,12 +160,31 @@ class BrowserSession:
                     const el = document.elementFromPoint(x, y);
                     if (!el) return null;
                     const cls = typeof el.className === 'string' ? el.className : '';
+                    // Walk ancestors: a click bubbles up, so a <span> inside
+                    // an <a href> IS interactive. Disabled controls are NOT —
+                    // they swallow clicks without effect.
+                    const TAGS = new Set(['a','button','input','select','textarea','summary','label']);
+                    const ROLES = new Set(['button','link','tab','menuitem','checkbox','radio','switch','option']);
+                    let interactive = false;
+                    let node = el;
+                    for (let i = 0; node && node.nodeType === 1 && i < 8; i++) {
+                        const t = node.tagName.toLowerCase();
+                        if (TAGS.has(t) || node.hasAttribute('href') || node.hasAttribute('onclick') ||
+                            ROLES.has(node.getAttribute('role') || '')) {
+                            interactive = !(node.disabled === true ||
+                                node.getAttribute('aria-disabled') === 'true');
+                            break;
+                        }
+                        if (t === 'body' || t === 'html') break;
+                        node = node.parentElement;
+                    }
                     return {
                         tag: el.tagName.toLowerCase(),
                         id: el.id || '',
                         cls: cls.slice(0, 80),
                         text: (el.textContent || '').trim().slice(0, 60),
                         href: el.href || '',
+                        interactive,
                     };
                 }""",
                 [x, y],
@@ -173,6 +192,141 @@ class BrowserSession:
         except Exception as e:
             logger.debug(f"elementFromPoint({x}, {y}) failed: {e}")
             return None
+
+    async def click_at(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        click_count: int = 1,
+    ) -> Dict[str, Any]:
+        """Click at (x, y) using Playwright's native element click.
+
+        Resolves the coordinates to the DOM element at that point, then clicks
+        through the element handle at the exact position. This engages
+        Playwright's actionability + hit-target verification: if an overlay
+        intercepts the pointer event, a TimeoutError is raised instead of the
+        click silently landing on the overlay.
+
+        Returns:
+            {"clicked": bool, "element": dict|None, "intercepted": bool,
+             "error": str|None}
+        """
+        if self._page is None:
+            return {"clicked": False, "element": None, "intercepted": False,
+                    "error": "no page"}
+
+        element_info = await self.element_at(x, y)
+
+        # No element at point — fall back to raw mouse click (background).
+        if element_info is None:
+            try:
+                await self._page.mouse.click(x, y, button=button,
+                                             click_count=click_count)
+                return {"clicked": True, "element": None, "intercepted": False,
+                        "error": None}
+            except Exception as e:
+                return {"clicked": False, "element": None, "intercepted": False,
+                        "error": str(e)}
+
+        # Resolve to an ElementHandle for native click with hit-target checks.
+        handle = await self._page.evaluate_handle(
+            "([x, y]) => document.elementFromPoint(x, y)", [x, y]
+        )
+        element = handle.as_element()
+
+        if element is None:
+            try:
+                await self._page.mouse.click(x, y, button=button,
+                                             click_count=click_count)
+                return {"clicked": True, "element": element_info,
+                        "intercepted": False, "error": None}
+            except Exception as e:
+                return {"clicked": False, "element": element_info,
+                        "intercepted": False, "error": str(e)}
+            finally:
+                await handle.dispose()
+
+        try:
+            box = await element.bounding_box()
+            if box:
+                # Click at the EXACT (x, y) via position offset — preserves
+                # the model's intended target while engaging hit-target
+                # verification (Playwright checks elementFromPoint at the
+                # final click point matches this element or a descendant).
+                position = {"x": max(0.0, x - box["x"]),
+                            "y": max(0.0, y - box["y"])}
+                await element.click(
+                    button=button, click_count=click_count,
+                    position=position, timeout=3000,
+                )
+            else:
+                # No bounding box (detached/hidden) — raw click fallback.
+                await self._page.mouse.click(x, y, button=button,
+                                             click_count=click_count)
+            return {"clicked": True, "element": element_info,
+                    "intercepted": False, "error": None}
+        except Exception as e:
+            err = str(e)
+            intercepted = "intercept" in err.lower()
+            logger.warning(
+                f"🖱 Click at ({x}, {y}) on <{element_info.get('tag')}> "
+                f"{'intercepted' if intercepted else 'failed'}: {err}"
+            )
+            return {"clicked": False, "element": element_info,
+                    "intercepted": intercepted, "error": err}
+        finally:
+            await handle.dispose()
+
+    async def scroll_by(self, delta_x: int, delta_y: int) -> Dict[str, Any]:
+        """Scroll by (delta_x, delta_y) pixels and verify the page moved.
+
+        Parks the mouse at the viewport center before wheeling — ``mouse.wheel``
+        dispatches at the current pointer position, and a pointer resting over
+        a fixed navbar or overlay can swallow the wheel event.
+
+        Returns:
+            {"scrolled": bool, "scroll_x": int, "scroll_y": int,
+             "can_scroll": bool, "delta_x": int, "delta_y": int}
+        """
+        if self._page is None:
+            return {"scrolled": False, "scroll_x": 0, "scroll_y": 0,
+                    "can_scroll": False, "delta_x": delta_x, "delta_y": delta_y}
+
+        vp = self.viewport
+        # Park pointer at viewport center so the wheel targets main content.
+        await self._page.mouse.move(vp["width"] // 2, vp["height"] // 2)
+
+        can_scroll = await self._page.evaluate(
+            "() => { const el = document.scrollingElement || document.documentElement;"
+            " return (el.scrollHeight - el.clientHeight) > 10; }"
+        )
+
+        before = await self._page.evaluate(
+            "() => ({ x: window.scrollX || 0, y: window.scrollY || 0 })"
+        )
+
+        await self._page.mouse.wheel(delta_x, delta_y)
+
+        # Smooth-scroll animations apply over time — poll briefly.
+        after = before
+        for _ in range(10):
+            await asyncio.sleep(0.05)
+            after = await self._page.evaluate(
+                "() => ({ x: window.scrollX || 0, y: window.scrollY || 0 })"
+            )
+            if after["x"] != before["x"] or after["y"] != before["y"]:
+                break
+
+        scrolled = after["x"] != before["x"] or after["y"] != before["y"]
+        return {
+            "scrolled": scrolled,
+            "scroll_x": after["x"],
+            "scroll_y": after["y"],
+            "can_scroll": can_scroll,
+            "delta_x": delta_x,
+            "delta_y": delta_y,
+        }
 
     async def wait_for_settle(self, timeout_ms: int = 5000, settle_ms: int = 800) -> None:
         """Wait for the page to finish loading/rendering after an action.

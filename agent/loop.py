@@ -33,29 +33,40 @@ class AgentState(str, Enum):
 
 
 # ── Action → Playwright executor ─────────────────────────────────────────
-async def execute_action(page, action: AgentAction) -> Dict[str, Any]:
-    """Execute a validated action against the Playwright page.
+async def execute_action(browser, action: AgentAction) -> Dict[str, Any]:
+    """Execute a validated action against the browser session.
 
-    Returns a small result dict for the trace log. Raises on failure so the
+    Pointer actions go through ``BrowserSession.click_at`` (Playwright native
+    element click with hit-target verification) and scroll actions through
+    ``BrowserSession.scroll_by`` (center-parked wheel + movement verification).
+    Other actions use the raw page directly.
+
+    Returns a result dict for the trace log. Raises on failure so the
     loop can record an error and continue (or abort as configured).
     """
     name = action.name
     args = action.arguments
+    page = browser.page
 
-    if name == "left_click":
-        await page.mouse.click(args["x"], args["y"], button="left")
-    elif name == "right_click":
-        await page.mouse.click(args["x"], args["y"], button="right")
-    elif name == "double_click":
-        await page.mouse.dblclick(args["x"], args["y"])
-    elif name == "triple_click":
-        await page.mouse.click(args["x"], args["y"], click_count=3)
-    elif name == "type":
+    # ── Pointer: native click with hit-target check ──
+    if name in ("left_click", "right_click", "double_click", "triple_click"):
+        button = "right" if name == "right_click" else "left"
+        click_count = {"double_click": 2, "triple_click": 3}.get(name, 1)
+        result = await browser.click_at(
+            args["x"], args["y"], button=button, click_count=click_count,
+        )
+        return {"action": name, "arguments": args, **result}
+
+    # ── Scroll: center-parked wheel with movement verification ──
+    if name in ("scroll", "hscroll"):
+        dx = args["delta"] if name == "hscroll" else 0
+        dy = args["delta"] if name == "scroll" else 0
+        result = await browser.scroll_by(dx, dy)
+        return {"action": name, "arguments": args, **result}
+
+    # ── Keyboard / navigation / control ──
+    if name == "type":
         await page.keyboard.type(args["text"])
-    elif name == "scroll":
-        await page.mouse.wheel(0, args["delta"])
-    elif name == "hscroll":
-        await page.mouse.wheel(args["delta"], 0)
     elif name == "visit_url":
         await page.goto(args["url"], wait_until="domcontentloaded")
     elif name == "web_search":
@@ -370,7 +381,7 @@ class AgentLoop:
 
         # Execute the action
         try:
-            exec_result = await execute_action(self.browser.page, action)
+            exec_result = await execute_action(self.browser, action)
             # Let the page finish loading/rendering before the next screenshot.
             # Without this, the next step captures a blank/loading page and the
             # model wrongly concludes the navigation failed.
@@ -381,38 +392,95 @@ class AgentLoop:
             await self._emit("execution_error", error=str(e), action=action.to_dict())
             return
 
-        # ── Click verification (Gap 3/4) ──
-        # A pointer action that lands on background and leaves the URL unchanged
-        # has definitively missed its target. Report the element actually at the
-        # point so the model gets actionable feedback instead of silently looping.
-        click_feedback: Optional[str] = None
+        # ── Action feedback (click + scroll verification) ──
+        # Two click failure modes:
+        #   1. Playwright hit-target check failed (overlay intercepts) —
+        #      exec_result carries clicked=False + intercepted flag.
+        #   2. Click succeeded but landed on an inert element with URL
+        #      unchanged — coordinates were wrong.
+        # Scroll failure: wheel dispatched but scrollY didn't move.
+        action_feedback: Optional[str] = None
         if action.is_pointer:
-            try:
-                px = action.arguments["x"]
-                py = action.arguments["y"]
-                url_after = await self.browser.current_url()
-                element = await self.browser.element_at(px, py)
-                tag = (element or {}).get("tag", "")
-                missed = (
-                    url_after == current_url
-                    and (element is None or tag in ("body", "html"))
+            px = action.arguments["x"]
+            py = action.arguments["y"]
+
+            if not exec_result.get("clicked", True):
+                # Mode 1: native click was blocked by an interceptor.
+                element = exec_result.get("element") or {}
+                tag = element.get("tag", "unknown")
+                if exec_result.get("intercepted"):
+                    action_feedback = (
+                        f"The click at ({px}, {py}) was BLOCKED — <{tag}> "
+                        f"(or an overlay above it) is intercepting pointer "
+                        f"events. The page did not change. Try different "
+                        f"coordinates, or use visit_url to navigate directly."
+                    )
+                else:
+                    action_feedback = (
+                        f"The click at ({px}, {py}) failed on <{tag}>: "
+                        f"{exec_result.get('error', 'unknown error')}. "
+                        f"Recompute coordinates from the screenshot."
+                    )
+                logger.warning(
+                    f"🖱 Click blocked: ({px}, {py}) → "
+                    f"{'intercepted' if exec_result.get('intercepted') else exec_result.get('error')}"
                 )
-                if missed:
-                    click_feedback = (
-                        f"The click at ({px}, {py}) landed on "
-                        f"'{tag or 'nothing'}' — not an interactive element — "
-                        f"and the page did not change (URL still "
-                        f"{url_after or 'about:blank'}). The coordinates are "
-                        f"likely wrong. Recompute the target position from the "
-                        f"screenshot, or use visit_url to navigate directly."
-                    )
-                    logger.warning(f"🖱 Click missed: ({px}, {py}) → <{tag or 'none'}>")
-                    await self._emit(
-                        "click_missed",
-                        x=px, y=py, element=element, url=url_after,
-                    )
-            except Exception as e:
-                logger.debug(f"Click verification failed: {e}")
+                await self._emit(
+                    "click_missed",
+                    x=px, y=py, element=element,
+                    url=await self.browser.current_url(),
+                    reason="intercepted" if exec_result.get("intercepted") else "error",
+                )
+            else:
+                # Mode 2: click succeeded — verify URL changed / element interactive.
+                try:
+                    url_after = await self.browser.current_url()
+                    element = await self.browser.element_at(px, py)
+                    tag = (element or {}).get("tag", "")
+                    interactive = bool(element and element.get("interactive"))
+                    missed = url_after == current_url and not interactive
+                    if missed:
+                        el_text = ((element or {}).get("text") or "").strip()
+                        hit_desc = f"<{tag}>" + (f" '{el_text[:40]}'" if el_text else "")
+                        action_feedback = (
+                            f"The click at ({px}, {py}) landed on {hit_desc} "
+                            f"— not an interactive element — and the page did "
+                            f"not change (URL still {url_after or 'about:blank'}). "
+                            f"The coordinates are likely wrong. Recompute the "
+                            f"target position from the screenshot, or use "
+                            f"visit_url to navigate directly."
+                        )
+                        logger.warning(
+                            f"🖱 Click missed: ({px}, {py}) → <{tag or 'none'}> "
+                            f"(inert, URL unchanged)"
+                        )
+                        await self._emit(
+                            "click_missed",
+                            x=px, y=py, element=element, url=url_after,
+                        )
+                except Exception as e:
+                    logger.debug(f"Click verification failed: {e}")
+
+        # ── Scroll verification ──
+        if action.is_scroll and not exec_result.get("scrolled", True):
+            if not exec_result.get("can_scroll", True):
+                action_feedback = (
+                    "The page has no more content to scroll — it fits the "
+                    "viewport. Use visit_url or history_back to navigate instead."
+                )
+            else:
+                action_feedback = (
+                    f"The scroll by {action.arguments.get('delta', 0)}px did "
+                    f"not move the page (scrollY stayed at "
+                    f"{exec_result.get('scroll_y', 0)}). The delta sign may "
+                    f"be inverted — try the opposite sign, or an overlay may "
+                    f"be intercepting the wheel event."
+                )
+            logger.warning(
+                f"📜 Scroll had no effect: delta={action.arguments.get('delta')} "
+                f"scrollY={exec_result.get('scroll_y', 0)} "
+                f"can_scroll={exec_result.get('can_scroll', '?')}"
+            )
 
         # ── Repeated-action detection ──
         # A quantized 9B model can loop on the same no-effect click. Detect
@@ -446,9 +514,9 @@ class AgentLoop:
             )
             self._repeat_count = 0
             self._last_action_key = None
-        elif click_feedback:
-            # Immediate miss feedback — don't wait for the repeat threshold.
-            self.history.append({"role": "user", "content": click_feedback})
+        elif action_feedback:
+            # Immediate miss/scroll feedback — don't wait for the repeat threshold.
+            self.history.append({"role": "user", "content": action_feedback})
         else:
             self.history.append({
                 "role": "user",
