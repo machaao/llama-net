@@ -22,7 +22,7 @@ class AgentConsole {
         return resp.json();
     }
 
-    async createSession() {
+    async startSession() {
         const goal = document.getElementById('agent-goal').value.trim();
         if (!goal) { this._toast('error', 'Enter a goal first'); return; }
 
@@ -38,23 +38,16 @@ class AgentConsole {
                 goal, allowlist, blocklist, start_url: startUrl || null, headless,
             });
             this.sessionId = data.session_id;
-            this._setControls('created');
-            this._toast('success', 'Session created: ' + this.sessionId);
             this._ensureLog();
-            this._appendLog('system', 'Session created. Press Run to start.', '');
-        } catch (e) {
-            this._toast('error', 'Failed to create session: ' + e.message);
-        }
-    }
+            this._appendLog('system', 'Session created. Starting…', '');
+            this._toast('success', 'Session started: ' + this.sessionId);
 
-    async runSession() {
-        if (!this.sessionId) return;
-        try {
+            // Immediately run the session — no separate Run step.
             await this._api('POST', `/agent/sessions/${this.sessionId}/run`);
             this._setControls('running');
             this._openEvents();
         } catch (e) {
-            this._toast('error', 'Run failed: ' + e.message);
+            this._toast('error', 'Failed to start session: ' + e.message);
         }
     }
 
