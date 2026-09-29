@@ -243,21 +243,19 @@ class AgentConsole {
 
     _setControls(state) {
         const start = document.getElementById('agent-start-btn');
-        const run = document.getElementById('agent-run-btn');
         const pause = document.getElementById('agent-pause-btn');
         const resume = document.getElementById('agent-resume-btn');
         const stop = document.getElementById('agent-stop-btn');
 
         const map = {
-            idle:    { start: false, run: false, pause: false, resume: false, stop: false },
-            created: { start: true,  run: true,  pause: false, resume: false, stop: false },
-            running: { start: false, run: false, pause: true,  resume: false, stop: true },
-            paused:  { start: false, run: false, pause: false, resume: true,  stop: true },
-            waiting: { start: false, run: false, pause: false, resume: false, stop: true },
-        }[state] || { start: false, run: false, pause: false, resume: false, stop: false };
+            idle:    { start: false, pause: false, resume: false, stop: false },
+            created: { start: true,  pause: false, resume: false, stop: false },
+            running: { start: false, pause: true,  resume: false, stop: true },
+            paused:  { start: false, pause: false, resume: true,  stop: true },
+            waiting: { start: false, pause: false, resume: false, stop: true },
+        }[state] || { start: false, pause: false, resume: false, stop: false };
 
         start.disabled = !map.start;
-        run.disabled = !map.run;
         pause.disabled = !map.pause;
         resume.disabled = !map.resume;
         stop.disabled = !map.stop;
