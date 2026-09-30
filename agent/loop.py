@@ -292,6 +292,59 @@ class AgentLoop:
             })
             await self._emit("step_budget_warning", remaining=remaining)
 
+    # ── Goal-achievement judge ───────────────────────────────────────────
+
+    async def _judge_goal_achieved(self, question: str, model_output: str) -> bool:
+        """Verify with a cheap text-only LLM call whether the goal is achieved.
+
+        Called when the model emits ``ask_user_question``. A question asked
+        after the goal is delivered is an offer of extra work beyond the goal —
+        the goal is the priority, so the session auto-completes instead of
+        pausing for a human. A question the task genuinely requires (missing
+        info, clarification, irreversible-action confirmation) returns False
+        and the normal pause path proceeds.
+
+        Fails closed: any judge error or unparseable verdict returns False
+        (pause), preserving the existing critical-point behavior.
+        """
+        try:
+            result = await self.llm.generate_chat_safe(
+                messages=[
+                    {"role": "system", "content": (
+                        "You verify task completion. The goal is the contract — "
+                        "work beyond the goal does not count. Decide whether the "
+                        "goal has been fully achieved. Reply with ONLY a JSON "
+                        'object: {"goal_achieved": true} or '
+                        '{"goal_achieved": false}'
+                    )},
+                    {"role": "user", "content": (
+                        f"Goal: {self.goal}\n\n"
+                        f"Agent's final report:\n{(model_output or '')[:1500]}\n\n"
+                        f'The agent then asked the user: "{question}"\n\n'
+                        f"Has everything the goal requires already been delivered?"
+                    )},
+                ],
+                max_tokens=60,
+                temperature=0.0,
+            )
+        except Exception as e:
+            logger.debug(f"Goal-achievement judge call failed: {e}")
+            return False
+
+        raw = (result.get("content") or result.get("text") or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end <= start:
+            return False
+        try:
+            verdict = repair_json_loads(raw[start:end + 1])
+        except Exception:
+            return False
+        if isinstance(verdict, dict):
+            achieved = bool(verdict.get("goal_achieved", False))
+            logger.info(f"🎯 Goal-achievement judge: achieved={achieved}")
+            return achieved
+        return False
+
     # ── Plan construction ────────────────────────────────────────────────
 
     async def _create_plan(self) -> None:
@@ -638,6 +691,30 @@ class AgentLoop:
                 f"🖱 Pointer coords: model-space {model_coords} → "
                 f"viewport ({action.arguments['x']}, {action.arguments['y']})"
             )
+
+        # ── Goal-reached check before human intervention ──
+        # The goal is the priority: when the model asks the user a question,
+        # first verify with a cheap text-only judge call whether the goal is
+        # already achieved. A question asked after delivery is an offer of
+        # extra work — auto-complete with the model's own summary instead of
+        # pausing for a human (default: no human intervention).
+        if action.name == "ask_user_question":
+            question = action.arguments.get("question", "")
+            if await self._judge_goal_achieved(question, raw_text):
+                self.final_summary = (cot or raw_text).strip() or question
+                self.state = AgentState.COMPLETED
+                self._remember("assistant", raw_text)
+                logger.info(
+                    f"🎯 Goal achieved — auto-completing instead of pausing "
+                    f"for: {question}"
+                )
+                await self._emit(
+                    "completed",
+                    summary=self.final_summary,
+                    skipped_question=question,
+                )
+                return
+            # Genuine critical point — fall through to the safety pause path.
 
         # Safety gate (may pause)
         try:
