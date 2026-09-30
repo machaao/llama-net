@@ -79,6 +79,9 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
             await session.emit("execution_error", error=str(exc))
 
         session.task = asyncio.create_task(session.loop.run())
+        # Wire the task into the loop so stop() can cancel an in-flight step
+        # immediately (loop._task is otherwise never set and cancel no-ops).
+        session.loop._task = session.task
         session.task.add_done_callback(
             lambda t: asyncio.create_task(_done(t))
         )
@@ -108,6 +111,14 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
                 f"Active model '{getattr(llm, '_model_name', '?')}' does not appear to be a "
                 "vision/computer-use model. The agent requires a Fara-class vision model."
             )
+
+        # Bound memory: drop terminal sessions older than 15 minutes (their
+        # browser contexts are already closed; this trims the bookkeeping).
+        now = time.time()
+        for sid, s in list(sessions.items()):
+            if s.loop.state in (AgentState.COMPLETED, AgentState.ABORTED, AgentState.FAILED) \
+                    and now - s.created_at > 900:
+                sessions.pop(sid, None)
 
         loop = _new_loop(goal, body)
         # Wire the loop's on_event callback to the session queue.
@@ -156,8 +167,11 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
         answer = (body or {}).get("answer", "")
         await session.loop.resume(answer)
         await session.emit("resumed", {"answer": answer})
-        # Continue running if not already in an active task
-        if not session.task or session.task.done():
+        # Restart the loop task only for a genuinely paused session — never
+        # for a terminal one (resume() no-ops there; a new run() task would
+        # be a zombie that exits immediately).
+        if session.loop.state in (AgentState.PAUSED, AgentState.WAITING_FOR_USER) \
+                and (not session.task or session.task.done()):
             _start_loop_task(session)
         return {"session_id": session_id, "state": session.loop.state.value}
 
@@ -169,7 +183,9 @@ def create_agent_router(get_llm: Callable[[], Any]) -> APIRouter:
         answer = (body or {}).get("answer", "")
         await session.loop.resume(answer)
         await session.emit("answered", {"answer": answer})
-        if not session.task or session.task.done():
+        # Same guard as resume: only restart for a genuinely paused session.
+        if session.loop.state in (AgentState.PAUSED, AgentState.WAITING_FOR_USER) \
+                and (not session.task or session.task.done()):
             _start_loop_task(session)
         return {"session_id": session_id, "state": session.loop.state.value}
 

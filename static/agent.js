@@ -209,16 +209,23 @@ class AgentConsole {
                 this._setStatus('Completed', 'success');
                 this._setControls('idle');
                 this._appendLog('system', 'Task completed', data.summary || '');
+                this._resetForNextGoal();
                 break;
             case 'aborted':
                 this._setStatus('Stopped', 'secondary');
                 this._setControls('idle');
                 this._appendLog('system', 'Session stopped', '');
+                this._resetForNextGoal();
+                completed/aborted/failed → session is over; make the console
+                immediately ready for the next goal: clear the session id,
+                close the SSE stream, and re-enable Start. The goal text and
+                step log are kept so the operator can review the run.
                 break;
             case 'failed':
                 this._setStatus('Failed', 'danger');
                 this._setControls('idle');
                 this._appendLog('error', 'Failed', data.error || '');
+                this._resetForNextGoal();
                 break;
             case 'heartbeat':
                 break;
@@ -233,6 +240,16 @@ class AgentConsole {
             return `${data.action} ${JSON.stringify(data.arguments || {})}`;
         }
         return JSON.stringify(data);
+    }
+
+    // Terminal events (completed/aborted/failed) → session is over; make the
+    // console immediately ready for the next goal: clear the session id,
+    // close the SSE stream, and re-enable Start. The goal text and step log
+    // are kept so the operator can review the run.
+    _resetForNextGoal() {
+        this.sessionId = null;
+        this._closeEvents();
+        this._setControls('idle');
     }
 
     // ── UI helpers ──────────────────────────────────────────────────

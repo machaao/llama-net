@@ -218,7 +218,12 @@ class AgentLoop:
     # ── Event helpers ───────────────────────────────────────────────────
 
     async def _emit(self, event_type: str, **data: Any) -> None:
-        self.safety.record(event_type, data)
+        # Record without bulky payloads — base64 screenshots are delivered
+        # live via SSE; keeping them in the trace grows sessions to MBs and
+        # bloats GET /agent/sessions/{id} responses.
+        self.safety.record(
+            event_type, {k: v for k, v in data.items() if k != "screenshot"}
+        )
         if self.on_event:
             try:
                 await self.on_event(event_type, data)
@@ -904,6 +909,16 @@ class AgentLoop:
             # controls update consistently.
             if self.state is AgentState.FAILED:
                 await self._emit("failed", error=self._last_error or "Agent failed")
+
+            # Terminal states: tear down this session's browser context so the
+            # next goal starts clean. The shared Chromium singleton stays up;
+            # only this session's isolated context closes. Paused sessions
+            # (WAITING_FOR_USER) keep the browser open for resume.
+            if self.state in (AgentState.COMPLETED, AgentState.ABORTED, AgentState.FAILED):
+                try:
+                    await self.browser.close()
+                except Exception as e:
+                    logger.debug(f"Browser teardown after terminal state failed: {e}")
 
     # ── Control API for the router ──────────────────────────────────────
 
