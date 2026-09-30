@@ -561,8 +561,25 @@ class AgentLoop:
         except SafetyViolation as e:
             logger.warning(f"Safety violation: {e}")
             self.state = AgentState.PAUSED
-            self.safety.pause(str(e))
-            await self._emit("safety_blocked", reason=str(e), action=action.to_dict())
+            self.safety.pause(str(e), kind=getattr(e, "kind", "safety"))
+            # Tell the model its action was blocked — otherwise after resume it
+            # re-emits the same action and gets blocked again.
+            self.history.append({
+                "role": "user",
+                "content": (
+                    f"Your action {action.name} {action.arguments} was BLOCKED by "
+                    f"the safety policy: {e}. Do not repeat it. "
+                    + ("Reply APPROVE to authorize it once, or choose a different "
+                       "approach." if getattr(e, "kind", "") == "irreversible"
+                       else "Choose a different approach within the policy.")
+                ),
+            })
+            await self._emit(
+                "safety_blocked",
+                reason=str(e),
+                kind=getattr(e, "kind", "safety"),
+                action=action.to_dict(),
+            )
             return
 
         # Control actions that terminate or pause
@@ -600,6 +617,7 @@ class AgentLoop:
             await self._emit(
                 "waiting_for_user",
                 question=self.safety.pause_reason,
+                kind=self.safety.pause_kind,
                 action=action.to_dict(),
             )
             return
@@ -930,6 +948,13 @@ class AgentLoop:
     async def resume(self, answer: str = "") -> None:
         if self.state not in (AgentState.PAUSED, AgentState.WAITING_FOR_USER):
             return
+        # One-shot approval: "APPROVE" (case-insensitive) authorizes the pending
+        # irreversible action instead of being fed to the model as an answer.
+        if answer.strip().upper() == "APPROVE":
+            self.safety.authorize_once()
+            self.state = AgentState.RUNNING
+            await self._emit("authorized_once")
+            return
         if answer:
             self.history.append({"role": "user", "content": answer})
         self.safety.resume(answer)
@@ -960,6 +985,7 @@ class AgentLoop:
             "final_summary": self.final_summary,
             "paused": self.safety.paused,
             "pause_reason": self.safety.pause_reason,
+            "pause_kind": self.safety.pause_kind,
             "plan": self.plan,
             "plan_index": self.plan_index,
             "trace": self.safety.get_trace(),

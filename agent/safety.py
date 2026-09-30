@@ -29,7 +29,16 @@ logger = get_logger(__name__)
 
 
 class SafetyViolation(Exception):
-    """Raised (or recorded) when an action breaches a safety policy."""
+    """Raised (or recorded) when an action breaches a safety policy.
+
+    ``kind`` classifies the violation so the pause UI can label it and ask
+    for the right input: "irreversible" (needs one-shot approval),
+    "navigation" (allow-list/block-list), or "safety" (anything else).
+    """
+
+    def __init__(self, message: str, kind: str = "safety"):
+        super().__init__(message)
+        self.kind = kind
 
 
 # Actions that are irreversible and therefore require explicit authorization.
@@ -62,25 +71,34 @@ class SafetyController:
 
         self.paused = False
         self.pause_reason = ""
+        self.pause_kind = "question"
         self.aborted = False
         self._authorized_once = False  # one-shot authorization for a pending irreversible action
         self._trace: List[Dict[str, Any]] = []
 
     # ── Lifecycle control ────────────────────────────────────────────────
 
-    def pause(self, question: str) -> None:
-        """Pause the agent and surface a user question."""
+    def pause(self, question: str, kind: str = "question") -> None:
+        """Pause the agent and surface a user question.
+
+        ``kind`` labels WHY the agent stopped so the UI can ask for the right
+        input: "question" (needs information), "memorize" (recorded a fact),
+        "irreversible" (needs one-shot approval), "navigation"/"safety"
+        (policy block).
+        """
         self.paused = True
         self.pause_reason = question
+        self.pause_kind = kind
         self._authorized_once = False
-        logger.info(f"⏸️  Agent paused: {question}")
+        logger.info(f"⏸  Agent paused ({kind}): {question}")
 
     def resume(self, answer: str = "") -> None:
         """Resume from a paused state with an optional user answer."""
         self.paused = False
         self.pause_reason = ""
+        self.pause_kind = "question"
         self.answer = answer
-        logger.info("▶️  Agent resumed")
+        logger.info("▶  Agent resumed")
 
     def authorize_once(self) -> None:
         """Authorize exactly one blocked irreversible action."""
@@ -112,11 +130,12 @@ class SafetyController:
             raise SafetyViolation(f"Could not parse domain from URL: {url}")
 
         if self.blocklist and self._matches(domain, self.blocklist):
-            raise SafetyViolation(f"Domain '{domain}' is blocked")
+            raise SafetyViolation(f"Domain '{domain}' is blocked", kind="navigation")
 
         if self.allowlist and not self._matches(domain, self.allowlist):
             raise SafetyViolation(
-                f"Domain '{domain}' is outside the configured allow-list"
+                f"Domain '{domain}' is outside the configured allow-list",
+                kind="navigation",
             )
         return True
 
@@ -131,22 +150,30 @@ class SafetyController:
         # Critical-point control actions → pause.
         if action.name == "ask_user_question":
             question = action.arguments.get("question", "Agent needs input.")
-            self.pause(question)
+            self.pause(question, kind="question")
             return
 
         if action.name == "pause_and_memorize_fact":
             fact = action.arguments.get("fact", "")
             logger.info(f"📌 Agent memorized fact: {fact}")
-            self.pause("Agent paused to record information.")
+            self.pause(
+                f"The agent recorded this fact and paused: \"{fact}\". "
+                f"Reply to continue.",
+                kind="memorize",
+            )
             return
 
         # Irreversible-action heuristic — type/click aimed at dangerous controls.
         if self.require_confirmation and action.is_keyboard:
             text = action.arguments.get("text", "").lower()
-            if any(hint in text for hint in _IRREVERSIBLE_HINTS) and not self._authorized_once:
+            hint = next((h for h in _IRREVERSIBLE_HINTS if h in text), None)
+            if hint and not self._authorized_once:
                 raise SafetyViolation(
-                    "Typed text appears to trigger an irreversible action; "
-                    "user confirmation required."
+                    f"The text being typed contains '{hint}', which may trigger "
+                    f"an irreversible action (submit / purchase / send / delete). "
+                    f"Reply APPROVE to allow this once, or provide different "
+                    f"instructions.",
+                    kind="irreversible",
                 )
 
     def check_step(self, action: AgentAction) -> None:

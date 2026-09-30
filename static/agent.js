@@ -181,16 +181,25 @@ class AgentConsole {
                     'The same action keeps failing. Nudging the model to try a different approach.');
                 break;
             case 'waiting_for_user':
-                this._setStatus('Waiting for user', 'warning');
+            case 'safety_blocked': {
+                const kind = data.kind || 'question';
+                const reason = data.question || data.reason || '';
+                const kindLabel = {
+                    question: 'Agent needs information',
+                    memorize: 'Agent recorded a fact',
+                    irreversible: 'Approval required',
+                    navigation: 'Navigation blocked by policy',
+                    safety: 'Safety blocked',
+                }[kind] || 'Paused — needs input';
+                this._setStatus(
+                    kind === 'irreversible' ? 'Approval required' : 'Waiting for user',
+                    'warning'
+                );
                 this._setControls('waiting');
-                this._showAnswerBox(data.question || data.reason || '');
-                this._appendLog('paused', 'Paused — needs input', data.question || data.reason || '');
+                this._showAnswerBox(reason, kind);
+                this._appendLog('paused', kindLabel, reason);
                 break;
-            case 'safety_blocked':
-                this._setStatus('Safety hold', 'warning');
-                this._setControls('waiting');
-                this._appendLog('paused', 'Safety blocked', data.reason || '');
-                break;
+            }
             case 'parse_retry':
                 this._appendLog('system', `Retrying parse (attempt ${data.attempt})`, data.error || '');
                 break;
@@ -312,12 +321,33 @@ class AgentConsole {
         stop.disabled = !map.stop;
     }
 
-    _showAnswerBox(question) {
+    _showAnswerBox(question, kind) {
         const box = document.getElementById('agent-answer-box');
+        const label = box.querySelector('.form-label');
+        const approveBtn = document.getElementById('agent-approve-btn');
         box.classList.remove('d-none');
         const answer = document.getElementById('agent-answer');
         answer.placeholder = question || 'Your answer / confirmation';
+        if (label) {
+            label.innerHTML = kind === 'irreversible'
+                ? '<i class="fas fa-shield-alt"></i> Approval required — reply APPROVE or describe the change'
+                : kind === 'memorize'
+                    ? '<i class="fas fa-bookmark"></i> Fact recorded — reply to continue'
+                    : '<i class="fas fa-question-circle"></i> Agent is asking for input';
+        }
+        if (approveBtn) {
+            approveBtn.classList.toggle('d-none', kind !== 'irreversible');
+        }
         answer.focus();
+    }
+
+    async approveIrreversible() {
+        if (!this.sessionId) return;
+        await this._api('POST', `/agent/sessions/${this.sessionId}/resume`, { answer: 'APPROVE' });
+        document.getElementById('agent-answer').value = '';
+        document.getElementById('agent-answer-box').classList.add('d-none');
+        this._setControls('running');
+        this._openEvents();
     }
 
     _toast(type, message) {
