@@ -612,6 +612,27 @@ class AgentLoop:
                 await self._emit("completed", summary=self.final_summary)
             return
 
+        if action.name == "pause_and_memorize_fact":
+            # Record-and-continue — NOT a critical point. The model surfaces a
+            # discovery mid-task; halting the goal for it stalls the run until
+            # the operator types something. Acknowledge the fact in the
+            # trajectory so it persists in the sliding-window history, notify
+            # the UI, and keep going. Counts toward max_steps so spam can't
+            # loop forever.
+            fact = action.arguments.get("fact", "")
+            self._remember("assistant", raw_text)
+            self.history.append({
+                "role": "user",
+                "content": f"Noted: {fact} Continue the task.",
+            })
+            self.steps_completed += 1
+            await self._emit("fact_recorded", fact=fact)
+            if self.steps_completed >= self.max_steps:
+                self.state = AgentState.COMPLETED
+                self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                await self._emit("completed", summary=self.final_summary)
+            return
+
         if self.safety.paused:
             self.state = AgentState.WAITING_FOR_USER
             await self._emit(

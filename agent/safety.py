@@ -154,13 +154,12 @@ class SafetyController:
             return
 
         if action.name == "pause_and_memorize_fact":
+            # Record-and-continue — NOT a critical point. The model surfaces a
+            # discovery mid-task; pausing here stalls the goal until the
+            # operator types something. The loop records the fact into the
+            # trajectory and keeps going (see AgentLoop.step).
             fact = action.arguments.get("fact", "")
-            logger.info(f"📌 Agent memorized fact: {fact}")
-            self.pause(
-                f"The agent recorded this fact and paused: \"{fact}\". "
-                f"Reply to continue.",
-                kind="memorize",
-            )
+            logger.info(f"📌 Agent recorded fact (continuing): {fact}")
             return
 
         # Irreversible-action heuristic — type/click aimed at dangerous controls.

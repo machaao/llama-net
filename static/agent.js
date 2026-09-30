@@ -176,6 +176,9 @@ class AgentConsole {
             case 'action_feedback':
                 this._appendLog('paused', 'Action feedback', data.message || '');
                 break;
+            case 'fact_recorded':
+                this._appendLog('action', 'Fact recorded', data.fact || '');
+                break;
             case 'action_repeat_warning':
                 this._appendLog('paused', `Repeated action ×${data.count} — no effect`,
                     'The same action keeps failing. Nudging the model to try a different approach.');

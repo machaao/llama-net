@@ -112,10 +112,11 @@ python examples/agent_litellm_example.py agent 'goto pypi.org and find the fasta
   `waiting_for_user` (critical point), `safety_blocked`, `parse_retry` /
   `parse_error` / `execution_error`, and terminal `completed` / `aborted` /
   `failed`.
-- **Critical points are mandatory** — the agent pauses on `ask_user_question`,
-  `pause_and_memorize_fact`, and irreversible actions. Your app must handle
-  `waiting_for_user` and call `/answer` (or `/resume`) or the session stays
-  paused.
+- **Critical points are mandatory** — the agent pauses on `ask_user_question`
+  and irreversible actions. Your app must handle `waiting_for_user` and call
+  `/answer` (or `/resume`) or the session stays paused.
+  `pause_and_memorize_fact` does **not** pause — the fact is recorded into the
+  trajectory (emitted as a `fact_recorded` event) and the goal continues.
 - **State polling** — `GET /agent/sessions/{id}` returns the full state
   (`state`, `goal`, `plan`, `plan_index`, `steps_completed`,
   `final_summary`, `trace`) for dashboards or when you can't hold an SSE
