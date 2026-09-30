@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from json_repair import loads as repair_json_loads
 
 from common.utils import get_logger
-from agent.actions import AgentAction, parse_action_arguments
+from agent.actions import AgentAction, parse_action_arguments, ALL_ACTION_NAMES
 
 logger = get_logger(__name__)
 
@@ -129,6 +129,25 @@ def _infer_action(arguments: Any) -> Optional[str]:
             return action
     if "x" in arguments and "y" in arguments:
         return "left_click"
+    return None
+
+
+def _salvage_action_name(corrupted: str) -> Optional[str]:
+    """Extract a valid action name from a corrupted ``name`` value.
+
+    Quantized models glue the arguments object into the name value, e.g.
+    ``{"name": "computer_use" Action": "visit_url", "url": ...}``. json-repair
+    recovers that as ``name='computer_use" Action": "visit_url'`` — not a valid
+    action — but the real action name survives as a substring. Scan for any
+    canonical action name inside the string (longest first so e.g. a
+    ``double_click`` match wins over a partial ``click``-family overlap).
+    """
+    if not corrupted:
+        return None
+    lowered = corrupted.lower()
+    for name in sorted(ALL_ACTION_NAMES, key=len, reverse=True):
+        if name in lowered:
+            return name
     return None
 
 
@@ -257,17 +276,32 @@ class ToolCallParser:
         action_name = action_name.strip().lower()
         action_name = _ACTION_ALIASES.get(action_name, action_name)
 
-        # ``computer_use`` is the tool *wrapper* name, not an action. Quantized
-        # models often omit the inner ``action`` key — infer the real action
-        # from the argument shape instead of failing on the wrapper name.
-        if action_name in ("computer_use", "computer-use", "computer use"):
-            inferred = _infer_action(arguments)
-            if inferred:
+        # ── Invalid-name recovery ──
+        # The extracted name may be corrupted (quantized models glue the
+        # arguments object into the name value:
+        #   {"name": "computer_use" Action": "visit_url", "url": ...}
+        # → json-repair yields name='computer_use" Action": "visit_url')
+        # or be the tool *wrapper* name ("computer_use") rather than an action.
+        # Recovery order: salvage a valid action name embedded in the corrupted
+        # string, else infer from the argument shape (the wrapper case).
+        # Unknown names with un-inferable arguments still fail closed in
+        # parse_action_arguments().
+        if action_name not in ALL_ACTION_NAMES:
+            salvaged = _salvage_action_name(action_name)
+            if salvaged:
                 logger.debug(
-                    f"Inferred action '{inferred}' from arguments "
-                    f"(wrapper name 'computer_use')"
+                    f"Salvaged action '{salvaged}' from corrupted name value "
+                    f"'{action_name[:60]}'"
                 )
-                action_name = inferred
+                action_name = salvaged
+            else:
+                inferred = _infer_action(arguments)
+                if inferred:
+                    logger.debug(
+                        f"Inferred action '{inferred}' from arguments "
+                        f"(invalid name '{action_name[:60]}')"
+                    )
+                    action_name = inferred
 
         # Strip arguments used for dispatch — keep the rest as action args.
         action_args = {k: v for k, v in arguments.items() if k not in _ACTION_KEYS}
