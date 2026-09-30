@@ -83,6 +83,22 @@ def _format_nearby_elements(
     return "; ".join(lines)
 
 
+def _normalize_url_key(url: str) -> str:
+    """Canonical key for URL comparison and visit tracking.
+
+    Scheme- and trailing-slash-insensitive so ``https://x/`` and
+    ``http://x`` count as the same page (the redirect makes them one).
+    Query strings and paths are preserved — different params are
+    different pages.
+    """
+    u = (url or "").strip()
+    for prefix in ("https://", "http://"):
+        if u.startswith(prefix):
+            u = u[len(prefix):]
+            break
+    return u.rstrip("/")
+
+
 class AgentState(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
@@ -222,6 +238,11 @@ class AgentLoop:
         # so the model wraps up (terminate) instead of being cut off mid-task.
         self.STEP_BUDGET_WARNING_AT = 3
         self._budget_warned = False
+
+        # URL visit tracking — a 9B model re-visits pages it has already
+        # loaded (especially after click-miss feedback suggests visit_url),
+        # burning steps on no-op navigations.
+        self._url_visit_counts: Dict[str, int] = {}
 
         self._task: Optional[asyncio.Task] = None
 
@@ -417,6 +438,23 @@ class AgentLoop:
         return messages
 
     # ── Core loop ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _navigation_target_url(action: AgentAction) -> str:
+        """Resolved URL a navigation action will land on (for visit tracking).
+
+        Mirrors execute_action()'s web_search URL construction exactly so
+        guard/feedback comparisons match where the browser actually goes.
+        """
+        if action.name == "visit_url":
+            return action.arguments.get("url", "") or ""
+        if action.name == "web_search":
+            from urllib.parse import quote
+            return (
+                "https://www.google.com/search?q="
+                + quote(action.arguments.get("query", ""))
+            )
+        return ""
 
     @staticmethod
     def _action_key(action: AgentAction) -> str:
@@ -689,6 +727,60 @@ class AgentLoop:
             )
             return
 
+        # ── No-op navigation guard ──
+        # A 9B model re-visits the page it is already on (click-miss feedback
+        # suggests visit_url, and a reload "succeeds" so the repeat detector
+        # never fires). Block the reload, keep page state (scroll position
+        # survives), and count it as a failed action so repeated no-op
+        # navigations trip the repeat detector.
+        if action.is_navigation:
+            target = self._navigation_target_url(action)
+            if target and current_url and \
+                    _normalize_url_key(target) == _normalize_url_key(current_url):
+                self.steps_completed += 1
+                self._remember("assistant", raw_text)
+                feedback = (
+                    f"You are ALREADY on {current_url or 'about:blank'} — the "
+                    f"{action.name} would just reload the same page and reset "
+                    f"your scroll position. Do not re-navigate. Continue with "
+                    f"the next step of the task from the current page."
+                )
+                self.history.append({"role": "user", "content": feedback})
+                await self._emit(
+                    "action_feedback",
+                    action=action.to_dict(),
+                    message=feedback,
+                )
+                # Count as a failed action for repeat detection.
+                action_key = self._action_key(action)
+                if action_key == self._last_action_key:
+                    self._repeat_count += 1
+                else:
+                    self._last_action_key = action_key
+                    self._repeat_count = 1
+                if self._repeat_count >= self.MAX_IDENTICAL_REPEATS:
+                    nudge = (
+                        f"The navigation {action.name} {action.arguments} has "
+                        f"been repeated {self._repeat_count + 1} times but you "
+                        f"are already on that page. Stop re-navigating — work "
+                        f"with the content already on screen (scroll, read, "
+                        f"click) or emit terminate {{summary}} if the task is done."
+                    )
+                    self.history.append({"role": "user", "content": nudge})
+                    await self._emit(
+                        "action_repeat_warning",
+                        count=self._repeat_count + 1,
+                        action=action.to_dict(),
+                        url=current_url,
+                    )
+                    self._repeat_count = 0
+                    self._last_action_key = None
+                if self.steps_completed >= self.max_steps:
+                    self.state = AgentState.COMPLETED
+                    self.final_summary = f"Reached maximum step limit ({self.max_steps})."
+                    await self._emit("completed", summary=self.final_summary)
+                return
+
         # Execute the action
         try:
             # Snapshot interactive-element state BEFORE the action — clicks on
@@ -930,6 +1022,23 @@ class AgentLoop:
                     f"can_scroll={exec_result.get('can_scroll', '?')}"
                 )
             await self._emit("action_feedback", action=action.to_dict(), message=action_feedback)
+
+        # ── Navigation visit tracking ──
+        # Advisory (not a block): after the model has visited the same URL
+        # twice, tell it re-visiting wastes steps. The sliding history window
+        # means it genuinely forgets — this keeps the fact in recent context.
+        if action.is_navigation:
+            target = self._navigation_target_url(action)
+            if target:
+                key = _normalize_url_key(target)
+                count = self._url_visit_counts.get(key, 0) + 1
+                self._url_visit_counts[key] = count
+                if count >= 2 and not action_feedback:
+                    action_feedback = (
+                        f"Note: you have already visited {target} {count} times "
+                        f"in this session. Re-visiting pages wastes steps — "
+                        f"work with the content already on screen."
+                    )
 
         # ── Repeated-action detection ──
         # A quantized 9B model can loop on the same no-effect click. Detect
