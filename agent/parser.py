@@ -94,7 +94,26 @@ _INFER_FROM_ARGS: tuple = (
     ("note", "complete_step"),
     ("text", "type"),
     ("delta", "scroll"),
+    ("keys", "press_key"),
+    ("key", "press_key"),
 )
+
+
+# Quantized models invent near-miss action names ("key_press", "goto",
+# "finish"). Map the known near-misses to canonical names before validation;
+# unknown names still fail closed.
+_ACTION_ALIASES = {
+    "key_press": "press_key",
+    "presskey": "press_key",
+    "press": "press_key",
+    "key": "press_key",
+    "click": "left_click",
+    "goto": "visit_url",
+    "navigate": "visit_url",
+    "go_back": "history_back",
+    "back": "history_back",
+    "finish": "terminate",
+}
 
 
 def _infer_action(arguments: Any) -> Optional[str]:
@@ -236,6 +255,7 @@ class ToolCallParser:
             return None
 
         action_name = action_name.strip().lower()
+        action_name = _ACTION_ALIASES.get(action_name, action_name)
 
         # ``computer_use`` is the tool *wrapper* name, not an action. Quantized
         # models often omit the inner ``action`` key — infer the real action

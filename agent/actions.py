@@ -121,6 +121,27 @@ def parse_action_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, An
             raise ActionValidationError("'type' action requires a string 'text'")
         return {"text": text}
 
+    if name == "press_key":
+        key = arguments.get("key")
+        if key is None:
+            keys = arguments.get("keys")
+            if isinstance(keys, (list, tuple)) and keys:
+                key = keys[0]
+        if not isinstance(key, str) or not key.strip():
+            raise ActionValidationError(
+                "'press_key' requires a 'key' (e.g. 'Enter', 'End', 'PageDown', 'ArrowDown')"
+            )
+        key = key.strip()
+        # Normalize common named-key spellings to Playwright's key names.
+        named = {
+            "end": "End", "home": "Home", "enter": "Enter", "return": "Enter",
+            "tab": "Tab", "escape": "Escape", "esc": "Escape", "space": "Space",
+            "backspace": "Backspace", "delete": "Delete", "pageup": "PageUp",
+            "pagedown": "PageDown", "arrowup": "ArrowUp", "arrowdown": "ArrowDown",
+            "arrowleft": "ArrowLeft", "arrowright": "ArrowRight",
+        }
+        return {"key": named.get(key.lower(), key)}
+
     if name in SCROLL_ACTIONS:
         # Both accept a signed pixel delta; scroll is vertical, hscroll horizontal.
         _require(arguments, ["delta"])
@@ -189,6 +210,7 @@ single <tool_call> block with `name` = "computer_use"):
 - double_click {x, y}        — double-click at pixel (x, y)
 - triple_click {x, y}        — triple-click at pixel (x, y)
 - type {text}                — type text at the current focus
+- press_key {key}            — press a keyboard key (e.g. "End", "Enter", "PageDown", "Escape", "ArrowDown")
 - scroll {delta}             — vertical scroll; POSITIVE delta scrolls DOWN, NEGATIVE scrolls UP
 - hscroll {delta}            — horizontal scroll by delta pixels
 - visit_url {url}            — navigate to an http(s) URL
