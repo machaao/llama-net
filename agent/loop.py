@@ -119,9 +119,14 @@ async def execute_action(browser, action: AgentAction) -> Dict[str, Any]:
         return {"action": name, "arguments": args, **result}
 
     # ── Scroll: center-parked wheel with movement verification ──
+    # Fara's trained scroll convention is pyautogui's: NEGATIVE delta scrolls
+    # DOWN, POSITIVE scrolls UP — the OPPOSITE of Playwright's mouse.wheel.
+    # Empirically the model emits "scroll down" as a negative delta far more
+    # often than it follows a stated convention, so the harness adopts the
+    # model's native convention and flips the sign for Playwright here.
     if name in ("scroll", "hscroll"):
         dx = args["delta"] if name == "hscroll" else 0
-        dy = args["delta"] if name == "scroll" else 0
+        dy = -args["delta"] if name == "scroll" else 0  # sign flip: model → Playwright
         result = await browser.scroll_by(dx, dy)
         return {"action": name, "arguments": args, **result}
 
@@ -330,7 +335,7 @@ class AgentLoop:
             pct = int((y / max_y) * 100) if max_y > 0 else 0
             page_context += (
                 f"\nScroll position: y={y} of {max_y} px ({pct}% from top; "
-                f"positive delta scrolls down)"
+                f"negative delta scrolls down)"
             )
             if scroll.get("at_bottom"):
                 page_context += "\nPage is at the BOTTOM — no more content below."
@@ -791,15 +796,15 @@ class AgentLoop:
             delta = action.arguments.get("delta", 0)
             if exec_result.get("scrolled", True):
                 if action.name == "scroll":
-                    direction = "DOWN" if delta >= 0 else "UP"
+                    direction = "DOWN" if delta < 0 else "UP"
                 else:
                     direction = "RIGHT" if delta >= 0 else "LEFT"
                 action_feedback = (
-                    f"Scrolled {direction} by {delta}px: scrollY "
+                    f"Scrolled {direction} by {abs(delta)}px: scrollY "
                     f"{exec_result.get('scroll_y_before', 0)} → "
                     f"{exec_result.get('scroll_y', 0)} (max "
                     f"{exec_result.get('max_scroll_y', 0)}px). "
-                    f"Positive delta scrolls DOWN."
+                    f"Negative delta scrolls DOWN."
                 )
                 if exec_result.get("at_bottom"):
                     action_feedback += (
@@ -815,7 +820,7 @@ class AgentLoop:
                 action_feedback = (
                     f"The scroll by {delta}px did not move the page (scrollY "
                     f"stayed at {exec_result.get('scroll_y', 0)}). Remember: "
-                    f"positive delta scrolls DOWN, negative scrolls UP. An "
+                    f"NEGATIVE delta scrolls DOWN, POSITIVE scrolls UP. An "
                     f"overlay may also be intercepting the wheel event."
                 )
             if not exec_result.get("scrolled", True):

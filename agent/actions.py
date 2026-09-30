@@ -211,7 +211,7 @@ single <tool_call> block with `name` = "computer_use"):
 - triple_click {x, y}        — triple-click at pixel (x, y)
 - type {text}                — type text at the current focus
 - press_key {key}            — press a keyboard key (e.g. "End", "Enter", "PageDown", "Escape", "ArrowDown")
-- scroll {delta}             — vertical scroll; POSITIVE delta scrolls DOWN, NEGATIVE scrolls UP
+- scroll {delta}             — vertical scroll; NEGATIVE delta scrolls DOWN, POSITIVE scrolls UP
 - hscroll {delta}            — horizontal scroll by delta pixels
 - visit_url {url}            — navigate to an http(s) URL
 - web_search {query}         — perform a web search for the query
