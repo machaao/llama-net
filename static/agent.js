@@ -38,7 +38,7 @@ class AgentConsole {
                 goal, allowlist, blocklist, start_url: startUrl || null, headless,
             });
             this.sessionId = data.session_id;
-            this._ensureLog();
+            this._clearLog();
             this._appendLog('system', 'Session created. Starting…', '');
             this._toast('success', 'Session started: ' + this.sessionId);
 
@@ -266,6 +266,15 @@ class AgentConsole {
             log.innerHTML = '';
             this._logInitialized = true;
         }
+    }
+
+    // Clear the step log for a fresh session. Called on Start — the previous
+    // run's log stays visible until the operator begins the next goal, so
+    // they can still review it, then it's wiped for the new run.
+    _clearLog() {
+        const log = document.getElementById('agent-log');
+        if (log) log.innerHTML = '';
+        this._logInitialized = true;
     }
 
     _appendLog(kind, title, body) {
