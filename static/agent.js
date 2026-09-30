@@ -79,9 +79,8 @@ class AgentConsole {
         try {
             await this._api('POST', `/agent/sessions/${this.sessionId}/stop`);
         } catch (e) { /* ignore */ }
-        this._closeEvents();
-        this._setControls('idle');
         this._setStatus('Stopped', 'secondary');
+        this._resetForNextGoal();
     }
 
     // ── SSE event stream ─────────────────────────────────────────────
@@ -216,10 +215,6 @@ class AgentConsole {
                 this._setControls('idle');
                 this._appendLog('system', 'Session stopped', '');
                 this._resetForNextGoal();
-                completed/aborted/failed → session is over; make the console
-                immediately ready for the next goal: clear the session id,
-                close the SSE stream, and re-enable Start. The goal text and
-                step log are kept so the operator can review the run.
                 break;
             case 'failed':
                 this._setStatus('Failed', 'danger');
@@ -303,7 +298,8 @@ class AgentConsole {
         const stop = document.getElementById('agent-stop-btn');
 
         const map = {
-            idle:    { start: false, pause: false, resume: false, stop: false },
+            // idle = no active session → Start ENABLED (ready for the next goal)
+            idle:    { start: true,  pause: false, resume: false, stop: false },
             created: { start: true,  pause: false, resume: false, stop: false },
             running: { start: false, pause: true,  resume: false, stop: true },
             paused:  { start: false, pause: false, resume: true,  stop: true },
