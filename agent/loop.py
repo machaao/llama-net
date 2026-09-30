@@ -218,6 +218,11 @@ class AgentLoop:
         self._repeat_count = 0
         self.MAX_IDENTICAL_REPEATS = 3
 
+        # Step-budget awareness — warn once when actions are nearly exhausted
+        # so the model wraps up (terminate) instead of being cut off mid-task.
+        self.STEP_BUDGET_WARNING_AT = 3
+        self._budget_warned = False
+
         self._task: Optional[asyncio.Task] = None
 
     # ── Event helpers ───────────────────────────────────────────────────
@@ -242,6 +247,30 @@ class AgentLoop:
             "content": _truncate_history_text(content, self.MAX_HISTORY_TEXT),
         })
 
+    async def _check_step_budget(self) -> None:
+        """Warn the model ONCE when the action budget is nearly exhausted.
+
+        A 9B model has no sense of the step budget and will keep gathering
+        content until the cap force-completes the session with partial work.
+        The nudge makes it wrap up and emit terminate {summary} with the best
+        answer it can give from what it has.
+        """
+        if self._budget_warned or self.state is not AgentState.RUNNING:
+            return
+        remaining = self.max_steps - self.steps_completed
+        if 0 < remaining <= self.STEP_BUDGET_WARNING_AT:
+            self._budget_warned = True
+            self.history.append({
+                "role": "user",
+                "content": (
+                    f"Step budget: only {remaining} actions remain before this "
+                    f"session is force-stopped. Wrap up NOW — stop gathering "
+                    f"content and emit terminate {{summary}} with the best "
+                    f"answer you can give from what you have."
+                ),
+            })
+            await self._emit("step_budget_warning", remaining=remaining)
+
     # ── Plan construction ────────────────────────────────────────────────
 
     async def _create_plan(self) -> None:
@@ -256,8 +285,9 @@ class AgentLoop:
                 messages=[
                     {"role": "system", "content": (
                         "You break a browser-automation goal into 2-6 short "
-                        "imperative steps. Reply with ONLY a JSON array of "
-                        "strings, no prose."
+                        f"imperative steps. The whole task must fit within "
+                        f"{self.max_steps} browser actions. Reply with ONLY a "
+                        "JSON array of strings, no prose."
                     )},
                     {"role": "user", "content": f"Goal: {self.goal}"},
                 ],
@@ -278,6 +308,8 @@ class AgentLoop:
         self.system_prompt = (
             self.system_prompt
             + "\n\n" + PLAN_INSTRUCTIONS
+            + f"Action budget: at most {self.max_steps} actions for the ENTIRE "
+            f"task — work efficiently.\n"
             + "Plan:\n"
             + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(self.plan))
         )
@@ -341,6 +373,16 @@ class AgentLoop:
                 page_context += "\nPage is at the BOTTOM — no more content below."
             elif scroll.get("at_top"):
                 page_context += "\nPage is at the TOP."
+
+        # Scroll-efficiency hint — a 9B model defaults to conservative viewport-sized
+        # deltas and burns the action budget traversing long pages. Tell it the
+        # page height and the fastest way to move.
+        if scroll and scroll.get("max_y", 0) > 0:
+            page_context += (
+                f"\nPage height: {int(scroll['max_y']) + 800} px total. "
+                f"To traverse the page quickly, scroll by large deltas "
+                f"(e.g. -2000 to -3000) instead of one viewport at a time."
+            )
 
         # Plan block — keeps the model oriented in multi-phase goals.
         plan_lines = []
@@ -416,6 +458,10 @@ class AgentLoop:
         """Perform exactly one screenshot → model → parse → execute cycle."""
         if self.state not in (AgentState.RUNNING,):
             return
+
+        # Warn once when the action budget is nearly exhausted so the model
+        # wraps up (terminate) instead of being cut off mid-task.
+        await self._check_step_budget()
 
         screenshot = await self.browser.screenshot()
         self.screenshot_history.append(screenshot)
@@ -645,6 +691,10 @@ class AgentLoop:
 
         # Execute the action
         try:
+            # Snapshot interactive-element state BEFORE the action — clicks on
+            # accordions/toggles/checkboxes change DOM state without changing
+            # the URL, and URL-only verification would report them as misses.
+            dom_before = await self.browser.dom_state_signature()
             exec_result = await execute_action(self.browser, action)
             # Let the page finish loading/rendering before the next screenshot.
             # Without this, the next step captures a blank/loading page and the
@@ -664,6 +714,7 @@ class AgentLoop:
         #      unchanged — coordinates were wrong.
         # Scroll failure: wheel dispatched but scrollY didn't move.
         action_feedback: Optional[str] = None
+        action_failed = False
         if action.is_pointer:
             px = action.arguments["x"]   # viewport pixels (post-rescale)
             py = action.arguments["y"]
@@ -691,6 +742,7 @@ class AgentLoop:
                         f"first (positive delta), then recompute coordinates "
                         f"from the new screenshot."
                     )
+                    action_failed = True
                     logger.warning(
                         f"🖱 Click out of bounds: ({px}, {py}) (viewport {vp_desc})"
                     )
@@ -717,6 +769,7 @@ class AgentLoop:
                             f"{err_text or 'unknown error'}. "
                             f"Recompute coordinates from the screenshot."
                         )
+                    action_failed = True
                     logger.warning(
                         f"🖱 Click blocked: ({px}, {py}) → "
                         f"{'intercepted' if exec_result.get('intercepted') else err_text}"
@@ -772,13 +825,19 @@ class AgentLoop:
                             "listed coordinates directly."
                         )
 
+                    # DOM-state check: a signature change means the click
+                    # toggled a control (accordion opened, checkbox flipped) —
+                    # the click WORKED even though the URL is unchanged.
+                    dom_after = await self.browser.dom_state_signature()
+                    dom_changed = bool(dom_before) and dom_after != dom_before
+
                     if exec_result.get("new_tab"):
                         action_feedback = (
                             f"The click at ({px}, {py}) opened a NEW TAB "
                             f"({url_after or 'about:blank'} is now the active "
                             f"page). Continue working in the new tab."
                         )
-                    elif url_after == current_url and not interactive:
+                    elif url_after == current_url and not interactive and not dom_changed:
                         missed = True
                         action_feedback = (
                             f"The click at ({px}, {py}) landed on {hit_desc} "
@@ -789,6 +848,7 @@ class AgentLoop:
                             f"visit_url to navigate directly."
                             + nearby_section
                         )
+                        action_failed = True
                         logger.warning(
                             f"🖱 Click missed: ({px}, {py}) → <{tag or 'none'}> "
                             f"(inert, URL unchanged)"
@@ -799,8 +859,9 @@ class AgentLoop:
                             reason="inert_element", nearby=nearby,
                             message=action_feedback,
                         )
-                    elif url_after == current_url:
-                        # Interactive element, but the page did not change.
+                    elif url_after == current_url and not dom_changed:
+                        # Interactive element, but neither the URL nor any
+                        # toggleable control changed.
                         # Tell the model exactly what it hit and what the
                         # element points to — a link to the current URL or a
                         # no-op handler is the usual cause.
@@ -873,19 +934,23 @@ class AgentLoop:
         # ── Repeated-action detection ──
         # A quantized 9B model can loop on the same no-effect click. Detect
         # identical consecutive actions (with coordinate tolerance) and inject
-        # a corrective nudge so it tries a different approach.
+        # a corrective nudge so it tries a different approach. Only FAILED
+        # actions count toward the threshold — a successful traversal scroll
+        # (same delta each time) is legitimate work, not a stuck loop.
         action_key = self._action_key(action)
         if action_key == self._last_action_key:
-            self._repeat_count += 1
+            if action_failed:
+                self._repeat_count += 1
+            # Successful identical action: keep the streak but don't escalate.
         else:
             self._last_action_key = action_key
-            self._repeat_count = 0
+            self._repeat_count = 1 if action_failed else 0
 
         self.steps_completed += 1
         self._remember("assistant", raw_text)
 
         if self._repeat_count >= self.MAX_IDENTICAL_REPEATS:
-            # Same action repeated with no effect — break the loop.
+            # Same failed action repeated — break the loop.
             nudge = (
                 f"The action {action.name} {action.arguments} has been repeated "
                 f"{self._repeat_count + 1} times with no effect (URL still "

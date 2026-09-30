@@ -290,6 +290,41 @@ class BrowserSession:
             logger.debug(f"interactive_elements_near({x}, {y}) failed: {e}")
             return []
 
+    async def dom_state_signature(self) -> str:
+        """Cheap signature of interactive-element state (accordions, toggles, focus).
+
+        Clicks on ``<summary>``/``<details>``, ``aria-expanded`` controls, and
+        checkboxes change DOM state WITHOUT changing the URL — URL-only click
+        verification reports them as misses, so the model re-clicks and toggles
+        the control back closed. This signature hashes the state of all such
+        controls; any toggle flips it. One ``evaluate`` call, no image decode.
+        """
+        if self._page is None:
+            return ""
+        try:
+            return await self._page.evaluate(
+                """() => {
+                    const parts = [];
+                    for (const d of document.querySelectorAll('details')) {
+                        parts.push('details:' + (d.open ? '1' : '0'));
+                    }
+                    for (const el of document.querySelectorAll('[aria-expanded]')) {
+                        parts.push('ax:' + (el.getAttribute('aria-expanded') || ''));
+                    }
+                    for (const el of document.querySelectorAll(
+                        'input[type=checkbox],input[type=radio]')) {
+                        parts.push('chk:' + (el.checked ? '1' : '0'));
+                    }
+                    const ae = document.activeElement;
+                    parts.push('focus:' + (ae && ae !== document.body
+                        ? ae.tagName.toLowerCase() : ''));
+                    return parts.join('|').slice(0, 4000);
+                }"""
+            )
+        except Exception as e:
+            logger.debug(f"dom_state_signature failed: {e}")
+            return ""
+
     async def click_at(
         self,
         x: int,
