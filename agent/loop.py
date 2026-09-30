@@ -10,7 +10,7 @@ background task while consuming per-step SSE events.
 
 import asyncio
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from common.utils import get_logger
 from agent.actions import AgentAction
@@ -35,18 +35,51 @@ def _truncate_history_text(text: str, limit: int) -> str:
     return "[earlier text truncated] " + text[-(limit - 26):]
 
 
-def _format_nearby_elements(elements: List[Dict[str, Any]], limit: int = 6) -> str:
-    """Format nearby interactive elements (with viewport boxes) for feedback."""
+def _to_model_space(x: int, y: int, viewport: Dict[str, Any]) -> Tuple[int, int]:
+    """Viewport pixels → the model's 0-1000 relative coordinate space."""
+    vw = int(viewport.get("width") or 1280)
+    vh = int(viewport.get("height") or 800)
+    return round(x * 1000 / vw), round(y * 1000 / vh)
+
+
+def _rescale_pointer_args(action: AgentAction, viewport: Dict[str, Any]) -> None:
+    """Map pointer coordinates from the model's 0-1000 relative space to
+    viewport pixels, in place.
+
+    Fara emits coordinates on a 0-1000 scale relative to the screenshot (its
+    trained coordinate space) — verified empirically: a click aimed at a nav
+    link centered at viewport (520, 35) arrives as (406, 44) =
+    520×1000/1280, 35×1000/800. Treating those values as viewport pixels
+    clicks the element one slot to the left of the intended target.
+    """
+    vw = int(viewport.get("width") or 1280)
+    vh = int(viewport.get("height") or 800)
+    x = action.arguments.get("x")
+    y = action.arguments.get("y")
+    if x is None or y is None:
+        return
+    action.arguments["x"] = max(0, min(vw - 1, round(float(x) * vw / 1000)))
+    action.arguments["y"] = max(0, min(vh - 1, round(float(y) * vh / 1000)))
+
+
+def _format_nearby_elements(
+    elements: List[Dict[str, Any]],
+    viewport: Dict[str, Any],
+    limit: int = 6,
+) -> str:
+    """Format nearby interactive elements for feedback, in the model's
+    0-1000 coordinate space (the space it emits clicks in)."""
+    vw = int(viewport.get("width") or 1280)
+    vh = int(viewport.get("height") or 800)
     lines = []
     for el in elements[:limit]:
         r = el.get("rect") or {}
-        x2 = (r.get("x") or 0) + (r.get("w") or 0)
-        y2 = (r.get("y") or 0) + (r.get("h") or 0)
+        x1 = round((r.get("x") or 0) * 1000 / vw)
+        y1 = round((r.get("y") or 0) * 1000 / vh)
+        x2 = round(((r.get("x") or 0) + (r.get("w") or 0)) * 1000 / vw)
+        y2 = round(((r.get("y") or 0) + (r.get("h") or 0)) * 1000 / vh)
         text = (el.get("text") or "")[:30]
-        lines.append(
-            f"<{el.get('tag')}> '{text}' "
-            f"[{r.get('x', '?')},{r.get('y', '?')} → {x2},{y2}]"
-        )
+        lines.append(f"<{el.get('tag')}> '{text}' [{x1},{y1} → {x2},{y2}]")
     return "; ".join(lines)
 
 
@@ -494,6 +527,24 @@ class AgentLoop:
         # Reset parse-retry counter on a successful parse.
         self._parse_retries = 0
 
+        # ── Coordinate-space mapping ──
+        # Fara emits pointer coordinates on a 0-1000 scale relative to the
+        # screenshot, NOT viewport pixels. Rescale for execution; keep the
+        # model-space values to echo back in feedback text.
+        model_coords: Optional[Tuple[int, int]] = None
+        if action.is_pointer:
+            model_coords = (
+                action.arguments.get("x"),
+                action.arguments.get("y"),
+            )
+            _rescale_pointer_args(
+                action, getattr(self.browser, "viewport", None) or {}
+            )
+            logger.debug(
+                f"🖱 Pointer coords: model-space {model_coords} → "
+                f"viewport ({action.arguments['x']}, {action.arguments['y']})"
+            )
+
         # Safety gate (may pause)
         try:
             self.safety.check_step(action)
@@ -565,8 +616,12 @@ class AgentLoop:
         # Scroll failure: wheel dispatched but scrollY didn't move.
         action_feedback: Optional[str] = None
         if action.is_pointer:
-            px = action.arguments["x"]
+            px = action.arguments["x"]   # viewport pixels (post-rescale)
             py = action.arguments["y"]
+            # Model-space coordinates for feedback text — echo what the model
+            # emitted so its mental model and our feedback stay consistent.
+            mx, my = model_coords if model_coords else (px, py)
+            vp = getattr(self.browser, "viewport", None) or {}
 
             if not exec_result.get("clicked", True):
                 element = exec_result.get("element") or {}
@@ -641,11 +696,14 @@ class AgentLoop:
                     rect = (element or {}).get("rect") or {}
                     hit_desc = f"<{tag}>" + (f" '{el_text[:40]}'" if el_text else "")
                     if rect:
-                        hit_desc += (
-                            f" [box {rect.get('x', '?')},{rect.get('y', '?')} → "
-                            f"{(rect.get('x') or 0) + (rect.get('w') or 0)},"
-                            f"{(rect.get('y') or 0) + (rect.get('h') or 0)}]"
+                        bx1, by1 = _to_model_space(
+                            rect.get("x") or 0, rect.get("y") or 0, vp
                         )
+                        bx2, by2 = _to_model_space(
+                            (rect.get("x") or 0) + (rect.get("w") or 0),
+                            (rect.get("y") or 0) + (rect.get("h") or 0), vp,
+                        )
+                        hit_desc += f" [box {bx1},{by1} → {bx2},{by2}]"
                     # What else is clickable near the click point — lets the
                     # model pivot to the intended element's exact coordinates
                     # instead of re-guessing from the screenshot (whose
@@ -654,12 +712,13 @@ class AgentLoop:
                         nearby = await self.browser.interactive_elements_near(px, py)
                     except Exception:
                         nearby = []
-                    nearby_txt = _format_nearby_elements(nearby)
+                    nearby_txt = _format_nearby_elements(nearby, vp)
                     nearby_section = ""
                     if nearby_txt:
                         nearby_section = (
                             " Interactive elements near the click point "
-                            "(viewport pixel coordinates): " + nearby_txt +
+                            "(0-1000 scale coordinates, the same space as "
+                            "your click coordinates): " + nearby_txt +
                             ". If one of these is your target, click its "
                             "listed coordinates directly."
                         )
